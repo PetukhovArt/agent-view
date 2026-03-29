@@ -2,7 +2,8 @@
 
 **Author:** PetukhovArt
 **Date:** 2026-03-28
-**Status:** Draft
+**Updated:** 2026-03-29
+**Status:** Approved
 
 ---
 
@@ -20,8 +21,8 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 
 | Metric | Target | How to Measure |
 |--------|--------|----------------|
-| Агент может получить DOM snapshot из Tauri-приложения | 100% успех на Windows | Интеграционный тест: launch → discover → dom |
-| Агент может получить PixiJS scene graph | Объекты с name, position, visible, tint | Интеграционный тест: scene --filter возвращает корректные данные |
+| Агент может получить DOM snapshot из Electron/Tauri-приложения | 100% успех на Windows | Ручной тест: discover → dom |
+| Агент может получить PixiJS scene graph | Объекты с name, position, visible, tint | Ручной тест: scene --filter возвращает корректные данные |
 | Время от вызова команды до получения результата | < 2 секунды (без launch) | Замер времени CLI-команд |
 | Расход токенов на один snapshot | < 2000 токенов для типичной страницы | Подсчёт символов в stdout |
 | Агент самостоятельно верифицирует UI после изменения кода | Корректно определяет затронутые области по git diff | Ручная проверка на пилотном проекте |
@@ -40,6 +41,17 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 
 4. **Агент решает что проверять** — по git diff определяет затронутые компоненты и вызывает нужные команды. Опциональный маппинг «файл → проверка» в конфиге для сложных случаев.
 
+## Technology Stack
+
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| Language | TypeScript | Целевая аудитория — JS/TS разработчики, максимальная скорость разработки |
+| Runtime | Node.js | Зрелые CDP-библиотеки, npm-экосистема |
+| CDP client | `chrome-remote-interface` | Легковесный, низкоуровневый, прямой доступ к CDP-доменам |
+| Package manager | pnpm | Быстрый, строгий node_modules |
+| Distribution | `npm install -g agent-view` | Глобальный CLI, минимум токенов на вызов |
+| IPC (CLI ↔ Lazy Server) | TCP на localhost (порт 47922) | Простота, кросс-платформенность, нет проблем с правами |
+
 ## User Stories
 
 **US-1:** Как разработчик, я хочу инициализировать agent-view в проекте одной командой, чтобы не тратить время на ручную конфигурацию.
@@ -50,6 +62,7 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - [ ] `agent-view init` генерирует `agent-view.config.json` с корректными значениями по умолчанию
 - [ ] Конфиг включает поле `launch` с командой запуска dev-сервера
 - [ ] Конфиг включает поле `port` с CDP-портом (default: 9222)
+- [ ] `init` полностью автоматический (без интерактивных prompts — агент не может отвечать на них)
 
 ---
 
@@ -59,7 +72,7 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - [ ] `agent-view discover` возвращает JSON с runtime, port, список окон (id, title, url)
 - [ ] Если приложение не запущено, возвращает понятное сообщение (не crash)
 - [ ] Multiwindow: все открытые окна перечислены
-- [ ] Формат вывода компактный, пригодный для парсинга агентом
+- [ ] Формат вывода — JSON (единственная команда с JSON-выводом)
 
 ---
 
@@ -78,10 +91,11 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 **Acceptance Criteria:**
 - [ ] `agent-view dom` возвращает accessibility tree в компактном текстовом формате
 - [ ] `agent-view dom --window <name|id>` адресует конкретное окно
-- [ ] Элементы имеют ref-идентификаторы для последующего взаимодействия
+- [ ] Элементы имеют session ref-идентификаторы (инкрементный ID, хранится в lazy server)
 - [ ] `--filter <text>` фильтрует дерево по тексту/имени
 - [ ] `--depth <N>` ограничивает глубину вложенности
 - [ ] Вывод по умолчанию укладывается в ~1500 токенов для типичной страницы
+- [ ] При невалидном ref возвращает понятную ошибку (агент делает повторный `dom`)
 
 ---
 
@@ -93,7 +107,7 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - [ ] `--filter <text>` фильтрует по name объекта
 - [ ] `--depth <N>` ограничивает глубину обхода display tree
 - [ ] `--verbose` добавляет расширенные свойства (scale, alpha, rotation, bounds)
-- [ ] `--diff` возвращает только изменения относительно предыдущего вызова
+- [ ] `--diff` возвращает только изменения относительно предыдущего вызова (кэш в памяти lazy server)
 - [ ] Работает через чтение `window.__PIXI_DEVTOOLS__` via CDP `Runtime.evaluate`
 
 ---
@@ -112,8 +126,7 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 **Acceptance Criteria:**
 - [ ] `agent-view screenshot` сохраняет PNG и возвращает путь к файлу
 - [ ] `--window <name|id>` для конкретного окна
-- [ ] `--fullpage` для полного скролла
-- [ ] Скриншот включает содержимое WebGL canvas
+- [ ] Скриншот включает содержимое WebGL canvas (CDP `Page.captureScreenshot`)
 
 ---
 
@@ -134,6 +147,7 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - [ ] Опциональный маппинг в конфиге: `verify: { "src/components/Pump.tsx": { steps: [...] } }`
 - [ ] Если маппинг есть — агент использует его; если нет — принимает решение сам
 - [ ] Агент вызывает `agent-view` команды для затронутых областей и анализирует результат
+- [ ] SKILL.md пишется после итерации 1 (когда базовые команды работают)
 
 ---
 
@@ -146,30 +160,46 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - [ ] В README чётко описаны шаги подготовки для каждого runtime
 - [ ] Инструментация не попадает в production build (dev-only)
 
+## MVP Iterations
+
+### Итерация 1 — Ядро (подключение и чтение DOM)
+Команды: `init`, `discover`, `dom`, `stop`
+Тестирование: ручное на `D:\web-projects\web-client` (Electron + Vue 3)
+
+### Итерация 2 — Взаимодействие
+Команды: `launch`, `click`, `fill`, `screenshot`
+
+### Итерация 3 — WebGL
+Команды: `scene`, `snap`, `--diff`
+Тестирование: на SCADA-проекте (Tauri + SolidJS + PixiJS)
+
+### Post-MVP
+- SKILL.md для Claude Code (после итерации 1)
+- Тестовые сценарии multiwindow / multi-monitor
+
 ## Module Architecture
 
 ### CLI (`agent-view`)
 
-- **Responsibility:** Точка входа пользователя и агента. Парсит команды и аргументы, маршрутизирует запросы в lazy server, форматирует вывод в stdout.
-- **Interface:** `agent-view <command> [options]`. Команды: `init`, `discover`, `launch`, `dom`, `scene`, `snap`, `screenshot`, `click`, `fill`.
-- **Dependencies:** Lazy Server (IPC), Config Manager.
-- **Testing strategy:** Unit-тесты на парсинг команд, интеграционные тесты на E2E flow.
+- **Responsibility:** Точка входа пользователя и агента. Парсит команды и аргументы, читает конфиг, передаёт параметры в lazy server, форматирует вывод в stdout.
+- **Interface:** `agent-view <command> [options]`. Команды: `init`, `discover`, `launch`, `dom`, `scene`, `snap`, `screenshot`, `click`, `fill`, `stop`.
+- **Dependencies:** Lazy Server (TCP), Config Manager.
+- **Output format:** Плоский текст по умолчанию (LLM-friendly, минимум токенов). `discover` — JSON.
 - **New / Modified:** New.
 
 ### Lazy Server
 
-- **Responsibility:** Фоновый процесс, управляющий CDP-соединениями. Поднимается при первом вызове CLI, переиспользуется последующими, гасится по таймауту бездействия. Хранит кэш snapshot'ов для `--diff`.
-- **Interface:** IPC-сокет (Unix domain socket или named pipe на Windows). Принимает JSON-команды, возвращает JSON-результаты.
+- **Responsibility:** Фоновый процесс, управляющий CDP-соединениями. Поднимается при первом вызове CLI, переиспользуется последующими, гасится по таймауту бездействия (5 минут). Хранит session ref маппинг и кэш snapshot'ов для `--diff` в памяти.
+- **Interface:** TCP на localhost:47922. Принимает JSON-команды (CLI передаёт все параметры включая port/runtime в каждом запросе), возвращает JSON-результаты.
+- **Multi-project:** Один сервер на все проекты, различает по CDP-порту.
 - **Dependencies:** CDP Transport, Runtime Adapters, DOM Inspector, Scene Inspector.
-- **Testing strategy:** Интеграционные тесты с мок-CDP endpoint.
 - **New / Modified:** New.
 
 ### CDP Transport
 
 - **Responsibility:** Абстракция подключения к приложению через Chrome DevTools Protocol. Управляет WebSocket-соединением, отправляет команды, получает ответы.
 - **Interface:** `connect(port): Connection`, `evaluate(code): Result`, `getAccessibilityTree(): Tree`, `getTargets(): Target[]`. Интерфейс `Transport` позволяет в будущем подставить injected bridge вместо CDP.
-- **Dependencies:** ws (WebSocket клиент).
-- **Testing strategy:** Unit-тесты с мок WebSocket, интеграционные тесты с реальным CDP.
+- **Dependencies:** `chrome-remote-interface`.
 - **New / Modified:** New.
 
 ### Runtime Adapters
@@ -177,15 +207,13 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - **Responsibility:** Discovery и подключение для каждого runtime. Определяет какой runtime запущен, находит CDP endpoint, перечисляет окна/targets.
 - **Interface:** `discover(): RuntimeInfo`, `getWindows(): Window[]`, `connectWindow(id): Connection`. Каждый адаптер реализует единый интерфейс `RuntimeAdapter`.
 - **Dependencies:** CDP Transport.
-- **Testing strategy:** Unit-тесты с мок CDP targets API.
 - **New / Modified:** New. Три реализации: BrowserAdapter, ElectronAdapter, TauriAdapter.
 
 ### DOM Inspector
 
-- **Responsibility:** Получает accessibility tree через CDP, форматирует в компактный LLM-friendly текст с ref-идентификаторами. Поддерживает фильтрацию по тексту и ограничение глубины.
+- **Responsibility:** Получает accessibility tree через CDP, форматирует в компактный LLM-friendly текст с session ref-идентификаторами. Поддерживает фильтрацию по тексту и ограничение глубины.
 - **Interface:** `getSnapshot(options: {filter?, depth?}): string`, `getRef(ref): ElementHandle`.
 - **Dependencies:** CDP Transport.
-- **Testing strategy:** Unit-тесты на форматирование, snapshot-тесты на реальных страницах.
 - **New / Modified:** New.
 
 ### Scene Inspector
@@ -193,15 +221,13 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - **Responsibility:** Читает данные из `window.__PIXI_DEVTOOLS__` через CDP `Runtime.evaluate`. Сериализует PixiJS scene graph в компактный формат. Поддерживает фильтрацию, глубину, verbose, diff.
 - **Interface:** `getSceneGraph(options: {filter?, depth?, verbose?, diff?}): string`. Интерфейс `SceneInspector` позволяет добавлять адаптеры для других движков (CesiumJS, Three.js).
 - **Dependencies:** CDP Transport.
-- **Testing strategy:** Unit-тесты с мок `window.__PIXI_DEVTOOLS__` данных.
 - **New / Modified:** New.
 
 ### Config Manager
 
-- **Responsibility:** Чтение, валидация и автогенерация `agent-view.config.json`. Команда `init` сканирует `package.json` и предлагает конфиг.
+- **Responsibility:** Чтение, валидация и автогенерация `agent-view.config.json`. Команда `init` сканирует `package.json` и генерирует конфиг автоматически (без интерактивных prompts).
 - **Interface:** `readConfig(): Config`, `generateConfig(packageJson): Config`, `writeConfig(config): void`.
 - **Dependencies:** Файловая система.
-- **Testing strategy:** Unit-тесты на генерацию конфига из разных package.json.
 - **New / Modified:** New.
 
 ### Launcher
@@ -209,7 +235,6 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - **Responsibility:** Запускает приложение по команде из конфига как фоновый процесс. Поллит CDP-порт для определения readiness. Управляет lifecycle (не дублировать, таймаут).
 - **Interface:** `launch(config): Promise<void>`, `isRunning(): boolean`, `stop(): void`.
 - **Dependencies:** Config Manager, CDP Transport (для polling).
-- **Testing strategy:** Интеграционные тесты с тестовым приложением.
 - **New / Modified:** New.
 
 ## Implementation Decisions
@@ -224,7 +249,7 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
    - *Trade-off:* Меньше гибкости для сложных сценариев (нельзя написать цикл внутри одного вызова).
    - *Reversibility:* Лёгкая. Скриптовый режим можно добавить позже как дополнительную команду.
 
-3. **Lazy server с auto-shutdown** — первый вызов CLI поднимает фоновый процесс, последующие переиспользуют. Shutdown по таймауту бездействия.
+3. **Lazy server с auto-shutdown (5 минут)** — первый вызов CLI поднимает фоновый процесс, последующие переиспользуют. Shutdown по таймауту бездействия.
    - *Context:* Серия вызовов в e2e-сценарии требует persistent CDP-соединения. Overhead переподключения ~200-500ms на каждый вызов неприемлем.
    - *Trade-off:* Висящий фоновый процесс. Потенциальные проблемы с orphaned processes.
    - *Reversibility:* Средняя. Можно переключить на stateless режим с флагом.
@@ -249,13 +274,17 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
    - *Trade-off:* macOS/Linux пользователи не могут использовать пакет с Tauri.
    - *Reversibility:* Средняя. Добавление injected bridge — новый модуль, существующий код не меняется.
 
-## Testing Decisions
+8. **Session ref IDs** — инкрементный ID, маппинг `ref → backendNodeId` хранится в памяти lazy server. Невалидный ref возвращает ошибку, агент делает повторный `dom`.
+   - *Context:* HMR или навигация инвалидирует ref. Persistent ref (хэш от DOM-пути) — усложнение для v2.
+   - *Reversibility:* Лёгкая. Можно добавить persistent ref как улучшение.
 
-- **Config Manager, DOM Inspector, Scene Inspector** — покрываются unit-тестами. Чистые функции трансформации данных, легко мокать.
-- **CDP Transport, Runtime Adapters** — интеграционные тесты с мок CDP-сервером. Проверяют корректность WebSocket-взаимодействия и парсинга targets.
-- **Launcher** — интеграционные тесты с минимальным тестовым приложением (простая HTML-страница с `--remote-debugging-port`).
-- **E2E flow** — полный сценарий `init → launch → discover → dom → scene → screenshot` на тестовом PixiJS-приложении. Запускается вручную на Windows (CI — out of scope для MVP).
-- **Паттерн тестирования** — тестируем внешнее поведение (что CLI выводит в stdout), не внутреннюю реализацию. Snapshot-тесты для форматов вывода.
+9. **Один lazy server на все проекты** — различает по CDP-порту. CLI читает конфиг из текущей директории и передаёт параметры в каждом запросе. Сервер stateless относительно конфигов.
+
+10. **`stop` останавливает только lazy server** — приложение продолжает работать. Разработчик управляет dev-сервером сам.
+
+11. **Плоский текст как формат вывода** — минимум токенов, LLM отлично понимает текстовый accessibility tree. Исключение: `discover` возвращает JSON (список окон с id для программного парсинга).
+
+12. **Без автотестов на старте** — ручная верификация на реальном проекте `D:\web-projects\web-client` (Electron + Vue 3). Тесты добавляются после стабилизации API.
 
 ## Risks & Dependencies
 
@@ -263,10 +292,11 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 |-------------------|--------|------------|------------|
 | WebView2 CDP на Windows работает нестабильно с конкретной версией Tauri | Высокий — Tauri adapter не работает | Низкая | Proof-of-concept (Haprog/playwright-cdp) подтверждает работоспособность. Тестировать на целевой версии Tauri v2 |
 | `@pixi/devtools` меняет формат `window.__PIXI_DEVTOOLS__` | Средний — Scene Inspector ломается | Низкая | Абстракция через интерфейс SceneInspector. Фоллбэк на прямое чтение `app.stage` |
-| Orphaned lazy server процессы | Низкий — утечка ресурсов | Средняя | Auto-shutdown по таймауту. PID-файл для обнаружения и kill. Команда `agent-view stop` |
+| Orphaned lazy server процессы | Низкий — утечка ресурсов | Средняя | Auto-shutdown по таймауту (5 мин). PID-файл для обнаружения и kill. Команда `agent-view stop` |
 | Большой scene graph SCADA (сотни объектов) — переполнение контекстного окна | Высокий — агент теряет контекст | Средняя | Фильтрация (`--filter`), ограничение глубины (`--depth`), компактный формат по умолчанию, `--diff` режим |
 | Несколько приложений на одном CDP-порту | Средний — подключение к не тому приложению | Средняя | Конфиг привязывает проект к конкретному порту. `discover` показывает что найдено |
 | Именование PixiJS-объектов в SCADA — объекты без `name`/`label` | Высокий — агент не может адресовать объекты | Средняя | Prerequisite в README: добавить осмысленные name к ключевым объектам. Фоллбэк на идентификацию по type + position |
+| CDP `Page.captureScreenshot` не захватывает WebGL canvas | Средний — пустой canvas на скриншоте | Низкая | Проверить в PoC. Fallback: `canvas.toDataURL()` через `Runtime.evaluate` |
 
 ## Out of Scope
 
@@ -279,60 +309,25 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 - **CI/headless режим** — запуск в пайплайнах без GUI.
 - **MCP-сервер** — альтернативный интерфейс для агентов, не использующих Claude Code (Cursor, OpenCode). Для MVP только Claude Code skill.
 - **Скриптовый режим** — возможность писать JS-скрипты как в dev-browser, помимо CLI-команд.
+- **`--fullpage` скриншот** — для desktop-приложений неоднозначен, отложено.
+- **Автотесты** — добавляются после стабилизации API.
 
 ## Pilot Validation
 
-После реализации MVP проводим валидацию на двух реальных проектах. Цель — убедиться, что agent-view работает в production-like условиях, а не только на тестовых приложениях.
+### Основной тестовый проект: `web-client` (Electron + Vue 3)
 
-### Пилот 1: SCADA (Tauri + SolidJS + PixiJS) — основной
+**Путь:** `D:\web-projects\web-client`
+**Запуск:** `npm run dev`
+**Scope:** DOM + screenshot + multiwindow + interaction
 
-**Подготовка проекта:**
+Сценарии валидации описываются отдельно. Включают тестирование multiwindow и multi-monitor.
+
+### Пилот 2: SCADA (Tauri + SolidJS + PixiJS)
+
+Добавляется на итерации 3 (WebGL). Подготовка:
 - [ ] Установить `@pixi/devtools`, вызвать `initDevtools({ app })` в dev-режиме
 - [ ] Добавить `additionalBrowserArgs: "--remote-debugging-port=9222"` в `tauri.conf.json`
-- [ ] Добавить осмысленные `name`/`label` к ключевым PixiJS-объектам (насосы, клапаны, индикаторы)
-- [ ] Запустить `agent-view init`, проверить сгенерированный конфиг
-
-**Сценарии валидации:**
-
-| # | Сценарий | Что проверяем | Критерий успеха |
-|---|----------|---------------|-----------------|
-| 1 | `agent-view launch` → ожидание readiness | Launcher, CDP polling | Приложение запущено, `discover` возвращает окно |
-| 2 | `agent-view dom` на главном окне | DOM Inspector, Tauri adapter | Accessibility tree содержит панели управления, кнопки, формы |
-| 3 | `agent-view scene` на мнемосхеме | Scene Inspector, PixiJS integration | Объекты с name, position, tint видны. Насос «ЦН-1» найден по `--filter` |
-| 4 | `agent-view scene --diff` после изменения состояния | Diff-кэш в lazy server | Возвращает только изменившиеся объекты |
-| 5 | `agent-view click` на DOM-элементе | Interaction через CDP | Клик по кнопке переключает состояние, повторный `dom` отражает изменение |
-| 6 | `agent-view click --pos x,y` на canvas-объекте | Canvas interaction | Клик по насосу на мнемосхеме вызывает UI-реакцию |
-| 7 | `agent-view screenshot` | Скриншот с WebGL canvas | PNG содержит отрендеренную мнемосхему, не пустой canvas |
-| 8 | `agent-view snap` | Комбинированный вывод | DOM + Scene в одном ответе, секции разделены |
-| 9 | Multiwindow: открыть доп. окно → `discover` | Динамическое обнаружение окон | Новое окно появляется в списке targets |
-| 10 | Полный агентный цикл: изменить `Pump.tsx` → агент верифицирует | E2E agent loop | Агент по git diff находит изменение, вызывает `scene --filter`, корректно оценивает результат |
-
-**Критерий прохождения пилота:** сценарии 1-8 проходят стабильно (3 из 3 запусков). Сценарии 9-10 проходят хотя бы 2 из 3.
-
----
-
-### Пилот 2: Видеоаналитика (Electron + Vue 3 + CesiumJS) — вторичный
-
-**Подготовка проекта:**
-- [ ] Добавить `--remote-debugging-port=9223` в запуск Electron (порт 9223, чтобы не конфликтовать с SCADA)
-- [ ] Запустить `agent-view init`, проверить сгенерированный конфиг
-
-**Scope:** только DOM + screenshot + multiwindow. CesiumJS scene graph — out of scope (v2).
-
-**Сценарии валидации:**
-
-| # | Сценарий | Что проверяем | Критерий успеха |
-|---|----------|---------------|-----------------|
-| 1 | `agent-view launch` → readiness | Launcher, Electron adapter | Приложение запущено, `discover` возвращает окна |
-| 2 | `agent-view dom` на главном окне | DOM Inspector, Electron CDP | Accessibility tree содержит Vue-компоненты (навигация, панели, контролы) |
-| 3 | `agent-view dom --window <id>` на дополнительном окне | Multiwindow addressing | Корректный DOM для конкретного окна |
-| 4 | `agent-view screenshot` | Скриншот Electron-окна | PNG содержит отрендеренный UI включая CesiumJS canvas |
-| 5 | `agent-view click` + повторный `dom` | Interaction → verification loop | Клик меняет состояние, DOM отражает изменение |
-| 6 | Агентный цикл: изменить Vue-компонент → верификация | E2E agent loop | Агент по diff определяет затронутую область, вызывает `dom`, оценивает результат |
-
-**Критерий прохождения пилота:** сценарии 1-5 проходят стабильно. Сценарий 6 — хотя бы 2 из 3.
-
----
+- [ ] Добавить осмысленные `name`/`label` к ключевым PixiJS-объектам
 
 ## Further Notes
 
@@ -347,9 +342,9 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 
 ```json
 {
-  "runtime": "tauri",
+  "runtime": "electron",
   "port": 9222,
-  "launch": "cargo tauri dev",
+  "launch": "npm run dev",
   "webgl": {
     "engine": "pixi"
   },
@@ -366,11 +361,11 @@ AI-агенты (Claude Code) умеют писать и рефакторить 
 ```
 agent-view init                        # Автогенерация конфига
 agent-view launch                      # Запуск приложения из конфига
-agent-view discover                    # Обнаружение runtime и окон
-agent-view dom [--window] [--filter] [--depth]          # DOM accessibility tree
-agent-view scene [--window] [--filter] [--depth] [--verbose] [--diff]  # WebGL scene graph
-agent-view snap [--window] [--filter] [--depth]         # DOM + scene вместе
-agent-view screenshot [--window] [--fullpage]            # Скриншот
+agent-view discover                    # Обнаружение runtime и окон (JSON)
+agent-view dom [--window] [--filter] [--depth]          # DOM accessibility tree (текст)
+agent-view scene [--window] [--filter] [--depth] [--verbose] [--diff]  # WebGL scene graph (текст)
+agent-view snap [--window] [--filter] [--depth]         # DOM + scene вместе (текст)
+agent-view screenshot [--window]                         # Скриншот
 agent-view click <ref|--pos x,y>       # Клик по элементу
 agent-view fill <ref> <value>          # Ввод текста
 agent-view stop                        # Остановить lazy server
