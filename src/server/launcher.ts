@@ -9,7 +9,7 @@ export async function isRunning(port: number): Promise<boolean> {
   return targets.length > 0
 }
 
-export async function launch(command: string, port: number): Promise<void> {
+export async function launch(command: string, port: number, cwd?: string): Promise<void> {
   if (await isRunning(port)) {
     return
   }
@@ -18,6 +18,8 @@ export async function launch(command: string, port: number): Promise<void> {
     shell: true,
     detached: true,
     stdio: 'ignore',
+    cwd,
+    windowsHide: true,
   })
   child.unref()
 
