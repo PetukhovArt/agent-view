@@ -11,7 +11,7 @@ export async function runLaunch(config: AgentViewConfig): Promise<void> {
     command: 'launch',
     port: config.port,
     runtime: config.runtime,
-    args: { launch: config.launch },
+    args: { launch: config.launch, cwd: process.cwd() },
   })
 
   if (response.ok) {
