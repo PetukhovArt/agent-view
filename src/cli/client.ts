@@ -63,6 +63,7 @@ async function startServer(): Promise<void> {
     stdio: ['ignore', 'pipe', 'ignore'],
     shell: true,
     cwd: projectRoot,
+    windowsHide: true,
   })
   child.unref()
 

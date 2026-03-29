@@ -151,7 +151,7 @@ export class AgentViewServer {
       return { ok: true, data: 'Application already running' }
     }
 
-    await launch(launchCmd, req.port)
+    await launch(launchCmd, req.port, req.args.cwd as string | undefined)
     return { ok: true, data: 'Application launched and ready' }
   }
 
