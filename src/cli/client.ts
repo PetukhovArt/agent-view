@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs'
 import type { ServerRequest, ServerResponse } from '../types.js'
 
 const SERVER_PORT = 47922
+const DELIMITER = '\n'
 
 export async function sendCommand(request: ServerRequest): Promise<ServerResponse> {
   try {
@@ -19,21 +20,24 @@ export async function sendCommand(request: ServerRequest): Promise<ServerRespons
 function tryConnect(request: ServerRequest): Promise<ServerResponse> {
   return new Promise((resolve, reject) => {
     const socket: Socket = connect(SERVER_PORT, '127.0.0.1')
-    let data = ''
+    let buffer = ''
 
     socket.on('connect', () => {
-      socket.end(JSON.stringify(request))
+      // Send request with delimiter (no half-close)
+      socket.write(JSON.stringify(request) + DELIMITER)
     })
 
     socket.on('data', (chunk: Buffer) => {
-      data += chunk.toString()
-    })
-
-    socket.on('end', () => {
-      try {
-        resolve(JSON.parse(data) as ServerResponse)
-      } catch {
-        reject(new Error('Invalid response from server'))
+      buffer += chunk.toString()
+      const delimIndex = buffer.indexOf(DELIMITER)
+      if (delimIndex !== -1) {
+        const message = buffer.slice(0, delimIndex)
+        try {
+          resolve(JSON.parse(message) as ServerResponse)
+        } catch {
+          reject(new Error('Invalid response from server'))
+        }
+        socket.destroy()
       }
     })
 
@@ -51,10 +55,14 @@ async function startServer(): Promise<void> {
   const cmd = isDev ? 'npx' : 'node'
   const args = isDev ? ['tsx', serverEntryTs] : [serverEntryJs]
 
+  // Use agent-view project root as cwd so npx finds tsx
+  const projectRoot = join(__dirname, '..', '..')
+
   const child = spawn(cmd, args, {
     detached: true,
     stdio: ['ignore', 'pipe', 'ignore'],
     shell: true,
+    cwd: projectRoot,
   })
   child.unref()
 

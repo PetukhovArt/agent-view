@@ -7,6 +7,7 @@ import type { CDPConnection } from '../cdp/types.js'
 
 const SERVER_PORT = 47922
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
+const DELIMITER = '\n'
 
 export class AgentViewServer {
   private server: Server | null = null
@@ -32,25 +33,31 @@ export class AgentViewServer {
 
   private handleSocket(socket: Socket): void {
     this.resetIdleTimer()
-    let data = ''
+    let buffer = ''
 
     socket.on('data', (chunk: Buffer) => {
-      data += chunk.toString()
-    })
-
-    socket.on('end', async () => {
-      try {
-        const request = JSON.parse(data) as ServerRequest
-        const response = await this.handleCommand(request)
-        socket.end(JSON.stringify(response))
-      } catch (err) {
-        const response: ServerResponse = {
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        }
-        socket.end(JSON.stringify(response))
+      buffer += chunk.toString()
+      const delimIndex = buffer.indexOf(DELIMITER)
+      if (delimIndex !== -1) {
+        const message = buffer.slice(0, delimIndex)
+        buffer = ''
+        this.processRequest(message, socket)
       }
     })
+  }
+
+  private async processRequest(data: string, socket: Socket): Promise<void> {
+    try {
+      const request = JSON.parse(data) as ServerRequest
+      const response = await this.handleCommand(request)
+      socket.end(JSON.stringify(response) + DELIMITER)
+    } catch (err) {
+      const response: ServerResponse = {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      }
+      socket.end(JSON.stringify(response) + DELIMITER)
+    }
   }
 
   private async handleCommand(req: ServerRequest): Promise<ServerResponse> {

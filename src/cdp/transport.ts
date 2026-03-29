@@ -4,7 +4,7 @@ import type { CDPConnection, CDPTarget, AXNode } from './types.js'
 
 export async function listTargets(port: number): Promise<CDPTarget[]> {
   try {
-    const targets = await CDP.List({ port })
+    const targets = await CDP.List({ host: '127.0.0.1', port })
     return targets as CDPTarget[]
   } catch {
     return []
@@ -12,7 +12,7 @@ export async function listTargets(port: number): Promise<CDPTarget[]> {
 }
 
 export async function connectToTarget(port: number, targetId: string): Promise<CDPConnection> {
-  const client = await CDP({ port, target: targetId })
+  const client = await CDP({ host: '127.0.0.1', port, target: targetId })
   const { Runtime, Accessibility, Page } = client
 
   await Page.enable()
