@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "agent-view": "./dist/cli/index.js"
+    "agent-view": "dist/cli/index.js"
   },
   "files": [
     "dist",
@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "echo 'Run pnpm build before publishing'"
   },
   "keywords": [
     "cdp",
