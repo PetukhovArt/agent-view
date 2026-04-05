@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+const [nodeMajor] = process.versions.node.split('.').map(Number)
+if (nodeMajor < 18) {
+  process.stderr.write(`agent-view requires Node.js 18 or higher. Current: ${process.versions.node}\n`)
+  process.exit(1)
+}
+
 import { Command } from 'commander'
 import { readConfig } from '../config/manager.js'
 import { runInit } from './commands/init.js'

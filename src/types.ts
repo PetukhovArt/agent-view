@@ -1,6 +1,14 @@
-export type RuntimeType = 'electron' | 'tauri' | 'browser'
+export enum RuntimeType {
+  Electron = 'electron',
+  Tauri = 'tauri',
+  Browser = 'browser',
+}
 
-export type WebGLEngine = 'pixi' | 'cesium' | 'three'
+export enum WebGLEngine {
+  Pixi = 'pixi',
+  Cesium = 'cesium',
+  Three = 'three',
+}
 
 export type WindowInfo = {
   id: string
@@ -19,6 +27,7 @@ export type ServerRequest = {
   command: string
   port: number
   runtime: RuntimeType
+  engine?: WebGLEngine
   args: Record<string, unknown>
   token?: string
 }

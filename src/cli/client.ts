@@ -3,12 +3,12 @@ import { spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import type { ServerRequest, ServerResponse } from '../types.js'
 
 const SERVER_PORT = 47922
 const DELIMITER = '\n'
-const TOKEN_PATH = join(tmpdir(), 'agent-view-token')
+const TOKEN_PATH = join(homedir(), '.agent-view', 'token')
 
 function readToken(): string {
   try {
@@ -62,7 +62,10 @@ async function startServer(): Promise<void> {
 
   // Detect dev (tsx) vs built (node) by checking if .ts source exists but .js doesn't
   const isDev = existsSync(serverEntryTs) && !existsSync(serverEntryJs)
-  const cmd = isDev ? 'npx' : 'node'
+  // On Windows, npx is a .cmd script and can't be spawned without shell.
+  // Use npx.cmd directly so shell: true is not needed.
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const cmd = isDev ? npx : 'node'
   const args = isDev ? ['tsx', serverEntryTs] : [serverEntryJs]
 
   // Use agent-view project root as cwd so npx finds tsx
@@ -71,7 +74,7 @@ async function startServer(): Promise<void> {
   const child = spawn(cmd, args, {
     detached: true,
     stdio: ['ignore', 'pipe', 'ignore'],
-    shell: process.platform === 'win32',
+    shell: false,
     cwd: projectRoot,
     windowsHide: true,
   })

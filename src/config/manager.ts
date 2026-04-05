@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentViewConfig } from './types.js'
-import type { RuntimeType, WebGLEngine } from '../types.js'
+import { RuntimeType, WebGLEngine } from '../types.js'
 
 const CONFIG_FILENAME = 'agent-view.config.json'
 
@@ -9,7 +9,24 @@ export function readConfig(cwd: string): AgentViewConfig | null {
   const configPath = join(cwd, CONFIG_FILENAME)
   if (!existsSync(configPath)) return null
   const raw = readFileSync(configPath, 'utf-8')
-  return JSON.parse(raw) as AgentViewConfig
+  const parsed: unknown = JSON.parse(raw)
+  if (!isValidConfig(parsed)) {
+    throw new Error(`Invalid agent-view.config.json: must have runtime, port (number), and launch (string)`)
+  }
+  return parsed
+}
+
+function isValidConfig(obj: unknown): obj is AgentViewConfig {
+  if (!obj || typeof obj !== 'object') return false
+  const c = obj as Record<string, unknown>
+  const validRuntimes: string[] = Object.values(RuntimeType)
+  return (
+    typeof c.runtime === 'string' &&
+    validRuntimes.includes(c.runtime) &&
+    typeof c.port === 'number' &&
+    c.port > 0 && c.port < 65536 &&
+    typeof c.launch === 'string'
+  )
 }
 
 export function generateConfig(cwd: string): AgentViewConfig {
@@ -43,15 +60,15 @@ export function writeConfig(cwd: string, config: AgentViewConfig): void {
 }
 
 function detectRuntime(deps: Record<string, string>): RuntimeType {
-  if (deps['electron'] || deps['electron-vite']) return 'electron'
-  if (deps['@tauri-apps/api'] || deps['@tauri-apps/cli']) return 'tauri'
-  return 'browser'
+  if (deps['electron'] || deps['electron-vite']) return RuntimeType.Electron
+  if (deps['@tauri-apps/api'] || deps['@tauri-apps/cli']) return RuntimeType.Tauri
+  return RuntimeType.Browser
 }
 
 function detectWebGL(deps: Record<string, string>): WebGLEngine | undefined {
-  if (deps['pixi.js'] || deps['@pixi/app']) return 'pixi'
-  if (deps['cesium']) return 'cesium'
-  if (deps['three']) return 'three'
+  if (deps['pixi.js'] || deps['@pixi/app']) return WebGLEngine.Pixi
+  if (deps['cesium']) return WebGLEngine.Cesium
+  if (deps['three']) return WebGLEngine.Three
   return undefined
 }
 

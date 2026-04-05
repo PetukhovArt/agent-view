@@ -51,7 +51,10 @@ export function formatAccessibilityTree(
     return false
   }
 
+  const HARD_MAX_DEPTH = 100
+
   function walk(nodeId: string, depth: number, indent: number): void {
+    if (indent > HARD_MAX_DEPTH) return
     if (maxDepth !== undefined && indent > maxDepth) return
 
     const node = nodeMap.get(nodeId)

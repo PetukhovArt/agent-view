@@ -17,6 +17,7 @@ export async function runSnap(config: AgentViewConfig, options: SnapOptions): Pr
     command: 'snap',
     port: config.port,
     runtime: config.runtime,
+    engine: config.webgl?.engine,
     args,
   })
 

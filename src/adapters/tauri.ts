@@ -1,10 +1,10 @@
 import { listTargets, connectToTarget } from '../cdp/transport.js'
 import type { RuntimeAdapter } from './types.js'
-import type { WindowInfo } from '../types.js'
+import { RuntimeType, type WindowInfo } from '../types.js'
 import type { CDPConnection } from '../cdp/types.js'
 
 export const tauriAdapter: RuntimeAdapter = {
-  runtime: 'tauri',
+  runtime: RuntimeType.Tauri,
 
   async discover(port: number): Promise<WindowInfo[]> {
     const targets = await listTargets(port)

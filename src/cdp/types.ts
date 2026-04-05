@@ -12,7 +12,7 @@ export type CDPConnection = {
   clickByNodeId: (backendNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
   fillByNodeId: (backendNodeId: number, value: string) => Promise<void>
-  evaluateScene: (js: string) => Promise<unknown>
+  evaluate: (js: string) => Promise<unknown>
   close: () => Promise<void>
 }
 

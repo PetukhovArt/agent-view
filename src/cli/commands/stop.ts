@@ -1,11 +1,12 @@
 import { sendCommand } from '../client.js'
+import { RuntimeType } from '../../types.js'
 
 export async function runStop(): Promise<void> {
   try {
     const response = await sendCommand({
       command: 'stop',
       port: 0,
-      runtime: 'browser',
+      runtime: RuntimeType.Browser,
       args: {},
     })
 

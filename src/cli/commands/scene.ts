@@ -21,6 +21,7 @@ export async function runScene(config: AgentViewConfig, options: SceneOptions): 
     command: 'scene',
     port: config.port,
     runtime: config.runtime,
+    engine: config.webgl?.engine,
     args,
   })
 

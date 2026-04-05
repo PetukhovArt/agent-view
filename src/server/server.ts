@@ -1,22 +1,26 @@
 import { createServer, type Server, type Socket } from 'node:net'
 import { writeFile, unlink } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { mkdirSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { formatAccessibilityTree } from '../inspectors/dom.js'
-import { getSceneGraph, diffScenes, type SceneNode } from '../inspectors/scene.js'
+import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning } from './launcher.js'
 import { readConfig } from '../config/manager.js'
-import type { ServerRequest, ServerResponse, WindowInfo } from '../types.js'
+import { RuntimeType, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
 import type { CDPConnection } from '../cdp/types.js'
 
 const SERVER_PORT = 47922
+const VALID_COMMANDS = new Set(['discover', 'launch', 'dom', 'click', 'fill', 'screenshot', 'scene', 'snap', 'wait', 'stop'])
+const VALID_RUNTIMES = new Set<RuntimeType>(Object.values(RuntimeType))
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const DELIMITER = '\n'
 const MAX_BUFFER_SIZE = 1_048_576 // 1 MB
-const TOKEN_PATH = join(tmpdir(), 'agent-view-token')
+const TOKEN_DIR = join(homedir(), '.agent-view')
+const TOKEN_PATH = join(TOKEN_DIR, 'token')
 
 export class AgentViewServer {
   private server: Server | null = null
@@ -27,6 +31,7 @@ export class AgentViewServer {
   private token = ''
 
   async start(): Promise<void> {
+    mkdirSync(TOKEN_DIR, { recursive: true })
     this.token = randomBytes(32).toString('hex')
     await writeFile(TOKEN_PATH, this.token, { mode: 0o600 })
 
@@ -69,6 +74,16 @@ export class AgentViewServer {
       const request = JSON.parse(data) as ServerRequest
       if (request.token !== this.token) {
         socket.end(JSON.stringify({ ok: false, error: 'Unauthorized' } satisfies ServerResponse) + DELIMITER)
+        return
+      }
+      if (
+        typeof request.command !== 'string' || !VALID_COMMANDS.has(request.command) ||
+        (request.command !== 'stop' && (
+          !VALID_RUNTIMES.has(request.runtime) ||
+          typeof request.port !== 'number' || request.port < 1 || request.port > 65535
+        ))
+      ) {
+        socket.end(JSON.stringify({ ok: false, error: 'Invalid request' } satisfies ServerResponse) + DELIMITER)
         return
       }
       const response = await this.handleCommand(request)
@@ -168,7 +183,7 @@ export class AgentViewServer {
 
     // Validate launch command against on-disk config to prevent injection
     if (cwd) {
-      const config = readConfig(cwd)
+      const config = readConfig(resolve(cwd))
       if (!config || config.launch !== launchCmd) {
         return { ok: false, error: 'Launch command does not match project config' }
       }
@@ -360,42 +375,16 @@ export class AgentViewServer {
     const cacheKey = `${req.port}:${targetId}`
 
     if (isDiff) {
-      // Get raw scene for diff comparison
-      const EXTRACT_JS = `
-(function() {
-  const devtools = window.__PIXI_DEVTOOLS__;
-  if (!devtools) return null;
-  const app = devtools.app || devtools.stage?.parent;
-  if (!app) return null;
-  const stage = app.stage || devtools.stage;
-  if (!stage) return null;
-  function serialize(node) {
-    const result = {
-      type: node.constructor?.name || 'Unknown',
-      name: node.label || node.name || '',
-      x: Math.round(node.x || 0),
-      y: Math.round(node.y || 0),
-      visible: node.visible !== false,
-      tint: typeof node.tint === 'number' ? '#' + node.tint.toString(16).padStart(6, '0') : '0xffffff',
-      alpha: node.alpha ?? 1,
-      children: (node.children || []).map(c => serialize(c)),
-    };
-    return result;
-  }
-  return serialize(stage);
-})()
-`
-      const curr = await conn.evaluateScene(EXTRACT_JS) as SceneNode | null
+      const curr = await getRawScene(conn, req.engine)
       if (!curr) {
-        return { ok: true, data: 'No PixiJS scene found. Ensure @pixi/devtools is initialized.' }
+        return { ok: true, data: req.engine ? `No ${req.engine} scene found` : 'No WebGL engine configured' }
       }
 
       const prev = this.sceneCache.get(cacheKey)
       this.sceneCache.set(cacheKey, curr)
 
       if (!prev) {
-        // First call — return full scene
-        const text = await getSceneGraph(conn, {
+        const text = await getSceneGraph(conn, req.engine, {
           filter: req.args.filter as string | undefined,
           depth: req.args.depth as number | undefined,
           verbose: req.args.verbose as boolean | undefined,
@@ -403,11 +392,10 @@ export class AgentViewServer {
         return { ok: true, data: text }
       }
 
-      const diffText = diffScenes(prev, curr)
-      return { ok: true, data: diffText }
+      return { ok: true, data: diffScenes(prev, curr) }
     }
 
-    const text = await getSceneGraph(conn, {
+    const text = await getSceneGraph(conn, req.engine, {
       filter: req.args.filter as string | undefined,
       depth: req.args.depth as number | undefined,
       verbose: req.args.verbose as boolean | undefined,
@@ -429,15 +417,16 @@ export class AgentViewServer {
     })
     this.refStore.store(refs, req.port, targetId, nextRef)
 
-    // Scene section
-    const sceneText = await getSceneGraph(conn, {
-      filter: req.args.filter as string | undefined,
-      depth: req.args.depth as number | undefined,
-    })
-
     const sections = [`=== DOM ===\n${domText}`]
-    if (!sceneText.startsWith('No PixiJS')) {
-      sections.push(`=== Scene ===\n${sceneText}`)
+
+    if (req.engine) {
+      const sceneText = await getSceneGraph(conn, req.engine, {
+        filter: req.args.filter as string | undefined,
+        depth: req.args.depth as number | undefined,
+      })
+      if (!sceneText.startsWith('No ')) {
+        sections.push(`=== Scene ===\n${sceneText}`)
+      }
     }
 
     return { ok: true, data: sections.join('\n\n') }

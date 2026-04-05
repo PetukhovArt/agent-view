@@ -1,10 +1,10 @@
 import { listTargets, connectToTarget } from '../cdp/transport.js'
 import type { RuntimeAdapter } from './types.js'
-import type { WindowInfo } from '../types.js'
+import { RuntimeType, type WindowInfo } from '../types.js'
 import type { CDPConnection } from '../cdp/types.js'
 
 export const browserAdapter: RuntimeAdapter = {
-  runtime: 'browser',
+  runtime: RuntimeType.Browser,
 
   async discover(port: number): Promise<WindowInfo[]> {
     const targets = await listTargets(port)
