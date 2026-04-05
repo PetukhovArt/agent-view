@@ -2,7 +2,9 @@
 
 **Give your AI agent eyes and hands for desktop apps.**
 
-AI coding agents can write code, run tests, and read logs — but they can't *see* what the app actually looks like. agent-view bridges that gap: it connects to any Chromium-based desktop app via Chrome DevTools Protocol and lets the agent inspect the UI, take screenshots, click buttons, and fill forms.
+AI coding agents can write code, run tests, and read logs — but they can't *see* what the app actually looks like. Without visual verification, an agent is essentially **coding blind** — builds pass, tests are green, but the login form is broken, the button is off-screen, or the modal never appears.
+
+agent-view bridges that gap: it connects to any Chromium-based desktop app via Chrome DevTools Protocol and lets the agent inspect the UI, take screenshots, click buttons, and fill forms.
 
 Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but works with any AI agent or automation pipeline that can call CLI commands.
 
@@ -14,29 +16,58 @@ agent-view is a CLI. One Bash call, compact text output, zero schema overhead. T
 
 And CLI works everywhere — Claude Code, Copilot, Codex, custom pipelines, CI. No MCP client required.
 
-## Why
+## The feedback loop
 
-You're building an Electron or Tauri Frontend app. Your AI agent just changed a login form. Did it break the layout? Is the button still clickable? Does the error message show up?
+The real power isn't in individual commands — it's in the **loop**:
 
-Without agent-view, you'd have to check manually and waste time. With agent-view:
-
-```bash
-agent-view dom --filter "login"        # See the DOM structure
-agent-view screenshot                   # Capture what the user sees
-agent-view fill 5 "admin@test.com"     # Type into an input
-agent-view click 8                      # Click the submit button
-agent-view screenshot                   # See what happened
+```
+Code → Launch → See → Verify → Fix → See again
 ```
 
-The agent verifies its own changes — no human in the loop.
+The agent writes code, then immediately checks what the user would see. If something's wrong, it fixes and re-checks — no human needed. This catches problems that builds and tests miss: CSS regressions, broken layouts, missing error messages, silent IPC failures.
 
-## Supported runtimes
+## Enabling CDP
+
+### Recommended: in code (reliable, works with any build tool)
+
+Add to your Electron main process:
+
+```js
+app.commandLine.appendSwitch('remote-debugging-port', '9222');
+```
+
+For dev-only:
+
+```js
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+}
+```
+
+### Alternative: via CLI flag (no code changes)
+
+```bash
+# Plain Electron
+electron . --remote-debugging-port=9222
+
+# electron-vite (note the -- to forward the flag past the build tool)
+npx electron-vite dev -- --remote-debugging-port=9222
+```
+
+### Other runtimes
 
 | Runtime | Setup |
 |---------|-------|
-| **Electron** | `app.commandLine.appendSwitch('remote-debugging-port', '9222')` |
 | **Tauri** | CDP via devtools configuration |
 | **Any Chromium app** | `--remote-debugging-port=9222` launch flag |
+
+### Verify CDP is working
+
+```bash
+curl -s http://localhost:9222/json/version
+```
+
+If you see a JSON response with browser info — you're good.
 
 ## Install
 
@@ -63,6 +94,10 @@ agent-view screenshot        # PNG screenshot
 # 4. Interact
 agent-view click 5           # Click element by ref
 agent-view fill 3 "hello"   # Type into input
+
+# 5. Verify the result
+agent-view dom --filter "success"   # Check for expected element
+agent-view screenshot               # Visual confirmation
 ```
 
 ## How it works
@@ -71,7 +106,7 @@ agent-view fill 3 "hello"   # Type into input
 CLI → TCP → Lazy Server → CDP → Your App
 ```
 
-A background server connects to your app's CDP port, caches sessions, and auto-shuts down after 5 minutes of inactivity. One server handles all projects, distinguished by CDP port.
+A background server connects to your app's CDP port, caches sessions, and auto-shuts down after 5 minutes of inactivity. No manual `connect` step — the server starts on first CLI call and handles connection lifecycle automatically.
 
 ## Config
 
@@ -145,7 +180,7 @@ agent-view screenshot --window "Settings"
 
 ### `scene`
 
-Reads the PixiJS scene graph via `window.__PIXI_DEVTOOLS__`. For apps with 2D canvas rendering.
+Reads the WebGL scene graph for canvas-based apps. Currently supports PixiJS via `window.__PIXI_DEVTOOLS__`.
 
 ```bash
 agent-view scene                    # Full scene graph
@@ -156,7 +191,7 @@ agent-view scene --verbose          # Extended props (alpha, scale, bounds)
 
 ### `snap`
 
-Combined DOM + scene graph in one call. Shows DOM always; scene section appears when PixiJS is detected.
+Combined DOM + scene graph in one call. Shows DOM always; scene section appears when a WebGL engine is detected.
 
 ```bash
 agent-view snap
@@ -230,6 +265,22 @@ agent-view click 7
 agent-view dom --depth 2
 agent-view screenshot
 ```
+
+## Troubleshooting
+
+### CDP not responding
+
+1. Check the port is listening: `curl -s http://localhost:9222/json/version`
+2. For electron-vite: make sure you use `--` before the flag: `npx electron-vite dev -- --remote-debugging-port=9222`
+3. Restart the app — HMR doesn't restart the main process
+
+### Stale refs after HMR
+
+After hot reload, refs from previous `dom` calls become invalid. Run `agent-view dom` again to get fresh refs.
+
+### Launch timeout
+
+Complex Electron apps may take >60s on cold start. If `agent-view launch` times out, start the app manually and use `agent-view discover` to verify.
 
 ## License
 

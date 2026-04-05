@@ -81,7 +81,7 @@ When UI scenarios are pre-generated (e.g., from a plan file with `## UI Scenario
 4. **Screenshot**: capture on FAIL and at E2E scenario end — not every step
 5. **Report per-scenario**: PASS / FAIL with reason and evidence
 
-This mode is used by Phase 04.5 of the /work skill workflow.
+This mode works with any workflow that generates plan files with UI scenarios.
 
 ## Resilience
 

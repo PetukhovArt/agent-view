@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
-    "prepublishOnly": "echo 'Run pnpm build before publishing'"
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "cdp",
