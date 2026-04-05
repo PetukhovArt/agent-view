@@ -20,13 +20,23 @@ function isValidConfig(obj: unknown): obj is AgentViewConfig {
   if (!obj || typeof obj !== 'object') return false
   const c = obj as Record<string, unknown>
   const validRuntimes: string[] = Object.values(RuntimeType)
-  return (
-    typeof c.runtime === 'string' &&
-    validRuntimes.includes(c.runtime) &&
-    typeof c.port === 'number' &&
-    c.port > 0 && c.port < 65536 &&
-    typeof c.launch === 'string'
-  )
+  const validEngines: string[] = Object.values(WebGLEngine)
+  if (
+    typeof c.runtime !== 'string' ||
+    !validRuntimes.includes(c.runtime) ||
+    typeof c.port !== 'number' ||
+    c.port < 1 || c.port > 65535 ||
+    typeof c.launch !== 'string'
+  ) return false
+
+  // Validate optional webgl.engine
+  if (c.webgl !== undefined) {
+    if (!c.webgl || typeof c.webgl !== 'object') return false
+    const w = c.webgl as Record<string, unknown>
+    if (typeof w.engine !== 'string' || !validEngines.includes(w.engine)) return false
+  }
+
+  return true
 }
 
 export function generateConfig(cwd: string): AgentViewConfig {

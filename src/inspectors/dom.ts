@@ -37,6 +37,45 @@ export function formatAccessibilityTree(
   const ALWAYS_SKIP_ROLES = new Set(['InlineTextBox'])
   const SKIP_WHEN_EMPTY_ROLES = new Set(['none', 'generic', 'StaticText'])
 
+  // WAI-ARIA-like fallback: when a node has no accessible name,
+  // walk its children to find the first non-empty name, description, or title.
+  // This handles cases like v-list-item with title on a child v-icon.
+  function resolveNameFromChildren(node: AXNode, depthLimit = 5): string {
+    if (depthLimit <= 0 || !node.childIds) return ''
+    for (const childId of node.childIds) {
+      const child = nodeMap.get(childId)
+      if (!child) continue
+      // Check child's own name
+      if (child.name?.value) return child.name.value
+      // Check description/title in AX properties
+      const desc = child.properties?.find(p => p.name === 'description')
+      if (desc?.value?.value && typeof desc.value.value === 'string') return desc.value.value
+      // Recurse into grandchildren
+      const deeper = resolveNameFromChildren(child, depthLimit - 1)
+      if (deeper) return deeper
+    }
+    return ''
+  }
+
+  // Collect all descendant text for heuristic filter matching.
+  // Searches name and description of all descendants, not just current node.
+  function getDescendantText(node: AXNode, depthLimit = 10): string {
+    const parts: string[] = []
+    function collect(n: AXNode, depth: number): void {
+      if (depth > depthLimit || !n.childIds) return
+      for (const childId of n.childIds) {
+        const child = nodeMap.get(childId)
+        if (!child) continue
+        if (child.name?.value) parts.push(child.name.value)
+        const desc = child.properties?.find(p => p.name === 'description')
+        if (desc?.value?.value && typeof desc.value.value === 'string') parts.push(desc.value.value)
+        collect(child, depth + 1)
+      }
+    }
+    collect(node, 0)
+    return parts.join(' ').toLowerCase()
+  }
+
   function hasMatchingDescendant(node: AXNode, lowerFilter: string): boolean {
     if (!node.childIds) return false
     for (const childId of node.childIds) {
@@ -61,7 +100,10 @@ export function formatAccessibilityTree(
     if (!node) return
 
     const role = node.role?.value ?? ''
-    const name = node.name?.value ?? ''
+    const ownName = node.name?.value ?? ''
+    // Fallback: resolve name from children when node has no accessible name
+    const fallbackName = !ownName ? resolveNameFromChildren(node) : ''
+    const name = ownName || fallbackName
 
     if (ALWAYS_SKIP_ROLES.has(role)) return
 
@@ -72,7 +114,11 @@ export function formatAccessibilityTree(
         const lowerFilter = filter.toLowerCase()
         const matchesName = name.toLowerCase().includes(lowerFilter)
         const matchesRole = role.toLowerCase().includes(lowerFilter)
-        if (!matchesName && !matchesRole && !hasMatchingDescendant(node, lowerFilter)) {
+        // Heuristic: also search descendant names/descriptions
+        const matchesDescendants = !matchesName && !matchesRole
+          ? getDescendantText(node, 10).includes(lowerFilter)
+          : false
+        if (!matchesName && !matchesRole && !matchesDescendants && !hasMatchingDescendant(node, lowerFilter)) {
           return
         }
       }
@@ -83,7 +129,8 @@ export function formatAccessibilityTree(
       }
 
       const padding = '  '.repeat(indent)
-      const nameStr = name ? ` "${name}"` : ''
+      const isFallback = !ownName && fallbackName
+      const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
       lines.push(`${padding}${role}${nameStr} [ref=${ref}]`)
     }
 

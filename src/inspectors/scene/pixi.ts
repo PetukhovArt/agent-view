@@ -40,9 +40,16 @@ const EXTRACT_JS = `
 })()
 `
 
+function isSceneNode(val: unknown): val is SceneNode {
+  if (!val || typeof val !== 'object') return false
+  const n = val as Record<string, unknown>
+  return typeof n.type === 'string' && typeof n.name === 'string'
+}
+
 export const pixiExtractor: SceneExtractor = {
   engine: WebGLEngine.Pixi,
   async extract(conn: CDPConnection): Promise<SceneNode | null> {
-    return conn.evaluate(EXTRACT_JS) as Promise<SceneNode | null>
+    const result = await conn.evaluate(EXTRACT_JS)
+    return isSceneNode(result) ? result : null
   },
 }

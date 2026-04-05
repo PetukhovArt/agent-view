@@ -10,17 +10,33 @@ import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspe
 import { RefStore } from './ref-store.js'
 import { launch, isRunning } from './launcher.js'
 import { readConfig } from '../config/manager.js'
-import { RuntimeType, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
+import { RuntimeType, WebGLEngine, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
 import type { CDPConnection } from '../cdp/types.js'
 
 const SERVER_PORT = 47922
 const VALID_COMMANDS = new Set(['discover', 'launch', 'dom', 'click', 'fill', 'screenshot', 'scene', 'snap', 'wait', 'stop'])
 const VALID_RUNTIMES = new Set<RuntimeType>(Object.values(RuntimeType))
+const VALID_ENGINES = new Set<WebGLEngine>(Object.values(WebGLEngine))
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const DELIMITER = '\n'
 const MAX_BUFFER_SIZE = 1_048_576 // 1 MB
 const TOKEN_DIR = join(homedir(), '.agent-view')
 const TOKEN_PATH = join(TOKEN_DIR, 'token')
+
+function argStr(args: Record<string, unknown>, key: string): string | undefined {
+  const v = args[key]
+  return typeof v === 'string' ? v : undefined
+}
+
+function argNum(args: Record<string, unknown>, key: string): number | undefined {
+  const v = args[key]
+  return typeof v === 'number' ? v : undefined
+}
+
+function argBool(args: Record<string, unknown>, key: string): boolean | undefined {
+  const v = args[key]
+  return typeof v === 'boolean' ? v : undefined
+}
 
 export class AgentViewServer {
   private server: Server | null = null
@@ -84,6 +100,14 @@ export class AgentViewServer {
         ))
       ) {
         socket.end(JSON.stringify({ ok: false, error: 'Invalid request' } satisfies ServerResponse) + DELIMITER)
+        return
+      }
+      if (request.engine !== undefined && !VALID_ENGINES.has(request.engine)) {
+        socket.end(JSON.stringify({ ok: false, error: 'Invalid engine' } satisfies ServerResponse) + DELIMITER)
+        return
+      }
+      if (!request.args || typeof request.args !== 'object' || Array.isArray(request.args)) {
+        socket.end(JSON.stringify({ ok: false, error: 'Invalid args' } satisfies ServerResponse) + DELIMITER)
         return
       }
       const response = await this.handleCommand(request)
@@ -175,18 +199,19 @@ export class AgentViewServer {
   }
 
   private async handleLaunch(req: ServerRequest): Promise<ServerResponse> {
-    const launchCmd = req.args.launch as string
-    const cwd = req.args.cwd as string | undefined
+    const launchCmd = argStr(req.args, 'launch')
+    const cwd = argStr(req.args, 'cwd')
     if (!launchCmd) {
       return { ok: false, error: 'No launch command provided' }
     }
+    if (!cwd) {
+      return { ok: false, error: 'launch requires cwd to validate config' }
+    }
 
     // Validate launch command against on-disk config to prevent injection
-    if (cwd) {
-      const config = readConfig(resolve(cwd))
-      if (!config || config.launch !== launchCmd) {
-        return { ok: false, error: 'Launch command does not match project config' }
-      }
+    const config = readConfig(resolve(cwd))
+    if (!config || config.launch !== launchCmd) {
+      return { ok: false, error: 'Launch command does not match project config' }
     }
 
     if (await isRunning(req.port)) {
@@ -203,8 +228,8 @@ export class AgentViewServer {
 
     const nodes = await conn.getAccessibilityTree()
     const { text, refs, nextRef } = formatAccessibilityTree(nodes, {
-      filter: req.args.filter as string | undefined,
-      depth: req.args.depth as number | undefined,
+      filter: argStr(req.args, 'filter'),
+      depth: argNum(req.args, 'depth'),
       startRef: this.refStore.getNextRef(),
     })
 
@@ -230,11 +255,30 @@ export class AgentViewServer {
 
     if (refs.length === 0) return null
 
+    // Build map with fallback name resolution (same logic as dom.ts)
+    const nodeById = new Map<string, typeof nodes[0]>()
+    for (const node of nodes) nodeById.set(node.nodeId, node)
+
+    function resolveChildName(node: typeof nodes[0], depth = 5): string {
+      if (depth <= 0 || !node.childIds) return ''
+      for (const childId of node.childIds) {
+        const child = nodeById.get(childId)
+        if (!child) continue
+        if (child.name?.value) return child.name.value
+        const desc = child.properties?.find(p => p.name === 'description')
+        if (desc?.value?.value && typeof desc.value.value === 'string') return desc.value.value as string
+        const deeper = resolveChildName(child, depth - 1)
+        if (deeper) return deeper
+      }
+      return ''
+    }
+
     const nodeByDOMId = new Map<number, { name: string; role: string }>()
     for (const node of nodes) {
       if (node.backendDOMNodeId) {
+        const name = node.name?.value || resolveChildName(node)
         nodeByDOMId.set(node.backendDOMNodeId, {
-          name: node.name?.value ?? '',
+          name,
           role: node.role?.value ?? '',
         })
       }
@@ -270,14 +314,17 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
-    if (req.args.pos) {
-      const { x, y } = req.args.pos as { x: number; y: number }
+    if (req.args.pos && typeof req.args.pos === 'object') {
+      const pos = req.args.pos as Record<string, unknown>
+      const x = typeof pos.x === 'number' ? pos.x : 0
+      const y = typeof pos.y === 'number' ? pos.y : 0
       await conn.clickAtPosition(x, y)
       return { ok: true, data: `Clicked at (${x}, ${y})` }
     }
 
-    if (req.args.filter) {
-      const filter = req.args.filter as string
+    const clickFilter = argStr(req.args, 'filter')
+    if (clickFilter) {
+      const filter = clickFilter
       const CLICK_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio'])
       const found = await this.findByFilter(conn, filter, req, targetId, CLICK_ROLES)
       if (!found) {
@@ -287,7 +334,10 @@ export class AgentViewServer {
       return { ok: true, data: `Clicked "${found.name}"` }
     }
 
-    const ref = req.args.ref as number
+    const ref = argNum(req.args, 'ref')
+    if (ref === undefined) {
+      return { ok: false, error: 'click requires --ref, --filter, or --pos' }
+    }
     const entry = this.refStore.get(ref)
     if (!entry) {
       return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
@@ -301,10 +351,14 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
-    const value = req.args.value as string
+    const value = argStr(req.args, 'value')
+    if (value === undefined) {
+      return { ok: false, error: 'fill requires --value' }
+    }
 
-    if (req.args.filter) {
-      const filter = req.args.filter as string
+    const fillFilter = argStr(req.args, 'filter')
+    if (fillFilter) {
+      const filter = fillFilter
       const FILL_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'textarea'])
       const found = await this.findByFilter(conn, filter, req, targetId, FILL_ROLES)
       if (!found) {
@@ -314,23 +368,26 @@ export class AgentViewServer {
       return { ok: true, data: `Filled "${found.name}" with "${value}"` }
     }
 
-    const ref = req.args.ref as number
-    const entry = this.refStore.get(ref)
+    const fillRef = argNum(req.args, 'ref')
+    if (fillRef === undefined) {
+      return { ok: false, error: 'fill requires --ref or --filter' }
+    }
+    const entry = this.refStore.get(fillRef)
     if (!entry) {
-      return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
+      return { ok: false, error: `Invalid ref: ${fillRef}. Run \`agent-view dom\` to get fresh refs.` }
     }
 
     await conn.fillByNodeId(entry.backendDOMNodeId, value)
-    return { ok: true, data: `Filled ref ${ref} with "${value}"` }
+    return { ok: true, data: `Filled ref ${fillRef} with "${value}"` }
   }
 
   private async handleWait(req: ServerRequest): Promise<ServerResponse> {
-    const filter = req.args.filter as string
+    const filter = argStr(req.args, 'filter')
     if (!filter) {
       return { ok: false, error: 'wait requires --filter' }
     }
 
-    const timeout = (req.args.timeout as number) ?? 10
+    const timeout = argNum(req.args, 'timeout') ?? 10
     const interval = 500
     const maxAttempts = Math.ceil((timeout * 1000) / interval)
 
@@ -371,8 +428,11 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
-    const isDiff = req.args.diff as boolean
+    const isDiff = argBool(req.args, 'diff') ?? false
     const cacheKey = `${req.port}:${targetId}`
+    const sceneFilter = argStr(req.args, 'filter')
+    const sceneDepth = argNum(req.args, 'depth')
+    const sceneVerbose = argBool(req.args, 'verbose')
 
     if (isDiff) {
       const curr = await getRawScene(conn, req.engine)
@@ -385,9 +445,9 @@ export class AgentViewServer {
 
       if (!prev) {
         const text = await getSceneGraph(conn, req.engine, {
-          filter: req.args.filter as string | undefined,
-          depth: req.args.depth as number | undefined,
-          verbose: req.args.verbose as boolean | undefined,
+          filter: sceneFilter,
+          depth: sceneDepth,
+          verbose: sceneVerbose,
         })
         return { ok: true, data: text }
       }
@@ -396,9 +456,9 @@ export class AgentViewServer {
     }
 
     const text = await getSceneGraph(conn, req.engine, {
-      filter: req.args.filter as string | undefined,
-      depth: req.args.depth as number | undefined,
-      verbose: req.args.verbose as boolean | undefined,
+      filter: sceneFilter,
+      depth: sceneDepth,
+      verbose: sceneVerbose,
     })
 
     return { ok: true, data: text }
@@ -408,11 +468,14 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
+    const snapFilter = argStr(req.args, 'filter')
+    const snapDepth = argNum(req.args, 'depth')
+
     // DOM section
     const nodes = await conn.getAccessibilityTree()
     const { text: domText, refs, nextRef } = formatAccessibilityTree(nodes, {
-      filter: req.args.filter as string | undefined,
-      depth: req.args.depth as number | undefined,
+      filter: snapFilter,
+      depth: snapDepth,
       startRef: this.refStore.getNextRef(),
     })
     this.refStore.store(refs, req.port, targetId, nextRef)
@@ -421,8 +484,8 @@ export class AgentViewServer {
 
     if (req.engine) {
       const sceneText = await getSceneGraph(conn, req.engine, {
-        filter: req.args.filter as string | undefined,
-        depth: req.args.depth as number | undefined,
+        filter: snapFilter,
+        depth: snapDepth,
       })
       if (!sceneText.startsWith('No ')) {
         sections.push(`=== Scene ===\n${sceneText}`)

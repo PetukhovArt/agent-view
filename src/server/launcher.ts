@@ -4,10 +4,18 @@ import { listTargets } from '../cdp/transport.js'
 const LAUNCH_TIMEOUT_MS = 60_000
 const POLL_INTERVAL_MS = 1_000
 
+// Commands that are .cmd scripts on Windows and need explicit extension
+// when spawned without shell
+const WIN_CMD_EXECUTABLES = new Set(['npm', 'npx', 'pnpm', 'yarn', 'ng', 'vite', 'tsc'])
+
 function parseCommand(cmd: string): [string, string[]] {
   const parts = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
   const cleaned = parts.map(p => p.replace(/^["']|["']$/g, ''))
-  return [cleaned[0], cleaned.slice(1)]
+  let exe = cleaned[0]
+  if (process.platform === 'win32' && WIN_CMD_EXECUTABLES.has(exe)) {
+    exe = `${exe}.cmd`
+  }
+  return [exe, cleaned.slice(1)]
 }
 
 export async function isRunning(port: number): Promise<boolean> {
@@ -22,7 +30,7 @@ export async function launch(command: string, port: number, cwd?: string): Promi
 
   const [exe, args] = parseCommand(command)
   const child = spawn(exe, args, {
-    shell: process.platform === 'win32',
+    shell: false,
     detached: true,
     stdio: 'ignore',
     cwd,

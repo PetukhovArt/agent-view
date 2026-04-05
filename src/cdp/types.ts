@@ -12,6 +12,7 @@ export type CDPConnection = {
   clickByNodeId: (backendNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
   fillByNodeId: (backendNodeId: number, value: string) => Promise<void>
+  /** Executes arbitrary JS in the target process. Only pass trusted, hardcoded expressions. */
   evaluate: (js: string) => Promise<unknown>
   close: () => Promise<void>
 }
