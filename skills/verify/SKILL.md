@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Visual verification of desktop app UI after code changes. Use when modifying UI components, fixing visual bugs, or when asked to verify/check/test how the app looks. Works with Electron, Tauri, and browser apps via CDP.
+description: "Visual verification of desktop app UI after code changes. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM."
 allowed-tools: Bash(agent-view *)
 ---
 
@@ -46,10 +46,13 @@ agent-view screenshot                   # Save PNG to temp dir, print path
 agent-view screenshot --window <id>     # Specific window
 ```
 
-### WebGL / PixiJS
+### Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
+
+These commands read the scene graph from canvas-based rendering engines. Skip this section if the project has no `webgl` field in config.
+
 ```bash
-agent-view scene                        # PixiJS scene graph
-agent-view scene --filter "pump"        # Filter by object name
+agent-view scene                        # Scene graph from configured engine
+agent-view scene --filter "player"      # Filter by object name/type
 agent-view scene --verbose              # Extended props (scale, alpha, rotation)
 agent-view scene --diff                 # Changes since last call
 agent-view snap                         # DOM + Scene combined
@@ -57,14 +60,35 @@ agent-view snap                         # DOM + Scene combined
 
 ## Verification Workflow
 
+### Ad-hoc Mode (standalone)
+
 After making code changes:
 
 1. **Determine affected areas** from git diff
 2. **Ensure app is running**: `agent-view launch` or `agent-view discover`
-3. **Inspect DOM**: `agent-view dom` — check structure matches expectations
+3. **Inspect DOM**: `agent-view dom --filter "<area>"` — check structure matches expectations
 4. **Take screenshot**: `agent-view screenshot` — capture visual state
 5. **Interact if needed**: `agent-view click`/`fill` → `agent-view dom` to verify state changed
-6. **For PixiJS apps**: `agent-view scene --diff` to see what changed on canvas
+6. **For canvas apps**: `agent-view scene --diff` to see what changed
+
+### Scenario Execution Mode (from plan)
+
+When UI scenarios are pre-generated (e.g., from a plan file with `## UI Scenarios` section):
+
+1. **Read scenario steps** with symbolic refs (`$var` notation)
+2. **Resolve each $var**: `agent-view dom --filter "<text>" --depth 3` → map to ref ID
+3. **Execute steps** sequentially: fill, click, dom --filter (verify expected outcome)
+4. **Screenshot**: capture on FAIL and at E2E scenario end — not every step
+5. **Report per-scenario**: PASS / FAIL with reason and evidence
+
+This mode is used by Phase 04.5 of the /work skill workflow.
+
+## Resilience
+
+- **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
+- **Element not found:** Wait 2s, retry once (render delay after HMR). If still missing — report FAIL
+- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch`
+- **Max retries per command:** 2. After that — SKIP scenario step with warning
 
 ## Important Notes
 
@@ -73,4 +97,4 @@ After making code changes:
 - **Multiwindow**: all commands support `--window` flag
 - **Output format**: plain text (DOM, scene), JSON (discover only), file path (screenshot)
 - **Lazy server**: auto-starts on first call, shuts down after 5min idle
-- **PixiJS**: requires `@pixi/devtools` initialized in the target app
+- **Token optimization**: always use `dom --filter` with specific text, limit `--depth` to 2-3

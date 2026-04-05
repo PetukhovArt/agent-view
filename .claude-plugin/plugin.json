@@ -1,6 +1,6 @@
 {
   "name": "agent-view",
-  "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, read PixiJS scene graphs.",
+  "description": "Multi-platform visual verification CLI for Frontend apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, WebGL support. Use when verifying UI changes, checking visual regressions, testing user interactions, or when any workflow phase needs to inspect the running application.",
   "version": "0.1.0",
   "author": {
     "name": "PetukhovArt"

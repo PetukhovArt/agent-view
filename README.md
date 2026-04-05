@@ -16,9 +16,9 @@ And CLI works everywhere — Claude Code, Copilot, Codex, custom pipelines, CI. 
 
 ## Why
 
-You're building an Electron app. Your AI agent just changed a login form. Did it break the layout? Is the button still clickable? Does the error message show up?
+You're building an Electron or Tauri Frontend app. Your AI agent just changed a login form. Did it break the layout? Is the button still clickable? Does the error message show up?
 
-Without agent-view, you'd have to check manually. With agent-view:
+Without agent-view, you'd have to check manually and waste time. With agent-view:
 
 ```bash
 agent-view dom --filter "login"        # See the DOM structure
