@@ -6,6 +6,14 @@ AI coding agents can write code, run tests, and read logs — but they can't *se
 
 Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but works with any AI agent or automation pipeline that can call CLI commands.
 
+## Why CLI, not MCP?
+
+Most alternatives in this space are MCP servers with 30+ tool definitions loaded into context on every session. That burns tokens before the agent even starts working.
+
+agent-view is a CLI. One Bash call, compact text output, zero schema overhead. The accessibility tree comes back as plain text — not wrapped in JSON-RPC with metadata. For an agent that runs dozens of verification steps, the token savings add up fast.
+
+And CLI works everywhere — Claude Code, Copilot, Codex, custom pipelines, CI. No MCP client required.
+
 ## Why
 
 You're building an Electron app. Your AI agent just changed a login form. Did it break the layout? Is the button still clickable? Does the error message show up?
