@@ -34,16 +34,18 @@ export function formatAccessibilityTree(
   const rootNodeId = nodes[0]?.nodeId
   if (!rootNodeId) return { text: '(empty)', refs: [], nextRef }
 
-  const SKIP_ROLES = new Set(['none', 'generic', 'InlineTextBox', 'StaticText'])
+  const ALWAYS_SKIP_ROLES = new Set(['InlineTextBox'])
+  const SKIP_WHEN_EMPTY_ROLES = new Set(['none', 'generic', 'StaticText'])
 
   function hasMatchingDescendant(node: AXNode, lowerFilter: string): boolean {
     if (!node.childIds) return false
     for (const childId of node.childIds) {
       const child = nodeMap.get(childId)
       if (!child) continue
+      const childRole = child.role?.value ?? ''
+      if (ALWAYS_SKIP_ROLES.has(childRole)) continue
       const childName = child.name?.value?.toLowerCase() ?? ''
-      const childRole = child.role?.value?.toLowerCase() ?? ''
-      if (childName.includes(lowerFilter) || childRole.includes(lowerFilter)) return true
+      if (childName.includes(lowerFilter) || childRole.toLowerCase().includes(lowerFilter)) return true
       if (hasMatchingDescendant(child, lowerFilter)) return true
     }
     return false
@@ -58,7 +60,9 @@ export function formatAccessibilityTree(
     const role = node.role?.value ?? ''
     const name = node.name?.value ?? ''
 
-    const skip = SKIP_ROLES.has(role) && !name
+    if (ALWAYS_SKIP_ROLES.has(role)) return
+
+    const skip = SKIP_WHEN_EMPTY_ROLES.has(role) && !name
 
     if (!skip) {
       if (filter) {

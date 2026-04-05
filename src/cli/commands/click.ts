@@ -3,18 +3,21 @@ import type { AgentViewConfig } from '../../config/types.js'
 
 type ClickOptions = {
   pos?: string
+  filter?: string
   window?: string
 }
 
 export async function runClick(config: AgentViewConfig, refArg: string | undefined, options: ClickOptions): Promise<void> {
-  if (!refArg && !options.pos) {
-    console.error('Usage: agent-view click <ref> or agent-view click --pos <x,y>')
+  if (!refArg && !options.pos && !options.filter) {
+    console.error('Usage: agent-view click <ref> | --filter <text> | --pos <x,y>')
     process.exit(1)
   }
 
   const args: Record<string, unknown> = {}
 
-  if (options.pos) {
+  if (options.filter) {
+    args.filter = options.filter
+  } else if (options.pos) {
     const [x, y] = options.pos.split(',').map(Number)
     if (isNaN(x) || isNaN(y)) {
       console.error(`Invalid position: "${options.pos}". Expected format: x,y`)

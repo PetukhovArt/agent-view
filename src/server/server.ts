@@ -84,6 +84,8 @@ export class AgentViewServer {
         return this.handleScene(req)
       case 'snap':
         return this.handleSnap(req)
+      case 'wait':
+        return this.handleWait(req)
       case 'stop':
         return this.handleStop()
       default:
@@ -171,6 +173,59 @@ export class AgentViewServer {
     return { ok: true, data: text }
   }
 
+  private async findByFilter(
+    conn: CDPConnection,
+    filter: string,
+    req: ServerRequest,
+    targetId: string,
+    preferRoles?: Set<string>,
+  ): Promise<{ backendDOMNodeId: number; name: string } | null> {
+    const nodes = await conn.getAccessibilityTree()
+    const { refs, nextRef } = formatAccessibilityTree(nodes, {
+      filter,
+      startRef: this.refStore.getNextRef(),
+    })
+
+    this.refStore.store(refs, req.port, targetId, nextRef)
+
+    if (refs.length === 0) return null
+
+    const nodeByDOMId = new Map<number, { name: string; role: string }>()
+    for (const node of nodes) {
+      if (node.backendDOMNodeId) {
+        nodeByDOMId.set(node.backendDOMNodeId, {
+          name: node.name?.value ?? '',
+          role: node.role?.value ?? '',
+        })
+      }
+    }
+
+    const lowerFilter = filter.toLowerCase()
+
+    // If preferred roles specified, try those first
+    if (preferRoles) {
+      for (const entry of refs) {
+        const info = nodeByDOMId.get(entry.backendDOMNodeId)
+        if (info && preferRoles.has(info.role) && info.name.toLowerCase().includes(lowerFilter)) {
+          return { backendDOMNodeId: entry.backendDOMNodeId, name: info.name }
+        }
+      }
+    }
+
+    // Pick the deepest match whose name contains the filter text (leaf-first)
+    for (let i = refs.length - 1; i >= 0; i--) {
+      const info = nodeByDOMId.get(refs[i].backendDOMNodeId)
+      if (info && info.name.toLowerCase().includes(lowerFilter)) {
+        return { backendDOMNodeId: refs[i].backendDOMNodeId, name: info.name }
+      }
+    }
+
+    // Fallback: last ref (deepest element in filtered tree)
+    const last = refs[refs.length - 1]
+    const lastInfo = nodeByDOMId.get(last.backendDOMNodeId)
+    return { backendDOMNodeId: last.backendDOMNodeId, name: lastInfo?.name ?? filter }
+  }
+
   private async handleClick(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
@@ -179,6 +234,17 @@ export class AgentViewServer {
       const { x, y } = req.args.pos as { x: number; y: number }
       await conn.clickAtPosition(x, y)
       return { ok: true, data: `Clicked at (${x}, ${y})` }
+    }
+
+    if (req.args.filter) {
+      const filter = req.args.filter as string
+      const CLICK_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio'])
+      const found = await this.findByFilter(conn, filter, req, targetId, CLICK_ROLES)
+      if (!found) {
+        return { ok: false, error: `No element found matching "${filter}"` }
+      }
+      await conn.clickByNodeId(found.backendDOMNodeId)
+      return { ok: true, data: `Clicked "${found.name}"` }
     }
 
     const ref = req.args.ref as number
@@ -195,8 +261,20 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
-    const ref = req.args.ref as number
     const value = req.args.value as string
+
+    if (req.args.filter) {
+      const filter = req.args.filter as string
+      const FILL_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'textarea'])
+      const found = await this.findByFilter(conn, filter, req, targetId, FILL_ROLES)
+      if (!found) {
+        return { ok: false, error: `No element found matching "${filter}"` }
+      }
+      await conn.fillByNodeId(found.backendDOMNodeId, value)
+      return { ok: true, data: `Filled "${found.name}" with "${value}"` }
+    }
+
+    const ref = req.args.ref as number
     const entry = this.refStore.get(ref)
     if (!entry) {
       return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
@@ -204,6 +282,37 @@ export class AgentViewServer {
 
     await conn.fillByNodeId(entry.backendDOMNodeId, value)
     return { ok: true, data: `Filled ref ${ref} with "${value}"` }
+  }
+
+  private async handleWait(req: ServerRequest): Promise<ServerResponse> {
+    const filter = req.args.filter as string
+    if (!filter) {
+      return { ok: false, error: 'wait requires --filter' }
+    }
+
+    const timeout = (req.args.timeout as number) ?? 10
+    const interval = 500
+    const maxAttempts = Math.ceil((timeout * 1000) / interval)
+
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getConnection(req, targetId)
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const nodes = await conn.getAccessibilityTree()
+      const { refs, text, nextRef } = formatAccessibilityTree(nodes, {
+        filter,
+        startRef: this.refStore.getNextRef(),
+      })
+
+      if (refs.length > 0) {
+        this.refStore.store(refs, req.port, targetId, nextRef)
+        return { ok: true, data: text }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, interval))
+    }
+
+    return { ok: false, error: `Timeout: "${filter}" not found after ${timeout}s` }
   }
 
   private async handleScreenshot(req: ServerRequest): Promise<ServerResponse> {

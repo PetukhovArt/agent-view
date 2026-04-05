@@ -12,6 +12,7 @@ import { runScreenshot } from './commands/screenshot.js'
 import { runScene } from './commands/scene.js'
 import { runSnap } from './commands/snap.js'
 import { runStop } from './commands/stop.js'
+import { runWait } from './commands/wait.js'
 import type { AgentViewConfig } from '../config/types.js'
 
 const program = new Command()
@@ -55,7 +56,8 @@ program
 
 program
   .command('click [ref]')
-  .description('Click DOM element by ref or position')
+  .description('Click DOM element by ref, filter, or position')
+  .option('-f, --filter <text>', 'Find element by text and click')
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
   .option('-w, --window <id>', 'Target window ID or name')
   .action(async (ref, options) => {
@@ -64,12 +66,24 @@ program
   })
 
 program
-  .command('fill <ref> <value>')
-  .description('Type text into input by ref')
+  .command('fill <refOrValue> [value]')
+  .description('Type text into input by ref or filter')
+  .option('-f, --filter <text>', 'Find input by label/text and fill')
   .option('-w, --window <id>', 'Target window ID or name')
-  .action(async (ref, value, options) => {
+  .action(async (refOrValue, value, options) => {
     const config = requireConfig()
-    await runFill(config, ref, value, options)
+    await runFill(config, refOrValue, value, options)
+  })
+
+program
+  .command('wait')
+  .description('Wait for element to appear in DOM')
+  .requiredOption('-f, --filter <text>', 'Text to wait for')
+  .option('-t, --timeout <seconds>', 'Max wait time (default: 10)')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runWait(config, options)
   })
 
 program
