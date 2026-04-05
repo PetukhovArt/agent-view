@@ -7,12 +7,12 @@ export type CDPTarget = {
 }
 
 export type CDPConnection = {
-  evaluate: (expression: string) => Promise<unknown>
   getAccessibilityTree: () => Promise<AXNode[]>
   captureScreenshot: () => Promise<Buffer>
   clickByNodeId: (backendNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
   fillByNodeId: (backendNodeId: number, value: string) => Promise<void>
+  evaluateScene: (js: string) => Promise<unknown>
   close: () => Promise<void>
 }
 

@@ -20,6 +20,7 @@ export type ServerRequest = {
   port: number
   runtime: RuntimeType
   args: Record<string, unknown>
+  token?: string
 }
 
 export type ServerResponse = {

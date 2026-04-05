@@ -25,7 +25,7 @@ export async function connectToTarget(port: number, targetId: string): Promise<C
   }
 
   return {
-    async evaluate(expression: string): Promise<unknown> {
+    async evaluateScene(expression: string): Promise<unknown> {
       const { result } = await Runtime.evaluate({
         expression,
         returnByValue: true,

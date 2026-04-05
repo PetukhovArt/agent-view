@@ -2,18 +2,28 @@ import { connect, type Socket } from 'node:net'
 import { spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import type { ServerRequest, ServerResponse } from '../types.js'
 
 const SERVER_PORT = 47922
 const DELIMITER = '\n'
+const TOKEN_PATH = join(tmpdir(), 'agent-view-token')
+
+function readToken(): string {
+  try {
+    return readFileSync(TOKEN_PATH, 'utf-8').trim()
+  } catch {
+    return ''
+  }
+}
 
 export async function sendCommand(request: ServerRequest): Promise<ServerResponse> {
   try {
-    return await tryConnect(request)
+    return await tryConnect({ ...request, token: readToken() })
   } catch {
     await startServer()
-    return tryConnect(request)
+    return tryConnect({ ...request, token: readToken() })
   }
 }
 
@@ -61,7 +71,7 @@ async function startServer(): Promise<void> {
   const child = spawn(cmd, args, {
     detached: true,
     stdio: ['ignore', 'pipe', 'ignore'],
-    shell: true,
+    shell: process.platform === 'win32',
     cwd: projectRoot,
     windowsHide: true,
   })

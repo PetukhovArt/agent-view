@@ -59,7 +59,7 @@ const EXTRACT_SCENE_JS = `
 `
 
 export async function getSceneGraph(conn: CDPConnection, options: SceneOptions = {}): Promise<string> {
-  const tree = await conn.evaluate(EXTRACT_SCENE_JS) as SceneNode | null
+  const tree = await conn.evaluateScene(EXTRACT_SCENE_JS) as SceneNode | null
   if (!tree) {
     return 'No PixiJS scene found. Ensure @pixi/devtools is initialized.'
   }

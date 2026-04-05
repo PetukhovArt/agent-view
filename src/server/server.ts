@@ -1,5 +1,6 @@
 import { createServer, type Server, type Socket } from 'node:net'
-import { writeFile } from 'node:fs/promises'
+import { writeFile, unlink } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getAdapter } from '../adapters/registry.js'
@@ -7,12 +8,15 @@ import { formatAccessibilityTree } from '../inspectors/dom.js'
 import { getSceneGraph, diffScenes, type SceneNode } from '../inspectors/scene.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning } from './launcher.js'
+import { readConfig } from '../config/manager.js'
 import type { ServerRequest, ServerResponse, WindowInfo } from '../types.js'
 import type { CDPConnection } from '../cdp/types.js'
 
 const SERVER_PORT = 47922
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const DELIMITER = '\n'
+const MAX_BUFFER_SIZE = 1_048_576 // 1 MB
+const TOKEN_PATH = join(tmpdir(), 'agent-view-token')
 
 export class AgentViewServer {
   private server: Server | null = null
@@ -20,8 +24,12 @@ export class AgentViewServer {
   private refStore = new RefStore()
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private sceneCache = new Map<string, SceneNode>()
+  private token = ''
 
   async start(): Promise<void> {
+    this.token = randomBytes(32).toString('hex')
+    await writeFile(TOKEN_PATH, this.token, { mode: 0o600 })
+
     return new Promise((resolve, reject) => {
       this.server = createServer((socket: Socket) => this.handleSocket(socket))
       this.server.on('error', reject)
@@ -43,6 +51,10 @@ export class AgentViewServer {
 
     socket.on('data', (chunk: Buffer) => {
       buffer += chunk.toString()
+      if (buffer.length > MAX_BUFFER_SIZE) {
+        socket.destroy(new Error('Request too large'))
+        return
+      }
       const delimIndex = buffer.indexOf(DELIMITER)
       if (delimIndex !== -1) {
         const message = buffer.slice(0, delimIndex)
@@ -55,6 +67,10 @@ export class AgentViewServer {
   private async processRequest(data: string, socket: Socket): Promise<void> {
     try {
       const request = JSON.parse(data) as ServerRequest
+      if (request.token !== this.token) {
+        socket.end(JSON.stringify({ ok: false, error: 'Unauthorized' } satisfies ServerResponse) + DELIMITER)
+        return
+      }
       const response = await this.handleCommand(request)
       socket.end(JSON.stringify(response) + DELIMITER)
     } catch (err) {
@@ -145,15 +161,24 @@ export class AgentViewServer {
 
   private async handleLaunch(req: ServerRequest): Promise<ServerResponse> {
     const launchCmd = req.args.launch as string
+    const cwd = req.args.cwd as string | undefined
     if (!launchCmd) {
       return { ok: false, error: 'No launch command provided' }
+    }
+
+    // Validate launch command against on-disk config to prevent injection
+    if (cwd) {
+      const config = readConfig(cwd)
+      if (!config || config.launch !== launchCmd) {
+        return { ok: false, error: 'Launch command does not match project config' }
+      }
     }
 
     if (await isRunning(req.port)) {
       return { ok: true, data: 'Application already running' }
     }
 
-    await launch(launchCmd, req.port, req.args.cwd as string | undefined)
+    await launch(launchCmd, req.port, cwd)
     return { ok: true, data: 'Application launched and ready' }
   }
 
@@ -360,7 +385,7 @@ export class AgentViewServer {
   return serialize(stage);
 })()
 `
-      const curr = await conn.evaluate(EXTRACT_JS) as SceneNode | null
+      const curr = await conn.evaluateScene(EXTRACT_JS) as SceneNode | null
       if (!curr) {
         return { ok: true, data: 'No PixiJS scene found. Ensure @pixi/devtools is initialized.' }
       }
@@ -425,6 +450,8 @@ export class AgentViewServer {
 
   private async shutdown(): Promise<void> {
     if (this.idleTimer) clearTimeout(this.idleTimer)
+
+    await unlink(TOKEN_PATH).catch(() => {})
 
     for (const conn of this.connections.values()) {
       try { await conn.close() } catch { /* ignore */ }
