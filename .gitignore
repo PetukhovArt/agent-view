@@ -143,4 +143,5 @@ vite.config.ts.timestamp-*
 # Personal Claude files (live in claude-sync)
 .claude*
 !.claude-plugin
+CLAUDE.md
 agent-view-prd.md
