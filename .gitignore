@@ -138,7 +138,4 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-CLAUDE.md
-.claude*
-!.claude-plugin
-.claude.current-stage.md
+.idea
