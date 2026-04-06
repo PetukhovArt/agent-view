@@ -1,10 +1,21 @@
 {
   "name": "agent-view",
-  "description": "Multi-platform visual verification CLI for Frontend apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, WebGL libraries support. Use when verifying UI changes, checking visual regressions, testing user interactions, or when any workflow phase needs to inspect the running application.",
+  "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, and read WebGL scene graphs.",
   "version": "0.1.0",
+  "keywords": [
+    "cdp",
+    "electron",
+    "tauri",
+    "desktop",
+    "testing",
+    "accessibility",
+    "screenshot",
+    "automation"
+  ],
   "author": {
     "name": "PetukhovArt"
   },
   "homepage": "https://github.com/PetukhovArt/agent-view",
+  "repository": "https://github.com/PetukhovArt/agent-view",
   "license": "MIT"
 }

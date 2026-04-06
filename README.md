@@ -71,9 +71,23 @@ If you see a JSON response with browser info — you're good.
 
 ## Install
 
+### As CLI tool
+
 ```bash
-npm install -g agent-view
+npm install -g @petukhovart/agent-view
 ```
+
+### As Claude Code plugin
+
+```bash
+# Add marketplace (once)
+/plugin marketplace add PetukhovArt/agent-view
+
+# Install plugin
+/plugin install agent-view@agent-view
+```
+
+This gives Claude the `/agent-view:verify` skill — it knows when and how to use agent-view for visual verification during development workflows.
 
 ## Quick start
 
