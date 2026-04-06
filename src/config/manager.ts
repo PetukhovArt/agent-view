@@ -77,8 +77,6 @@ function detectRuntime(deps: Record<string, string>): RuntimeType {
 
 function detectWebGL(deps: Record<string, string>): WebGLEngine | undefined {
   if (deps['pixi.js'] || deps['@pixi/app']) return WebGLEngine.Pixi
-  if (deps['cesium']) return WebGLEngine.Cesium
-  if (deps['three']) return WebGLEngine.Three
   return undefined
 }
 
