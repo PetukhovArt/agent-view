@@ -125,7 +125,7 @@ Running `agent-view init` in your project root generates `agent-view.config.json
 | `runtime` | yes | `"electron"`, `"tauri"`, or `"browser"` |
 | `port` | yes | CDP debugging port |
 | `launch` | no | Command to start the app |
-| `webgl.engine` | no | `"pixi"`, `"cesium"`, or `"three"` |
+| `webgl.engine` | no | `"pixi"` (scene extractor architecture supports adding more engines) |
 
 ## Commands
 
@@ -195,6 +195,15 @@ Combined DOM + scene graph in one call. Shows DOM always; scene section appears 
 
 ```bash
 agent-view snap
+```
+
+### `wait`
+
+Waits for a DOM element matching the filter to appear. Useful after navigation or async operations.
+
+```bash
+agent-view wait --filter "Dashboard"              # Wait for element (default 10s)
+agent-view wait --filter "Dashboard" --timeout 30 # Custom timeout in seconds
 ```
 
 ### `launch`
