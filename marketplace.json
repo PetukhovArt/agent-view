@@ -1,0 +1,16 @@
+{
+  "name": "agent-view",
+  "owner": {
+    "name": "Artem Petukhov"
+  },
+  "plugins": [
+    {
+      "name": "agent-view",
+      "source": {
+        "source": "npm",
+        "package": "@petukhovart/agent-view"
+      },
+      "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. DOM inspection, screenshots, UI interaction, WebGL scene graph."
+    }
+  ]
+}
