@@ -8,7 +8,7 @@ const POLL_INTERVAL_MS = 1_000
 // when spawned without shell
 const WIN_CMD_EXECUTABLES = new Set(['npm', 'npx', 'pnpm', 'yarn', 'ng', 'vite', 'tsc'])
 
-function parseCommand(cmd: string): [string, string[]] {
+export function parseCommand(cmd: string): [string, string[]] {
   const parts = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
   const cleaned = parts.map(p => p.replace(/^["']|["']$/g, ''))
   let exe = cleaned[0]
