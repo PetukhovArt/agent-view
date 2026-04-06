@@ -2,17 +2,35 @@
 import CDP from 'chrome-remote-interface'
 import type { CDPConnection, CDPTarget, AXNode } from './types.js'
 
+// CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
+const CDP_HOSTS = ['127.0.0.1', '::1'] as const
+
+// Maps targetId → host for connection routing
+const targetHostMap = new Map<string, string>()
+
 export async function listTargets(port: number): Promise<CDPTarget[]> {
-  try {
-    const targets = await CDP.List({ host: '127.0.0.1', port })
-    return targets as CDPTarget[]
-  } catch {
-    return []
+  const seen = new Set<string>()
+  const result: CDPTarget[] = []
+
+  for (const host of CDP_HOSTS) {
+    try {
+      const targets = await CDP.List({ host, port })
+      for (const t of targets as CDPTarget[]) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id)
+          targetHostMap.set(`${port}:${t.id}`, host)
+          result.push(t)
+        }
+      }
+    } catch { /* host not available */ }
   }
+
+  return result
 }
 
 export async function connectToTarget(port: number, targetId: string): Promise<CDPConnection> {
-  const client = await CDP({ host: '127.0.0.1', port, target: targetId })
+  const host = targetHostMap.get(`${port}:${targetId}`) ?? 'localhost'
+  const client = await CDP({ host, port, target: targetId })
   const { Runtime, Accessibility, Page, DOM, Input } = client
 
   await Page.enable()
