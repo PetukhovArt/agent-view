@@ -6,9 +6,23 @@
   <style>
     body { font-family: sans-serif; margin: 20px; }
     .section { margin-bottom: 24px; padding: 16px; border: 1px solid #ccc; }
-    .hidden-section { display: none; }
+    .section.hidden-section { display: none; }
     label { display: block; margin: 4px 0; }
     input { margin-left: 8px; }
+
+    /* Search results */
+    #search-hint { margin-top: 4px; font-size: 0.85em; color: #555; min-height: 1.2em; }
+
+    /* Form validation */
+    .field-error { color: #c00; font-size: 0.85em; display: none; margin-left: 8px; }
+    .field-error.visible { display: inline; }
+    input:invalid.touched { outline: 2px solid #c00; }
+
+    /* Form feedback */
+    #form-success { display: none; color: #060; font-weight: bold; margin-top: 8px; }
+    #form-success.visible { display: block; }
+    #form-error-summary { display: none; color: #c00; margin-top: 8px; }
+    #form-error-summary.visible { display: block; }
   </style>
 </head>
 <body>
@@ -109,17 +123,32 @@
 
     <section id="form" class="section" aria-labelledby="form-heading">
       <h2 id="form-heading">Form</h2>
-      <form>
+      <form id="main-form" novalidate>
         <fieldset>
           <legend>Choose option</legend>
-          <label><input type="radio" name="opt" value="a"> Option A</label>
-          <label><input type="radio" name="opt" value="b"> Option B</label>
-          <label><input type="radio" name="opt" value="c"> Option C</label>
+          <label><input type="radio" name="opt" value="a" aria-label="Option A"> Option A</label>
+          <label><input type="radio" name="opt" value="b" aria-label="Option B"> Option B</label>
+          <label><input type="radio" name="opt" value="c" aria-label="Option C"> Option C</label>
+          <span id="opt-error" class="field-error" role="alert">Please choose an option.</span>
         </fieldset>
-        <label>Name <input type="text" aria-label="Name"></label>
-        <label>Email <input type="email" aria-label="Email"></label>
+
+        <label>
+          Name
+          <input type="text" id="name-field" aria-label="Name" aria-describedby="name-error" autocomplete="off">
+          <span id="name-error" class="field-error" role="alert">Name is required (min 2 characters).</span>
+        </label>
+
+        <label>
+          Email
+          <input type="email" id="email-field" aria-label="Email" aria-describedby="email-error" autocomplete="off">
+          <span id="email-error" class="field-error" role="alert">A valid email address is required.</span>
+        </label>
+
+        <div id="form-error-summary" role="alert">Please fix the errors above before submitting.</div>
+        <div id="form-success" role="status" aria-live="polite">Form submitted successfully!</div>
+
         <button type="submit">Submit</button>
-        <button type="reset">Reset</button>
+        <button type="reset" id="reset-btn">Reset</button>
       </form>
     </section>
 
@@ -144,7 +173,12 @@
 
     <section id="search" class="section" aria-labelledby="search-heading">
       <h2 id="search-heading">Search</h2>
-      <label>Search <input type="search" role="searchbox" aria-label="Search"></label>
+      <label>
+        Search
+        <input type="search" id="search-input" role="searchbox" aria-label="Search" aria-describedby="search-hint" autocomplete="off">
+      </label>
+      <p id="search-hint"></p>
+      <ul id="search-results" aria-label="Search results"></ul>
     </section>
 
     <section id="hidden-a" class="section" aria-hidden="true">
@@ -167,8 +201,7 @@
   </main>
 
   <script>
-    // Adds "Async Button" after 1500ms — required for wait_match benchmark scenario.
-    // 1500ms gives the benchmark runner time to issue the wait command before the element appears.
+    // ── Async element (bench scenario: wait_match) ──────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         const container = document.getElementById('async-container')
@@ -177,6 +210,122 @@
         container.appendChild(btn)
         document.getElementById('async-status').textContent = 'Async element ready'
       }, 1500)
+    })
+
+    // ── Search: filter sections, show clickable results ─────────────────────────
+    const searchInput = document.getElementById('search-input')
+    const searchHint = document.getElementById('search-hint')
+    const searchResults = document.getElementById('search-results')
+
+    // Sections eligible for search (exclude aria-hidden ones and the search section itself)
+    const searchableSections = Array.from(
+      document.querySelectorAll('main .section:not([aria-hidden="true"]):not(#search)')
+    )
+
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value.trim().toLowerCase()
+      searchResults.innerHTML = ''
+
+      if (!query) {
+        searchHint.textContent = ''
+        searchableSections.forEach(s => s.classList.remove('hidden-section'))
+        return
+      }
+
+      const matches = searchableSections.filter(section => {
+        const heading = section.querySelector('h2')
+        return heading && heading.textContent.toLowerCase().includes(query)
+      })
+
+      // Hide non-matching, show matching
+      searchableSections.forEach(s => {
+        const heading = s.querySelector('h2')
+        const matches_ = heading && heading.textContent.toLowerCase().includes(query)
+        s.classList.toggle('hidden-section', !matches_)
+      })
+
+      if (matches.length === 0) {
+        searchHint.textContent = 'No sections found.'
+        return
+      }
+
+      searchHint.textContent = `${matches.length} section${matches.length > 1 ? 's' : ''} found.`
+
+      matches.forEach(section => {
+        const heading = section.querySelector('h2')
+        const li = document.createElement('li')
+        const a = document.createElement('a')
+        a.href = '#' + section.id
+        a.textContent = heading ? heading.textContent : section.id
+        a.addEventListener('click', () => {
+          // Clear search and restore all sections after navigation
+          setTimeout(() => {
+            searchInput.value = ''
+            searchHint.textContent = ''
+            searchResults.innerHTML = ''
+            searchableSections.forEach(s => s.classList.remove('hidden-section'))
+          }, 100)
+        })
+        li.appendChild(a)
+        searchResults.appendChild(li)
+      })
+    })
+
+    // ── Form validation ─────────────────────────────────────────────────────────
+    const form = document.getElementById('main-form')
+    const nameField = document.getElementById('name-field')
+    const emailField = document.getElementById('email-field')
+    const nameError = document.getElementById('name-error')
+    const emailError = document.getElementById('email-error')
+    const optError = document.getElementById('opt-error')
+    const formSuccess = document.getElementById('form-success')
+    const formErrorSummary = document.getElementById('form-error-summary')
+
+    function validateName() {
+      const ok = nameField.value.trim().length >= 2
+      nameError.classList.toggle('visible', !ok)
+      return ok
+    }
+
+    function validateEmail() {
+      const val = emailField.value.trim()
+      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)
+      emailError.classList.toggle('visible', !ok)
+      return ok
+    }
+
+    function validateOpt() {
+      const ok = !!document.querySelector('input[name="opt"]:checked')
+      optError.classList.toggle('visible', !ok)
+      return ok
+    }
+
+    function resetFeedback() {
+      formSuccess.classList.remove('visible')
+      formErrorSummary.classList.remove('visible')
+      nameError.classList.remove('visible')
+      emailError.classList.remove('visible')
+      optError.classList.remove('visible')
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      resetFeedback()
+
+      const nameOk = validateName()
+      const emailOk = validateEmail()
+      const optOk = validateOpt()
+
+      if (!nameOk || !emailOk || !optOk) {
+        formErrorSummary.classList.add('visible')
+        return
+      }
+
+      formSuccess.classList.add('visible')
+    })
+
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      resetFeedback()
     })
   </script>
 </body>

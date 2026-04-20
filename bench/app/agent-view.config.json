@@ -1,0 +1,5 @@
+{
+  "runtime": "electron",
+  "port": 19222,
+  "launch": "npm start"
+}
