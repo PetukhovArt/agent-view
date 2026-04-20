@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
 
-const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCDP } =
+const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockCDP } =
   vi.hoisted(() => {
     const callOrder: string[] = []
 
@@ -27,6 +27,11 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       return Promise.resolve({})
     })
 
+    const mockCaptureScreenshot = vi.fn().mockResolvedValue({ data: '' })
+    const mockGetLayoutMetrics = vi.fn().mockResolvedValue({
+      cssLayoutViewport: { clientWidth: 1280, clientHeight: 720 },
+    })
+
     const mockCDP = vi.fn().mockResolvedValue({
       Runtime: { callFunctionOn: mockCallFunctionOn, evaluate: vi.fn().mockResolvedValue({ result: {} }) },
       Accessibility: {
@@ -34,7 +39,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         getFullAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
         queryAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
       },
-      Page: { enable: vi.fn().mockResolvedValue({}), captureScreenshot: vi.fn().mockResolvedValue({ data: '' }), frameNavigated: vi.fn() },
+      Page: { enable: vi.fn().mockResolvedValue({}), captureScreenshot: mockCaptureScreenshot, getLayoutMetrics: mockGetLayoutMetrics, frameNavigated: vi.fn() },
       DOM: {
         enable: vi.fn().mockResolvedValue({}),
         resolveNode: mockDomResolve,
@@ -46,7 +51,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       close: vi.fn().mockResolvedValue({}),
     })
 
-    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCDP }
+    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockCDP }
   })
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
@@ -56,6 +61,56 @@ import { connectToTarget } from './transport.js'
 import { AxTreeCache } from './ax-cache.js'
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('captureScreenshot', () => {
+  beforeEach(() => {
+    mockCaptureScreenshot.mockClear()
+    mockGetLayoutMetrics.mockClear()
+  })
+
+  it('default (no scale) calls captureScreenshot with png format, no clip', async () => {
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    await conn.captureScreenshot()
+
+    expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
+    expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
+  })
+
+  it('scale=1 behaves same as no scale', async () => {
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    await conn.captureScreenshot({ scale: 1 })
+
+    expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
+    expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
+  })
+
+  it('scale=0.5 fetches layout metrics and passes clip with scale', async () => {
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    await conn.captureScreenshot({ scale: 0.5 })
+
+    expect(mockGetLayoutMetrics).toHaveBeenCalledOnce()
+    expect(mockCaptureScreenshot).toHaveBeenCalledWith({
+      format: 'jpeg',
+      quality: 80,
+      clip: { x: 0, y: 0, width: 1280, height: 720, scale: 0.5 },
+    })
+  })
+
+  it('scale=0.25 uses viewport dimensions from getLayoutMetrics', async () => {
+    mockGetLayoutMetrics.mockResolvedValueOnce({
+      cssLayoutViewport: { clientWidth: 1920, clientHeight: 1080 },
+    })
+
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    await conn.captureScreenshot({ scale: 0.25 })
+
+    expect(mockCaptureScreenshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clip: expect.objectContaining({ width: 1920, height: 1080, scale: 0.25 }),
+      }),
+    )
+  })
+})
 
 describe('clickByNodeId', () => {
   beforeEach(() => {

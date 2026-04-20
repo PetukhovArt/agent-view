@@ -1,6 +1,6 @@
 // @ts-expect-error no types available for chrome-remote-interface
 import CDP from 'chrome-remote-interface'
-import type { CDPConnection, CDPTarget, AXNode } from './types.js'
+import type { CDPConnection, CDPTarget, AXNode, ScreenshotOpts } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
 
 // CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
@@ -97,8 +97,18 @@ export async function connectToTarget(port: number, targetId: string, cache: AxT
       }
     },
 
-    async captureScreenshot(): Promise<Buffer> {
-      const { data } = await Page.captureScreenshot({ format: 'png' })
+    async captureScreenshot(opts?: ScreenshotOpts): Promise<Buffer> {
+      const scale = opts?.scale ?? 1
+      if (scale >= 1) {
+        const { data } = await Page.captureScreenshot({ format: 'png' })
+        return Buffer.from(data, 'base64')
+      }
+      const { cssLayoutViewport } = await Page.getLayoutMetrics()
+      const { data } = await Page.captureScreenshot({
+        format: 'jpeg',
+        quality: 80,
+        clip: { x: 0, y: 0, width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight, scale },
+      })
       return Buffer.from(data, 'base64')
     },
 

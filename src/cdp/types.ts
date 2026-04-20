@@ -6,11 +6,16 @@ export type CDPTarget = {
   webSocketDebuggerUrl: string
 }
 
+export type ScreenshotOpts = {
+  /** Scale factor (0 < scale ≤ 1). Values < 1 use JPEG at 80% quality to reduce token cost. */
+  scale?: number
+}
+
 export type CDPConnection = {
   getAccessibilityTree: () => Promise<AXNode[]>
   /** Returns matching nodes by accessible name/role. null = API unavailable; [] = no match. */
   queryAXTree: (params: { accessibleName?: string; role?: string }) => Promise<AXNode[] | null>
-  captureScreenshot: () => Promise<Buffer>
+  captureScreenshot: (opts?: ScreenshotOpts) => Promise<Buffer>
   clickByNodeId: (backendNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
   fillByNodeId: (backendNodeId: number, value: string) => Promise<void>

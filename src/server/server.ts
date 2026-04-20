@@ -491,8 +491,11 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
-    const buffer = await conn.captureScreenshot()
-    const filename = `agent-view-screenshot-${Date.now()}.png`
+    const scale = argNum(req.args, 'scale')
+    const opts = scale !== undefined ? { scale } : undefined
+    const buffer = await conn.captureScreenshot(opts)
+    const ext = scale !== undefined && scale < 1 ? 'jpg' : 'png'
+    const filename = `agent-view-screenshot-${Date.now()}.${ext}`
     const filepath = join(tmpdir(), filename)
     await writeFile(filepath, buffer)
 

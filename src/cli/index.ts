@@ -96,6 +96,7 @@ program
   .command('screenshot')
   .description('Capture screenshot and save to temp dir')
   .option('-w, --window <id>', 'Target window ID or name')
+  .option('-s, --scale <factor>', 'Scale factor 0..1 — reduces image size and Claude vision token cost (e.g. 0.5)', parseFloat)
   .action(async (options) => {
     const config = requireConfig()
     await runScreenshot(config, options)
