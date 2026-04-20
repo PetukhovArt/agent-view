@@ -8,6 +8,8 @@ export type CDPTarget = {
 
 export type CDPConnection = {
   getAccessibilityTree: () => Promise<AXNode[]>
+  /** Returns matching nodes by accessible name/role. null = API unavailable; [] = no match. */
+  queryAXTree: (params: { accessibleName?: string; role?: string }) => Promise<AXNode[] | null>
   captureScreenshot: () => Promise<Buffer>
   clickByNodeId: (backendNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>

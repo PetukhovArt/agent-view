@@ -32,6 +32,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       Accessibility: {
         enable: vi.fn().mockResolvedValue({}),
         getFullAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
+        queryAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
       },
       Page: { enable: vi.fn().mockResolvedValue({}), captureScreenshot: vi.fn().mockResolvedValue({ data: '' }), frameNavigated: vi.fn() },
       DOM: {
@@ -39,6 +40,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         resolveNode: mockDomResolve,
         getBoxModel: mockDomBoxModel,
         focus: vi.fn().mockResolvedValue({}),
+        getDocument: vi.fn().mockResolvedValue({ root: { backendNodeId: 1 } }),
       },
       Input: { dispatchMouseEvent: mockDispatchMouse },
       close: vi.fn().mockResolvedValue({}),

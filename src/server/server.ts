@@ -39,6 +39,34 @@ function argBool(args: Record<string, unknown>, key: string): boolean | undefine
   return typeof v === 'boolean' ? v : undefined
 }
 
+const ARIA_ROLES = new Set([
+  'button', 'link', 'menuitem', 'tab', 'checkbox', 'radio',
+  'textbox', 'searchbox', 'combobox', 'spinbutton', 'textarea',
+  'listitem', 'option', 'treeitem', 'cell', 'row', 'heading',
+])
+
+type ParsedFilter =
+  | { kind: 'simple'; name: string; role?: string }
+  | { kind: 'heuristic'; raw: string }
+
+export function parseFilter(filter: string): ParsedFilter {
+  // "role:name" syntax — only recognized ARIA roles to prevent false matches (e.g. "localhost:3000")
+  const colonIdx = filter.indexOf(':')
+  if (colonIdx > 0) {
+    const role = filter.slice(0, colonIdx).trim().toLowerCase()
+    const name = filter.slice(colonIdx + 1).trim()
+    if (name && ARIA_ROLES.has(role)) {
+      return { kind: 'simple', name, role }
+    }
+  }
+  // heuristic: starts with ~ or contains regex special chars
+  if (filter.startsWith('~') || /[.*+?^${}()|[\]\\]/.test(filter)) {
+    return { kind: 'heuristic', raw: filter }
+  }
+  // plain string → accessible name lookup
+  return { kind: 'simple', name: filter }
+}
+
 export class AgentViewServer {
   private server: Server | null = null
   private connections = new Map<string, CDPConnection>()
@@ -247,6 +275,44 @@ export class AgentViewServer {
     targetId: string,
     preferRoles?: Set<string>,
   ): Promise<{ backendDOMNodeId: number; name: string } | null> {
+    const parsed = parseFilter(filter)
+
+    if (parsed.kind === 'simple') {
+      const queryNodes = await conn.queryAXTree({ accessibleName: parsed.name, role: parsed.role })
+      if (queryNodes !== null) {
+        // queryAXTree is available — use targeted path, no full-tree fallback on miss
+        if (queryNodes.length === 0) return null
+
+        // Assign refs to found nodes directly (they're already the match result)
+        const startRef = this.refStore.getNextRef()
+        let refNum = startRef
+        const refs: Array<{ ref: number; backendDOMNodeId: number }> = []
+        for (const node of queryNodes) {
+          if (node.backendDOMNodeId) {
+            refs.push({ ref: refNum++, backendDOMNodeId: node.backendDOMNodeId })
+          }
+        }
+        this.refStore.store(refs, req.port, targetId, refNum)
+
+        if (refs.length === 0) return null
+
+        // Prefer a node whose role matches preferRoles
+        if (preferRoles) {
+          for (let i = 0; i < queryNodes.length; i++) {
+            const node = queryNodes[i]
+            if (node.backendDOMNodeId && preferRoles.has(node.role?.value ?? '')) {
+              return { backendDOMNodeId: node.backendDOMNodeId, name: node.name?.value ?? parsed.name }
+            }
+          }
+        }
+        const first = queryNodes.find(n => n.backendDOMNodeId)
+        if (!first?.backendDOMNodeId) return null
+        return { backendDOMNodeId: first.backendDOMNodeId, name: first.name?.value ?? parsed.name }
+      }
+      // queryAXTree unavailable → fall through to full-tree path
+    }
+
+    // Full-tree path: used for heuristic filters or when queryAXTree is unavailable
     const nodes = await conn.getAccessibilityTree()
     const { refs, nextRef } = formatAccessibilityTree(nodes, {
       filter,

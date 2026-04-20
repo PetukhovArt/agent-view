@@ -39,7 +39,20 @@ export async function connectToTarget(port: number, targetId: string, cache: AxT
   await DOM.enable()
   await Accessibility.enable()
 
-  Page.frameNavigated(() => cache.invalidate(cacheKey))
+  // Fetch document root once — needed as subtree root for Accessibility.queryAXTree
+  const { root } = await DOM.getDocument({ depth: 0 })
+  let documentBackendNodeId: number = root.backendNodeId
+
+  // null = not yet tested; true = available; false = unavailable (API not supported)
+  let queryAXTreeAvailable: boolean | null = null
+
+  Page.frameNavigated(async () => {
+    cache.invalidate(cacheKey)
+    try {
+      const { root: newRoot } = await DOM.getDocument({ depth: 0 })
+      documentBackendNodeId = newRoot.backendNodeId
+    } catch { /* ignore refresh errors — next queryAXTree call will fall back */ }
+  })
 
   async function dispatchClick(x: number, y: number): Promise<void> {
     // Send both events before awaiting either — browser processes WS messages in order,
@@ -65,6 +78,23 @@ export async function connectToTarget(port: number, targetId: string, cache: AxT
       const result = nodes as AXNode[]
       cache.set(cacheKey, result)
       return result
+    },
+
+    async queryAXTree({ accessibleName, role }: { accessibleName?: string; role?: string }): Promise<AXNode[] | null> {
+      if (queryAXTreeAvailable === false) return null
+      try {
+        const { nodes } = await Accessibility.queryAXTree({
+          backendNodeId: documentBackendNodeId,
+          accessibleName,
+          role,
+        })
+        queryAXTreeAvailable = true
+        return nodes as AXNode[]
+      } catch {
+        // API unavailable (Chromium < M86 or Electron < 11)
+        queryAXTreeAvailable = false
+        return null
+      }
     },
 
     async captureScreenshot(): Promise<Buffer> {
