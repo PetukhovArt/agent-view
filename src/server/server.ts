@@ -49,6 +49,43 @@ type ParsedFilter =
   | { kind: 'simple'; name: string; role?: string }
   | { kind: 'heuristic'; raw: string }
 
+export function resolveDepth(filter: string | undefined, explicit: number | undefined): number | undefined {
+  if (explicit !== undefined) return explicit
+  if (filter !== undefined) return undefined  // unlimited depth when filtering
+  return 4  // default snapshot depth
+}
+
+export async function textContentFallback(conn: CDPConnection, filter: string): Promise<string> {
+  const safeFilter = JSON.stringify(filter)
+  const js = `(() => {
+    const q = ${safeFilter};
+    const results = [];
+    for (const el of document.querySelectorAll('body *')) {
+      if (results.length >= 5) break;
+      const directText = Array.from(el.childNodes)
+        .filter(n => n.nodeType === Node.TEXT_NODE)
+        .map(n => n.textContent.trim())
+        .join(' ');
+      if (directText.toLowerCase().includes(q.toLowerCase()) && el.offsetParent !== null) {
+        const id = el.id ? '#' + el.id : '';
+        const cls = el.className && typeof el.className === 'string' && el.className.trim()
+          ? '.' + el.className.trim().split(/\\s+/)[0] : '';
+        results.push(el.tagName.toLowerCase() + id + cls);
+      }
+    }
+    return results.length ? results.join(', ') : null;
+  })()`
+
+  const result = await conn.evaluate(js)
+  if (!result || typeof result !== 'string') {
+    return `(no text-match for "${filter}")`
+  }
+
+  return result.split(', ')
+    .map(loc => `[text-match] "${filter}" found in ${loc} (no accessible role in AX tree)`)
+    .join('\n')
+}
+
 export function parseFilter(filter: string): ParsedFilter {
   // "role:name" syntax — only recognized ARIA roles to prevent false matches (e.g. "localhost:3000")
   const colonIdx = filter.indexOf(':')
@@ -256,14 +293,21 @@ export class AgentViewServer {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
 
+    const filter = argStr(req.args, 'filter')
+    const useText = argBool(req.args, 'text') ?? false
+
     const nodes = await conn.getAccessibilityTree()
     const { text, refs, nextRef } = formatAccessibilityTree(nodes, {
-      filter: argStr(req.args, 'filter'),
-      depth: argNum(req.args, 'depth'),
+      filter,
+      depth: resolveDepth(filter, argNum(req.args, 'depth')),
       startRef: this.refStore.getNextRef(),
     })
 
     this.refStore.store(refs, req.port, targetId, nextRef)
+
+    if (useText && filter && text.startsWith('(no matching')) {
+      return { ok: true, data: await textContentFallback(conn, filter) }
+    }
 
     return { ok: true, data: text }
   }

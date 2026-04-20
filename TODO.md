@@ -9,6 +9,8 @@ Goal: minimize Claude context tokens consumed per verification call.
 - [x] DOM-first workflow in SKILL.md — screenshot only for final visual confirm
 - [x] AX tree cache (300ms TTL) — avoids redundant CDP roundtrips
 - [x] `queryAXTree` targeted lookup — skips full-tree fetch on plain-string filters
+- [x] `dom --text` — textContent fallback when element has no ARIA role in AX tree
+- [x] `resolveDepth` — auto unlimited depth when `--filter` set; depth=4 default otherwise
 
 ## Planned
 

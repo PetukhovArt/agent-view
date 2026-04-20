@@ -1,6 +1,26 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseFilter } from './server.js'
+import { parseFilter, resolveDepth, textContentFallback } from './server.js'
 import type { CDPConnection, AXNode } from '../cdp/types.js'
+
+// ── resolveDepth ──────────────────────────────────────────────────────────────
+
+describe('resolveDepth', () => {
+  it('no filter, no explicit → 4 (readable snapshot default)', () => {
+    expect(resolveDepth(undefined, undefined)).toBe(4)
+  })
+
+  it('filter present, no explicit → undefined (unlimited depth)', () => {
+    expect(resolveDepth('button', undefined)).toBeUndefined()
+  })
+
+  it('explicit depth always wins regardless of filter', () => {
+    expect(resolveDepth('button', 2)).toBe(2)
+  })
+
+  it('explicit depth wins when no filter', () => {
+    expect(resolveDepth(undefined, 3)).toBe(3)
+  })
+})
 
 // ── parseFilter ───────────────────────────────────────────────────────────────
 
@@ -37,6 +57,31 @@ describe('parseFilter', () => {
   it('filter with only colon → simple (no role)', () => {
     const result = parseFilter(':name')
     expect(result.kind).toBe('simple')
+  })
+})
+
+// ── textContentFallback ───────────────────────────────────────────────────────
+
+describe('textContentFallback', () => {
+  it('returns (no text-match) when evaluate returns null', async () => {
+    const conn = makeMockConn({ evaluate: vi.fn().mockResolvedValue(null) })
+    const result = await textContentFallback(conn, '1 section found')
+    expect(result).toMatch(/no text-match/i)
+  })
+
+  it('returns formatted [text-match] lines when evaluate finds elements', async () => {
+    const conn = makeMockConn({ evaluate: vi.fn().mockResolvedValue('p#search-hint') })
+    const result = await textContentFallback(conn, '1 section found')
+    expect(result).toContain('[text-match]')
+    expect(result).toContain('p#search-hint')
+  })
+
+  it('passes safe JSON-encoded filter to evaluate (no injection)', async () => {
+    const evaluateMock = vi.fn().mockResolvedValue(null)
+    const conn = makeMockConn({ evaluate: evaluateMock })
+    await textContentFallback(conn, 'a"b\\nc')
+    const expr = evaluateMock.mock.calls[0][0] as string
+    expect(expr).toContain('"a\\"b\\\\nc"')  // JSON.stringify output in the expression
   })
 })
 

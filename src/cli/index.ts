@@ -55,6 +55,7 @@ program
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-f, --filter <text>', 'Filter by text/name')
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
+  .option('--text', 'Fall back to DOM textContent search when AX tree returns no match')
   .action(async (options) => {
     const config = requireConfig()
     await runDom(config, options)
