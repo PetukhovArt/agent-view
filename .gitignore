@@ -140,6 +140,9 @@ vite.config.ts.timestamp-*
 
 .idea
 
+# Benchmark run results (baseline.json is committed, results.json is not)
+bench/results.json
+
 # Personal/dev files
 .claude*
 !.claude-plugin

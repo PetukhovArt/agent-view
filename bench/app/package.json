@@ -1,0 +1,12 @@
+{
+  "name": "agent-view-bench-app",
+  "version": "1.0.0",
+  "description": "Minimal Electron app for agent-view benchmarking",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron main.js --remote-debugging-port=19222"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>agent-view benchmark</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .section { margin-bottom: 24px; padding: 16px; border: 1px solid #ccc; }
+    .hidden-section { display: none; }
+    label { display: block; margin: 4px 0; }
+    input { margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <nav aria-label="Main navigation">
+    <a href="#actions">Actions</a>
+    <a href="#inputs">Inputs</a>
+    <a href="#lists">Lists</a>
+    <a href="#form">Form</a>
+    <a href="#links">Links</a>
+    <a href="#checks">Checkboxes</a>
+    <a href="#extra">Extra Buttons</a>
+    <a href="#search">Search</a>
+    <a href="#modal">Modal</a>
+    <a href="#table">Table</a>
+  </nav>
+
+  <main>
+    <h1>Benchmark App</h1>
+
+    <section id="actions" class="section" aria-labelledby="actions-heading">
+      <h2 id="actions-heading">Actions</h2>
+      <button>Button 1</button>
+      <button>Button 2</button>
+      <button>Button 3</button>
+      <button>Button 4</button>
+      <button>Button 5</button>
+      <button>Button 6</button>
+      <button>Button 7</button>
+      <button>Button 8</button>
+      <button>Button 9</button>
+      <button>Button 10</button>
+      <button>Button 11</button>
+      <button>Button 12</button>
+      <button>Button 13</button>
+      <button>Button 14</button>
+      <button>Button 15</button>
+      <button>Button 16</button>
+      <button>Button 17</button>
+      <button>Button 18</button>
+      <button>Button 19</button>
+      <button>Button 20</button>
+    </section>
+
+    <section id="inputs" class="section" aria-labelledby="inputs-heading">
+      <h2 id="inputs-heading">Inputs</h2>
+      <label>Input 1 <input type="text" aria-label="Input 1"></label>
+      <label>Input 2 <input type="text" aria-label="Input 2"></label>
+      <label>Input 3 <input type="text" aria-label="Input 3"></label>
+      <label>Input 4 <input type="text" aria-label="Input 4"></label>
+      <label>Input 5 <input type="text" aria-label="Input 5"></label>
+      <label>Input 6 <input type="text" aria-label="Input 6"></label>
+      <label>Input 7 <input type="text" aria-label="Input 7"></label>
+      <label>Input 8 <input type="text" aria-label="Input 8"></label>
+      <label>Input 9 <input type="text" aria-label="Input 9"></label>
+      <label>Input 10 <input type="text" aria-label="Input 10"></label>
+    </section>
+
+    <section id="lists" class="section" aria-labelledby="lists-heading">
+      <h2 id="lists-heading">Lists</h2>
+      <ul aria-label="List A">
+        <li>Item A1</li><li>Item A2</li><li>Item A3</li><li>Item A4</li><li>Item A5</li>
+        <li>Item A6</li><li>Item A7</li><li>Item A8</li><li>Item A9</li><li>Item A10</li>
+      </ul>
+      <ul aria-label="List B">
+        <li>Item B1</li><li>Item B2</li><li>Item B3</li><li>Item B4</li><li>Item B5</li>
+        <li>Item B6</li><li>Item B7</li><li>Item B8</li><li>Item B9</li><li>Item B10</li>
+      </ul>
+      <ul aria-label="List C">
+        <li>Item C1</li><li>Item C2</li><li>Item C3</li><li>Item C4</li><li>Item C5</li>
+        <li>Item C6</li><li>Item C7</li><li>Item C8</li><li>Item C9</li><li>Item C10</li>
+      </ul>
+    </section>
+
+    <section id="links" class="section" aria-labelledby="links-heading">
+      <h2 id="links-heading">Links</h2>
+      <a href="#">Link 1</a> <a href="#">Link 2</a> <a href="#">Link 3</a>
+      <a href="#">Link 4</a> <a href="#">Link 5</a> <a href="#">Link 6</a>
+      <a href="#">Link 7</a> <a href="#">Link 8</a> <a href="#">Link 9</a>
+      <a href="#">Link 10</a> <a href="#">Link 11</a> <a href="#">Link 12</a>
+      <a href="#">Link 13</a> <a href="#">Link 14</a> <a href="#">Link 15</a>
+      <a href="#">Link 16</a> <a href="#">Link 17</a> <a href="#">Link 18</a>
+      <a href="#">Link 19</a> <a href="#">Link 20</a>
+    </section>
+
+    <section id="checks" class="section" aria-labelledby="checks-heading">
+      <h2 id="checks-heading">Checkboxes</h2>
+      <label><input type="checkbox" aria-label="Check 1"> Check 1</label>
+      <label><input type="checkbox" aria-label="Check 2"> Check 2</label>
+      <label><input type="checkbox" aria-label="Check 3"> Check 3</label>
+      <label><input type="checkbox" aria-label="Check 4"> Check 4</label>
+      <label><input type="checkbox" aria-label="Check 5"> Check 5</label>
+      <label><input type="checkbox" aria-label="Check 6"> Check 6</label>
+      <label><input type="checkbox" aria-label="Check 7"> Check 7</label>
+      <label><input type="checkbox" aria-label="Check 8"> Check 8</label>
+      <label><input type="checkbox" aria-label="Check 9"> Check 9</label>
+      <label><input type="checkbox" aria-label="Check 10"> Check 10</label>
+    </section>
+
+    <section id="form" class="section" aria-labelledby="form-heading">
+      <h2 id="form-heading">Form</h2>
+      <form>
+        <fieldset>
+          <legend>Choose option</legend>
+          <label><input type="radio" name="opt" value="a"> Option A</label>
+          <label><input type="radio" name="opt" value="b"> Option B</label>
+          <label><input type="radio" name="opt" value="c"> Option C</label>
+        </fieldset>
+        <label>Name <input type="text" aria-label="Name"></label>
+        <label>Email <input type="email" aria-label="Email"></label>
+        <button type="submit">Submit</button>
+        <button type="reset">Reset</button>
+      </form>
+    </section>
+
+    <section id="extra" class="section" aria-labelledby="extra-heading">
+      <h2 id="extra-heading">Extra Buttons</h2>
+      <button>Save</button>
+      <button>Cancel</button>
+      <button>Delete</button>
+      <button>Edit</button>
+      <button>Copy</button>
+      <button>Paste</button>
+      <button>Undo</button>
+      <button>Redo</button>
+      <button>Print</button>
+      <button>Export</button>
+      <button>Import</button>
+      <button>Refresh</button>
+      <button>Filter</button>
+      <button>Sort</button>
+      <button>Search</button>
+    </section>
+
+    <section id="search" class="section" aria-labelledby="search-heading">
+      <h2 id="search-heading">Search</h2>
+      <label>Search <input type="search" role="searchbox" aria-label="Search"></label>
+    </section>
+
+    <section id="hidden-a" class="section" aria-hidden="true">
+      <h2>Hidden Modal A</h2>
+      <button>Hidden Button A1</button>
+      <button>Hidden Button A2</button>
+      <p>This section is hidden from accessibility tree.</p>
+    </section>
+
+    <section id="hidden-b" class="section" aria-hidden="true">
+      <h2>Hidden Modal B</h2>
+      <button>Hidden Button B1</button>
+      <p>This section is also hidden.</p>
+    </section>
+
+    <section id="async-container" class="section" aria-labelledby="async-heading">
+      <h2 id="async-heading">Async Elements</h2>
+      <p id="async-status">Waiting for async element...</p>
+    </section>
+  </main>
+
+  <script>
+    // Adds "Async Button" after 1500ms — required for wait_match benchmark scenario.
+    // 1500ms gives the benchmark runner time to issue the wait command before the element appears.
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        const container = document.getElementById('async-container')
+        const btn = document.createElement('button')
+        btn.textContent = 'Async Button'
+        container.appendChild(btn)
+        document.getElementById('async-status').textContent = 'Async element ready'
+      }, 1500)
+    })
+  </script>
+</body>
+</html>
