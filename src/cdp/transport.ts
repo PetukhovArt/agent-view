@@ -38,8 +38,11 @@ export async function connectToTarget(port: number, targetId: string): Promise<C
   await Accessibility.enable()
 
   async function dispatchClick(x: number, y: number): Promise<void> {
-    await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
-    await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+    // Send both events before awaiting either — browser processes WS messages in order,
+    // so mouseReleased always follows mousePressed in the event queue (same as Playwright).
+    const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+    const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+    await Promise.all([pressed, released])
   }
 
   return {
@@ -62,12 +65,17 @@ export async function connectToTarget(port: number, targetId: string): Promise<C
     },
 
     async clickByNodeId(backendNodeId: number): Promise<void> {
-      const { object } = await DOM.resolveNode({ backendNodeId })
+      // Batch 1: resolveNode (needed for scroll) and getBoxModel (independent) run in parallel
+      const [{ object }, { model }] = await Promise.all([
+        DOM.resolveNode({ backendNodeId }),
+        DOM.getBoxModel({ backendNodeId }),
+      ])
+      // Batch 2: scroll into view (needs objectId from batch 1)
       await Runtime.callFunctionOn({
         objectId: object.objectId,
         functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
       })
-      const { model } = await DOM.getBoxModel({ backendNodeId })
+      // Batch 3: fire-and-forget mouse events (see dispatchClick)
       const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
       const cx = (x1 + x2 + x3 + x4) / 4
       const cy = (y1 + y2 + y3 + y4) / 4
