@@ -32,8 +32,10 @@ rtk agent-view fill --filter "Search" "form"
 ### 2. Verify search found the Form section
 
 ```bash
-rtk agent-view dom --filter "1 section found" --depth 1
+rtk agent-view dom --filter "1 section found" --depth 2
 ```
+
+`p#search-hint` has `role="status"` so it is exposed in the AX tree.
 
 **PASS**: output contains `1 section found`  
 **FAIL**: text not in DOM → search JS filter not firing; check `index.html` `input` event listener
@@ -56,10 +58,12 @@ Clicks the `<a href="#form">Form</a>` nav link — scrolls to the Form section.
 ### 4. Verify form fields are accessible
 
 ```bash
-rtk agent-view dom --filter "Name" --depth 1
+rtk agent-view dom --filter "Name" --depth 8
 ```
 
-**PASS**: output contains `Name` (the text input with `aria-label="Name"`)  
+Form fields sit 7 levels deep in the AX tree (root → none → none → main → region → generic → label → textbox). Needs `--depth 8`.
+
+**PASS**: output contains `textbox "Name"`  
 **FAIL**: form section not in AX tree → check section is not `display:none`
 
 ---
@@ -111,7 +115,7 @@ agent-view click --filter "Submit"
 ### 9. Verify success message
 
 ```bash
-rtk agent-view dom --filter "Form submitted successfully" --depth 1
+rtk agent-view dom --filter "Form submitted successfully" --depth 8
 ```
 
 **PASS**: output contains `Form submitted successfully`  
@@ -122,7 +126,7 @@ rtk agent-view dom --filter "Form submitted successfully" --depth 1
 ### 10. Verify no error summary visible
 
 ```bash
-rtk agent-view dom --filter "Please fix" --depth 1
+rtk agent-view dom --filter "Please fix" --depth 8
 ```
 
 **PASS**: output contains `(no matching` — error summary is `display:none`, not in AX tree  
@@ -133,7 +137,7 @@ rtk agent-view dom --filter "Please fix" --depth 1
 ### 11. Verify no field-level errors
 
 ```bash
-rtk agent-view dom --filter "is required" --depth 1
+rtk agent-view dom --filter "is required" --depth 8
 ```
 
 **PASS**: output contains `(no matching` — all error spans are hidden  

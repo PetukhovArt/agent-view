@@ -6,7 +6,7 @@
   <style>
     body { font-family: sans-serif; margin: 20px; }
     .section { margin-bottom: 24px; padding: 16px; border: 1px solid #ccc; }
-    .section.hidden-section { display: none; }
+    .hidden-section { display: none; }
     label { display: block; margin: 4px 0; }
     input { margin-left: 8px; }
 
@@ -177,7 +177,7 @@
         Search
         <input type="search" id="search-input" role="searchbox" aria-label="Search" aria-describedby="search-hint" autocomplete="off">
       </label>
-      <p id="search-hint"></p>
+      <p id="search-hint" role="status" aria-live="polite"></p>
       <ul id="search-results" aria-label="Search results"></ul>
     </section>
 
