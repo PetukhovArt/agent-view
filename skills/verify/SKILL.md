@@ -27,10 +27,10 @@ agent-view stop                        # Stop the lazy server
 
 ### DOM Inspection
 ```bash
-agent-view dom                          # DOM accessibility tree (default window)
-agent-view dom --window <id|name>       # Specific window
-agent-view dom --filter "button"        # Filter by text/role
-agent-view dom --depth 3                # Limit tree depth
+rtk agent-view dom                          # DOM accessibility tree (default window)
+rtk agent-view dom --window <id|name>       # Specific window
+rtk agent-view dom --filter "button"        # Filter by text/role
+rtk agent-view dom --depth 3                # Limit tree depth
 ```
 
 ### Interaction
@@ -42,11 +42,12 @@ agent-view fill <ref> "text"            # Type into input field
 
 ### Screenshots
 ```bash
-agent-view screenshot                   # Save PNG to temp dir, print path
-agent-view screenshot --window <id>     # Specific window
+agent-view screenshot --scale 0.5              # Recommended: JPEG at half-res (~3× fewer vision tokens)
+agent-view screenshot --scale 0.5 --window <id>  # Specific window
+agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
 ```
 
-### Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
+### Scene / Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
 
 These commands read the scene graph from canvas-based rendering engines. Skip this section if the project has no `webgl` field in config.
 
@@ -66,10 +67,10 @@ After making code changes:
 
 1. **Determine affected areas** from git diff
 2. **Ensure app is running**: `agent-view launch` or `agent-view discover`
-3. **Inspect DOM**: `agent-view dom --filter "<area>"` — check structure matches expectations
-4. **Take screenshot**: `agent-view screenshot` — capture visual state
-5. **Interact if needed**: `agent-view click`/`fill` → `agent-view dom` to verify state changed
-6. **For canvas apps**: `agent-view scene --diff` to see what changed
+3. **Inspect DOM**: `rtk agent-view dom --filter "<area>" --depth 2` — check structure matches expectations
+4. **Interact if needed**: `agent-view click`/`fill` → `rtk agent-view dom --filter` to verify state changed
+5. **For canvas apps**: `agent-view scene --diff` to see what changed
+6. **Screenshot only for final visual confirm**: `agent-view screenshot --scale 0.5` — captures layout/styling that DOM can't reveal
 
 ### Scenario Execution Mode (from plan)
 
@@ -78,7 +79,7 @@ When UI scenarios are pre-generated (e.g., from a plan file with `## UI Scenario
 1. **Read scenario steps** with symbolic refs (`$var` notation)
 2. **Resolve each $var**: `agent-view dom --filter "<text>" --depth 3` → map to ref ID
 3. **Execute steps** sequentially: fill, click, dom --filter (verify expected outcome)
-4. **Screenshot**: capture on FAIL and at E2E scenario end — not every step
+4. **Screenshot**: `agent-view screenshot --scale 0.5` — only on FAIL and at E2E scenario end, not every step
 5. **Report per-scenario**: PASS / FAIL with reason and evidence
 
 This mode works with any workflow that generates plan files with UI scenarios.
@@ -97,4 +98,16 @@ This mode works with any workflow that generates plan files with UI scenarios.
 - **Multiwindow**: all commands support `--window` flag
 - **Output format**: plain text (DOM, scene), JSON (discover only), file path (screenshot)
 - **Lazy server**: auto-starts on first call, shuts down after 5min idle
-- **Token optimization**: always use `dom --filter` with specific text, limit `--depth` to 2-3
+
+## Token Optimization
+
+Vision tokens dominate cost. One full-res screenshot ≈ 19k tokens (1920×1080, 12 tiles).
+
+| Technique | Savings |
+|---|---|
+| `rtk agent-view dom --filter X --depth 2` | Compresses text output via RTK |
+| `agent-view screenshot --scale 0.5` | ~3× fewer vision tokens (4 tiles) |
+| `agent-view screenshot --scale 0.25` | ~12× fewer vision tokens (1 tile, ~1.6k tokens) |
+| DOM-first: screenshot only for final visual confirm | Eliminates most screenshot calls |
+
+**Default rule**: verify via `rtk agent-view dom --filter` first; only call `screenshot --scale 0.5` for final visual proof or layout bugs that DOM can't reveal.
