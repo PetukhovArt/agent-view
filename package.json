@@ -45,7 +45,7 @@
   },
   "homepage": "https://github.com/PetukhovArt/agent-view#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "chrome-remote-interface": "^0.34.0",
