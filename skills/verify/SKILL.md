@@ -1,7 +1,7 @@
 ---
 name: verify
 description: "Visual verification of desktop app UI after code changes. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM."
-allowed-tools: Bash(agent-view *)
+allowed-tools: Bash(agent-view *), Bash(rtk agent-view *)
 ---
 
 # Visual Verification with agent-view
