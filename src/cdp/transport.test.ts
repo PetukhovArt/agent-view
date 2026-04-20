@@ -33,7 +33,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         enable: vi.fn().mockResolvedValue({}),
         getFullAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
       },
-      Page: { enable: vi.fn().mockResolvedValue({}), captureScreenshot: vi.fn().mockResolvedValue({ data: '' }) },
+      Page: { enable: vi.fn().mockResolvedValue({}), captureScreenshot: vi.fn().mockResolvedValue({ data: '' }), frameNavigated: vi.fn() },
       DOM: {
         enable: vi.fn().mockResolvedValue({}),
         resolveNode: mockDomResolve,
@@ -51,6 +51,7 @@ vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
 
 // Import after mock is registered
 import { connectToTarget } from './transport.js'
+import { AxTreeCache } from './ax-cache.js'
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ describe('clickByNodeId', () => {
   })
 
   it('calls resolveNode and getBoxModel before callFunctionOn (parallel batch)', async () => {
-    const conn = await connectToTarget(9222, 'target-1')
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const resolveIdx = callOrder.indexOf('DOM.resolveNode')
@@ -79,7 +80,7 @@ describe('clickByNodeId', () => {
   })
 
   it('sends mousePressed before mouseReleased', async () => {
-    const conn = await connectToTarget(9222, 'target-1')
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const pressIdx = callOrder.indexOf('Input.mousePressed')
@@ -91,7 +92,7 @@ describe('clickByNodeId', () => {
   })
 
   it('dispatches both mousePressed and mouseReleased events', async () => {
-    const conn = await connectToTarget(9222, 'target-1')
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const mouseCalls = mockDispatchMouse.mock.calls.map((c) => c[0].type)
@@ -104,7 +105,7 @@ describe('clickByNodeId', () => {
     // content = [x1,y1, x2,y2, x3,y3, x4,y4] (tl, tr, br, bl)
     // center = avg(x1,x2,x3,x4), avg(y1,y2,y3,y4)
     // [10,20, 30,20, 30,40, 10,40] → cx=20, cy=30
-    const conn = await connectToTarget(9222, 'target-1')
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const pressCall = mockDispatchMouse.mock.calls.find((c) => c[0].type === 'mousePressed')
@@ -113,7 +114,7 @@ describe('clickByNodeId', () => {
   })
 
   it('passes backendNodeId to both resolveNode and getBoxModel', async () => {
-    const conn = await connectToTarget(9222, 'target-1')
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
     await conn.clickByNodeId(99)
 
     expect(mockDomResolve).toHaveBeenCalledWith({ backendNodeId: 99 })
@@ -121,7 +122,7 @@ describe('clickByNodeId', () => {
   })
 
   it('uses objectId from resolveNode for scroll callFunctionOn', async () => {
-    const conn = await connectToTarget(9222, 'target-1')
+    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
     await conn.clickByNodeId(42)
 
     expect(mockCallFunctionOn).toHaveBeenCalledWith(

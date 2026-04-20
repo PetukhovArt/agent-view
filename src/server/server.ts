@@ -12,6 +12,7 @@ import { launch, isRunning } from './launcher.js'
 import { readConfig } from '../config/manager.js'
 import { RuntimeType, WebGLEngine, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
 import type { CDPConnection } from '../cdp/types.js'
+import { AxTreeCache } from '../cdp/ax-cache.js'
 
 const SERVER_PORT = 47922
 const VALID_COMMANDS = new Set(['discover', 'launch', 'dom', 'click', 'fill', 'screenshot', 'scene', 'snap', 'wait', 'stop'])
@@ -44,6 +45,7 @@ export class AgentViewServer {
   private refStore = new RefStore()
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private sceneCache = new Map<string, SceneNode>()
+  private axTreeCache = new AxTreeCache()
   private token = ''
 
   async start(): Promise<void> {
@@ -179,7 +181,7 @@ export class AgentViewServer {
     let conn = this.connections.get(connKey)
     if (!conn) {
       const adapter = getAdapter(req.runtime)
-      conn = await adapter.connect(req.port, targetId)
+      conn = await adapter.connect(req.port, targetId, this.axTreeCache)
       this.connections.set(connKey, conn)
     }
     return conn
@@ -313,12 +315,14 @@ export class AgentViewServer {
   private async handleClick(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
+    const cacheKey = `${req.port}:${targetId}`
 
     if (req.args.pos && typeof req.args.pos === 'object') {
       const pos = req.args.pos as Record<string, unknown>
       const x = typeof pos.x === 'number' ? pos.x : 0
       const y = typeof pos.y === 'number' ? pos.y : 0
       await conn.clickAtPosition(x, y)
+      this.axTreeCache.invalidate(cacheKey)
       return { ok: true, data: `Clicked at (${x}, ${y})` }
     }
 
@@ -331,6 +335,7 @@ export class AgentViewServer {
         return { ok: false, error: `No element found matching "${filter}"` }
       }
       await conn.clickByNodeId(found.backendDOMNodeId)
+      this.axTreeCache.invalidate(cacheKey)
       return { ok: true, data: `Clicked "${found.name}"` }
     }
 
@@ -344,12 +349,14 @@ export class AgentViewServer {
     }
 
     await conn.clickByNodeId(entry.backendDOMNodeId)
+    this.axTreeCache.invalidate(cacheKey)
     return { ok: true, data: `Clicked ref ${ref}` }
   }
 
   private async handleFill(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getConnection(req, targetId)
+    const cacheKey = `${req.port}:${targetId}`
 
     const value = argStr(req.args, 'value')
     if (value === undefined) {
@@ -365,6 +372,7 @@ export class AgentViewServer {
         return { ok: false, error: `No element found matching "${filter}"` }
       }
       await conn.fillByNodeId(found.backendDOMNodeId, value)
+      this.axTreeCache.invalidate(cacheKey)
       return { ok: true, data: `Filled "${found.name}" with "${value}"` }
     }
 
@@ -378,6 +386,7 @@ export class AgentViewServer {
     }
 
     await conn.fillByNodeId(entry.backendDOMNodeId, value)
+    this.axTreeCache.invalidate(cacheKey)
     return { ok: true, data: `Filled ref ${fillRef} with "${value}"` }
   }
 

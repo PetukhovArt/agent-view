@@ -1,6 +1,7 @@
 // @ts-expect-error no types available for chrome-remote-interface
 import CDP from 'chrome-remote-interface'
 import type { CDPConnection, CDPTarget, AXNode } from './types.js'
+import type { AxTreeCache } from './ax-cache.js'
 
 // CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
 const CDP_HOSTS = ['127.0.0.1', '::1'] as const
@@ -28,14 +29,17 @@ export async function listTargets(port: number): Promise<CDPTarget[]> {
   return result
 }
 
-export async function connectToTarget(port: number, targetId: string): Promise<CDPConnection> {
+export async function connectToTarget(port: number, targetId: string, cache: AxTreeCache): Promise<CDPConnection> {
   const host = targetHostMap.get(`${port}:${targetId}`) ?? 'localhost'
   const client = await CDP({ host, port, target: targetId })
   const { Runtime, Accessibility, Page, DOM, Input } = client
+  const cacheKey = `${port}:${targetId}`
 
   await Page.enable()
   await DOM.enable()
   await Accessibility.enable()
+
+  Page.frameNavigated(() => cache.invalidate(cacheKey))
 
   async function dispatchClick(x: number, y: number): Promise<void> {
     // Send both events before awaiting either — browser processes WS messages in order,
@@ -55,8 +59,12 @@ export async function connectToTarget(port: number, targetId: string): Promise<C
     },
 
     async getAccessibilityTree(): Promise<AXNode[]> {
+      const cached = cache.get(cacheKey)
+      if (cached) return cached
       const { nodes } = await Accessibility.getFullAXTree()
-      return nodes as AXNode[]
+      const result = nodes as AXNode[]
+      cache.set(cacheKey, result)
+      return result
     },
 
     async captureScreenshot(): Promise<Buffer> {
