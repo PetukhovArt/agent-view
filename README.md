@@ -26,6 +26,32 @@ Code → Launch → See → Verify → Fix → See again
 
 The agent writes code, then immediately checks what the user would see. If something's wrong, it fixes and re-checks — no human needed. This catches problems that builds and tests miss: CSS regressions, broken layouts, missing error messages, silent IPC failures.
 
+## Performance
+
+AI agents run dozens of `dom → click → dom` verification cycles per session. Every millisecond compounds. agent-view v0.2.0 is built specifically for this pattern.
+
+### Benchmark results (Electron app, ~200 AX nodes)
+
+| Scenario | v0.1.0 | v0.2.0 | vs Playwright* |
+|---|---|---|---|
+| `dom` cold fetch | 10ms | 2ms | ~30–80ms |
+| `dom` warm (cache hit) | 10ms | 1ms | ~30–80ms |
+| Full cycle `dom → click → dom` | 27ms | 17ms | ~75ms |
+| `click --filter "Save"` | 12ms | 17ms† | ~15–30ms |
+
+\* *Playwright estimate based on architectural analysis — no published Electron-specific benchmarks exist*
+† *queryAXTree has CDP overhead that exceeds the benefit on small DOMs; improves on large production DOMs (1000+ nodes)*
+
+### What makes it fast
+
+**AX tree cache (300ms TTL).** The single biggest win. When an agent calls `dom`, then immediately `click --filter`, the second fetch hits the in-process cache instead of making a CDP round-trip. Cache is invalidated aggressively — busted on every `click`, `fill`, or page navigation.
+
+**Parallel CDP calls in click.** Previously 5 serial round-trips; now 3 parallel batches. `DOM.resolveNode` and `DOM.getBoxModel` run concurrently, then mouse events fire back-to-back without waiting for each response (the same approach Playwright uses internally).
+
+**`Accessibility.queryAXTree` for targeted lookups.** Plain string filters (`click --filter "Save"`) and `role:name` filters (`click --filter "button:Save"`) query the browser directly instead of fetching the full tree. Falls back gracefully on older Electron versions.
+
+**Raw CDP, no relay.** No Playwright client-server relay between your agent and the browser. The server process holds the CDP WebSocket connection and reuses it across commands.
+
 ## Enabling CDP
 
 ### Recommended: in code (reliable, works with any build tool)
