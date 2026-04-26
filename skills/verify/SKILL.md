@@ -38,7 +38,16 @@ rtk agent-view dom --depth 3                # Limit tree depth
 agent-view click <ref>                  # Click element by ref from dom output
 agent-view click --pos 100,200          # Click by coordinates (for canvas)
 agent-view fill <ref> "text"            # Type into input field
+agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
+agent-view drag --from-pos 50,80 --to-pos 200,300  # Drag by coordinates (for canvas / Pixi)
+agent-view drag --from <ref> --to <ref> --steps 25 --hold-ms 60  # Smoother movement, longer hold
 ```
+
+`drag` dispatches `mousePressed` → N × `mouseMoved` → `mouseReleased` via CDP. Endpoints can mix
+ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targets always use
+`--from-pos`/`--to-pos` — derive the centroid via `agent-view eval` from the scene graph.
+Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.
+Increase `--steps` for handlers using `globalpointermove` so intermediate frames are not skipped.
 
 ### Screenshots
 ```bash
