@@ -23,6 +23,7 @@ import { runWait } from './commands/wait.js'
 import { runTargets } from './commands/targets.js'
 import { runEval } from './commands/eval.js'
 import { runConsole } from './commands/console.js'
+import { runWatch } from './commands/watch.js'
 import type { AgentViewConfig } from '../config/types.js'
 
 const program = new Command()
@@ -181,6 +182,21 @@ program
   .action(async (options) => {
     const config = requireConfig()
     await runConsole(config, options)
+  })
+
+program
+  .command('watch <expression>')
+  .description('Watch a JS expression and stream JSON-patch diffs (requires "allowEval": true)')
+  .option('--interval <ms>', 'Polling interval (default 250, min 50)')
+  .option('--duration <s>', 'Stop after N seconds (default 30)')
+  .option('--max-changes <n>', 'Stop after N diffs (default 10)')
+  .option('--until <expression>', 'Stop when this JS expression becomes truthy')
+  .option('--json', 'NDJSON output, one frame per line')
+  .option('-t, --target <id>', 'Target by CDP id, title, or URL substring')
+  .option('-w, --window <id>', 'Page-target by id or title')
+  .action(async (expression, options) => {
+    const config = requireConfig()
+    await runWatch(config, expression, options)
   })
 
 program

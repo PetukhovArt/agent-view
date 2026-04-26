@@ -25,6 +25,8 @@ import {
 import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
+import { WatchSession } from './watch-session.js'
+import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
 
 const SERVER_PORT = 47922
 const VALID_RUNTIMES = new Set<RuntimeType>(Object.values(RuntimeType))
@@ -139,6 +141,7 @@ export class AgentViewServer {
   private axTreeCache = new AxTreeCache()
   private consoleStream = new ConsoleStream()
   private token = ''
+  private activeWatches = new Set<WatchSession>()
 
   private readonly handlers = {
     discover: (req: ServerRequest) => this.handleDiscover(req),
@@ -157,7 +160,8 @@ export class AgentViewServer {
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
-  private readonly validCommands: ReadonlySet<string> = new Set(Object.keys(this.handlers))
+  private readonly streamingCommands: ReadonlySet<string> = new Set(['watch'])
+  private readonly validCommands: ReadonlySet<string> = new Set([...Object.keys(this.handlers), ...this.streamingCommands])
 
   async start(): Promise<void> {
     mkdirSync(TOKEN_DIR, { recursive: true })
@@ -176,6 +180,11 @@ export class AgentViewServer {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
+    if (this.activeWatches.size > 0) {
+      // Pause idle shutdown while streaming handlers are alive.
+      this.idleTimer = null
+      return
+    }
     this.idleTimer = setTimeout(() => this.shutdown(), IDLE_TIMEOUT_MS)
   }
 
@@ -221,6 +230,10 @@ export class AgentViewServer {
       }
       if (!request.args || typeof request.args !== 'object' || Array.isArray(request.args)) {
         socket.end(JSON.stringify({ ok: false, error: 'Invalid args' } satisfies ServerResponse) + DELIMITER)
+        return
+      }
+      if (this.streamingCommands.has(request.command)) {
+        await this.handleWatchStreaming(request, socket)
         return
       }
       const response = await this.handleCommand(request)
@@ -774,6 +787,92 @@ export class AgentViewServer {
     }
   }
 
+  private async handleWatchStreaming(req: ServerRequest, socket: Socket): Promise<void> {
+    const writeFrame = (frame: WatchFrame): boolean => {
+      if (socket.writableEnded || socket.destroyed) return false
+      return socket.write(JSON.stringify(frame) + DELIMITER)
+    }
+    const writeError = (msg: string): void => {
+      if (!socket.writableEnded && !socket.destroyed) {
+        socket.end(JSON.stringify({ ok: false, error: msg } satisfies ServerResponse) + DELIMITER)
+      }
+    }
+
+    const cwd = argStr(req.args, 'cwd')
+    if (!cwd) return writeError('watch requires cwd to validate allowEval policy')
+    const config = readConfig(resolve(cwd))
+    if (!config?.allowEval) {
+      return writeError('watch is disabled. Set "allowEval": true in agent-view.config.json to enable.')
+    }
+
+    const expression = argStr(req.args, 'expression')
+    if (!expression) return writeError('watch requires --expression')
+
+    const intervalRaw = argNum(req.args, 'intervalMs') ?? 250
+    const intervalMs = Math.max(WATCH_MIN_INTERVAL_MS, intervalRaw)
+    const durationS = argNum(req.args, 'durationS') ?? 30
+    const maxChanges = argNum(req.args, 'maxChanges') ?? 10
+    const until = argStr(req.args, 'until')
+
+    if (maxChanges <= 0) return writeError('--max-changes must be > 0')
+    if (durationS <= 0) return writeError('--duration must be > 0')
+
+    let target: TargetInfo
+    try {
+      target = await this.resolveTarget(req)
+    } catch (err) {
+      return writeError(err instanceof Error ? err.message : String(err))
+    }
+    if (!RUNTIME_ONLY_TARGETS.has(target.type) && target.type !== TargetType.Page && target.type !== TargetType.Iframe) {
+      return writeError(`Target type "${target.type}" does not support watch.`)
+    }
+
+    let session: RuntimeSession
+    try {
+      session = await this.getRuntimeSession(req, target)
+    } catch (err) {
+      return writeError(err instanceof Error ? err.message : String(err))
+    }
+
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer)
+      this.idleTimer = null
+    }
+
+    const watch = new WatchSession(session, {
+      expression,
+      intervalMs,
+      durationS,
+      maxChanges,
+      until,
+      emit: writeFrame,
+    })
+    this.activeWatches.add(watch)
+
+    const cleanup = (): void => {
+      if (!this.activeWatches.has(watch)) return
+      this.activeWatches.delete(watch)
+      if (!socket.writableEnded && !socket.destroyed) socket.end()
+      if (this.activeWatches.size === 0) this.resetIdleTimer()
+    }
+    watch.onStop(cleanup)
+
+    socket.on('close', () => {
+      // Client closed (e.g. SIGINT). Stop watch with sigint reason if not already stopped.
+      watch.stop(StopReason.Sigint, true)
+    })
+    socket.on('error', () => {
+      watch.stop(StopReason.Sigint, true)
+    })
+
+    try {
+      await watch.start()
+    } catch (err) {
+      writeFrame({ type: 'error', ts: new Date().toISOString(), message: err instanceof Error ? err.message : String(err) })
+      watch.stop(StopReason.EvalFailed, false)
+    }
+  }
+
   private async handleConsole(req: ServerRequest): Promise<ServerResponse> {
     const cwd = argStr(req.args, 'cwd')
     const config = cwd ? readConfig(resolve(cwd)) : null
@@ -868,6 +967,9 @@ export class AgentViewServer {
 
   private async shutdown(): Promise<void> {
     if (this.idleTimer) clearTimeout(this.idleTimer)
+    for (const watch of [...this.activeWatches]) {
+      watch.stop(StopReason.ServerShutdown, false)
+    }
     await unlink(TOKEN_PATH).catch(() => {})
 
     this.consoleStream.detach()
