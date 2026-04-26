@@ -1,4 +1,4 @@
-import { getExtractor } from './registry.js'
+import { getAdapter } from './registry.js'
 import { formatNode, diffScenes } from './formatter.js'
 import type { RuntimeSession } from '../../cdp/types.js'
 import type { WebGLEngine } from '../../types.js'
@@ -12,8 +12,7 @@ export async function getSceneGraph(
   if (!engine) {
     return 'No WebGL engine configured. Add "webgl": { "engine": "pixi" } to agent-view.config.json'
   }
-  const extractor = getExtractor(engine)
-  const tree = await extractor.extract(conn)
+  const tree = await extract(conn, engine)
   if (!tree) {
     return `No ${engine} scene found`
   }
@@ -30,9 +29,14 @@ export async function getRawScene(
   engine: WebGLEngine | undefined,
 ): Promise<SceneNode | null> {
   if (!engine) return null
-  const extractor = getExtractor(engine)
-  return extractor.extract(conn)
+  return extract(conn, engine)
+}
+
+async function extract(conn: RuntimeSession, engine: WebGLEngine): Promise<SceneNode | null> {
+  const adapter = getAdapter(engine)
+  const raw = await conn.evaluate(adapter.extractScript)
+  return adapter.normalize(raw)
 }
 
 export { diffScenes } from './formatter.js'
-export type { SceneNode, SceneOptions } from './types.js'
+export type { SceneNode, SceneOptions, SceneAdapter } from './types.js'

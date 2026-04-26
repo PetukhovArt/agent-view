@@ -1,15 +1,15 @@
 import { WebGLEngine } from '../../types.js'
-import type { SceneExtractor } from './types.js'
-import { pixiExtractor } from './pixi.js'
+import type { SceneAdapter } from './types.js'
+import { pixiAdapter } from './adapters/pixi/index.js'
 
-const extractors: Partial<Record<WebGLEngine, SceneExtractor>> = {
-  [WebGLEngine.Pixi]: pixiExtractor,
+const adapters: Partial<Record<WebGLEngine, SceneAdapter>> = {
+  [WebGLEngine.Pixi]: pixiAdapter,
 }
 
-export function getExtractor(engine: WebGLEngine): SceneExtractor {
-  const extractor = extractors[engine]
-  if (!extractor) {
-    throw new Error(`Scene extractor for "${engine}" is not implemented yet`)
+export function getAdapter(engine: WebGLEngine): SceneAdapter {
+  const adapter = adapters[engine]
+  if (!adapter) {
+    throw new Error(`Scene adapter for "${engine}" is not implemented yet`)
   }
-  return extractor
+  return adapter
 }

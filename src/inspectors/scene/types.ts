@@ -7,14 +7,11 @@ export type SceneNode = {
   x: number
   y: number
   visible: boolean
-  tint: string
-  alpha?: number
-  scaleX?: number
-  scaleY?: number
-  rotation?: number
-  width?: number
-  height?: number
   children?: SceneNode[]
+  // Always shown inline (e.g. Pixi tint). Pre-formatted by the adapter.
+  extras?: Record<string, string>
+  // Shown only with --verbose (e.g. alpha, scale, rotation).
+  verboseExtras?: Record<string, string>
 }
 
 export type SceneOptions = {
@@ -28,7 +25,9 @@ export type SceneDiffResult = {
   snapshot: SceneNode
 }
 
-export type SceneExtractor = {
+export type SceneAdapter = {
   readonly engine: WebGLEngine
-  extract(conn: RuntimeSession): Promise<SceneNode | null>
+  readonly extractScript: string
+  // Returns null when the engine isn't present in the page.
+  normalize(raw: unknown): SceneNode | null
 }

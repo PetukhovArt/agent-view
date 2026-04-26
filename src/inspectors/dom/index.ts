@@ -1,4 +1,4 @@
-import type { AXNode } from '../cdp/types.js'
+import type { AXNode } from '../../cdp/types.js'
 
 export type RefEntry = {
   ref: number

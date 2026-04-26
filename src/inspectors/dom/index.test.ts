@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import type { AXNode } from '../cdp/types.js'
-import { formatAccessibilityTree } from './dom.js'
+import type { AXNode } from '../../cdp/types.js'
+import { formatAccessibilityTree } from './index.js'
 
 function node(
   nodeId: string,

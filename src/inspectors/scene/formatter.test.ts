@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatNode, diffScenes, hasMatch } from './formatter.js'
+import { formatNode, diffScenes } from './formatter.js'
 import type { SceneNode, SceneOptions } from './types.js'
 
 function makeScene(overrides: Partial<SceneNode> = {}): SceneNode {
@@ -9,12 +9,6 @@ function makeScene(overrides: Partial<SceneNode> = {}): SceneNode {
     x: 0,
     y: 0,
     visible: true,
-    tint: '0xffffff',
-    alpha: 1,
-    scaleX: 1,
-    scaleY: 1,
-    rotation: 0,
-    children: [],
     ...overrides,
   }
 }
@@ -38,43 +32,37 @@ describe('formatNode', () => {
     expect(lines[0]).toContain('[hidden]')
   })
 
-  it('shows tint when not white (0xffffff)', () => {
-    const node = makeScene({ tint: '0xff0000' })
+  it('shows inline extras (e.g. tint)', () => {
+    const node = makeScene({ extras: { tint: '#ff0000' } })
     const lines = collect(node)
-    expect(lines[0]).toContain('tint=0xff0000')
+    expect(lines[0]).toContain('tint=#ff0000')
   })
 
-  it('skips tint when white (0xffffff)', () => {
-    const node = makeScene({ tint: '0xffffff' })
-    const lines = collect(node)
-    expect(lines[0]).not.toContain('tint=')
-  })
-
-  it('skips tint when white (#ffffff)', () => {
-    const node = makeScene({ tint: '#ffffff' })
+  it('omits inline extras when not provided', () => {
+    const node = makeScene()
     const lines = collect(node)
     expect(lines[0]).not.toContain('tint=')
   })
 
-  it('shows verbose props: alpha when not 1', () => {
-    const node = makeScene({ alpha: 0.5 })
-    const lines = collect(node, { verbose: true })
-    expect(lines[0]).toContain('alpha=0.5')
+  it('shows verbose extras only when --verbose', () => {
+    const node = makeScene({ verboseExtras: { alpha: '0.5' } })
+    expect(collect(node)[0]).not.toContain('alpha=')
+    expect(collect(node, { verbose: true })[0]).toContain('alpha=0.5')
   })
 
-  it('shows verbose props: scale when not (1,1)', () => {
-    const node = makeScene({ scaleX: 2, scaleY: 3 })
+  it('shows verbose extras: scale', () => {
+    const node = makeScene({ verboseExtras: { scale: '(2,3)' } })
     const lines = collect(node, { verbose: true })
     expect(lines[0]).toContain('scale=(2,3)')
   })
 
-  it('shows verbose props: rotation when not 0', () => {
-    const node = makeScene({ rotation: 45 })
+  it('shows verbose extras: rotation', () => {
+    const node = makeScene({ verboseExtras: { rot: '45°' } })
     const lines = collect(node, { verbose: true })
     expect(lines[0]).toContain('rot=45°')
   })
 
-  it('omits verbose props when all defaults', () => {
+  it('omits verbose extras when not provided', () => {
     const node = makeScene()
     const lines = collect(node, { verbose: true })
     expect(lines[0]).not.toContain('alpha=')
@@ -119,9 +107,16 @@ describe('formatNode', () => {
     const child = makeScene({ name: 'hero', type: 'Sprite' })
     const parent = makeScene({ name: 'root', children: [child] })
     const lines = collect(parent, { filter: 'hero' })
-    // parent visible because it has matching child
     expect(lines.some(l => l.includes('root'))).toBe(true)
     expect(lines.some(l => l.includes('hero'))).toBe(true)
+  })
+
+  it('hides non-matching siblings of a matching child', () => {
+    const matching = makeScene({ name: 'hero', type: 'Sprite' })
+    const sibling = makeScene({ name: 'enemy', type: 'Sprite' })
+    const parent = makeScene({ name: 'root', children: [matching, sibling] })
+    const lines = collect(parent, { filter: 'hero' })
+    expect(lines.some(l => l.includes('enemy'))).toBe(false)
   })
 })
 
@@ -143,6 +138,20 @@ describe('diffScenes', () => {
     const curr = makeScene({ visible: false })
     const result = diffScenes(prev, curr)
     expect(result).toContain('visible: true→false')
+  })
+
+  it('detects extras change (e.g. tint)', () => {
+    const prev = makeScene({ extras: { tint: '#ffffff' } })
+    const curr = makeScene({ extras: { tint: '#ff0000' } })
+    const result = diffScenes(prev, curr)
+    expect(result).toContain('tint: #ffffff→#ff0000')
+  })
+
+  it('detects verbose extras change (e.g. alpha)', () => {
+    const prev = makeScene({ verboseExtras: { alpha: '1' } })
+    const curr = makeScene({ verboseExtras: { alpha: '0.5' } })
+    const result = diffScenes(prev, curr)
+    expect(result).toContain('alpha: 1→0.5')
   })
 
   it('detects added child', () => {
@@ -168,29 +177,5 @@ describe('diffScenes', () => {
     const curr = makeScene({ children: [currChild] })
     const result = diffScenes(prev, curr)
     expect(result).toContain('pos: (0,0)→(5,5)')
-  })
-})
-
-describe('hasMatch', () => {
-  it('matches by name (case-insensitive)', () => {
-    const node = makeScene({ name: 'HeroSprite' })
-    expect(hasMatch(node, 'hero')).toBe(true)
-  })
-
-  it('matches by type (case-insensitive)', () => {
-    const node = makeScene({ type: 'Sprite' })
-    expect(hasMatch(node, 'sprite')).toBe(true)
-  })
-
-  it('finds match recursively in children', () => {
-    const child = makeScene({ name: 'targetNode', type: 'Text' })
-    const parent = makeScene({ children: [child] })
-    expect(hasMatch(parent, 'target')).toBe(true)
-  })
-
-  it('returns false when no match', () => {
-    const child = makeScene({ name: 'other', type: 'Sprite' })
-    const parent = makeScene({ name: 'root', children: [child] })
-    expect(hasMatch(parent, 'missing')).toBe(false)
   })
 })

@@ -6,39 +6,43 @@ export function formatNode(node: SceneNode, depth: number, lines: string[], opti
   if (depth > HARD_MAX_DEPTH) return
   if (options.depth !== undefined && depth > options.depth) return
 
-  const matchesFilter = !options.filter ||
-    node.name.toLowerCase().includes(options.filter.toLowerCase()) ||
-    node.type.toLowerCase().includes(options.filter.toLowerCase())
+  const lowerFilter = options.filter?.toLowerCase()
+  if (lowerFilter && !subtreeMatches(node, lowerFilter)) return
 
-  const hasMatchingChildren = options.filter
-    ? (node.children || []).some(c => hasMatch(c, options.filter!))
-    : false
+  lines.push(formatLine(node, depth, options))
 
-  if (matchesFilter || hasMatchingChildren) {
-    const indent = '  '.repeat(depth)
-    const vis = node.visible ? '' : ' [hidden]'
-    const nameStr = node.name ? ` "${node.name}"` : ''
-    let line = `${indent}${node.type}${nameStr} (${node.x},${node.y})${vis}`
-
-    if (node.tint !== '0xffffff' && node.tint !== '#ffffff') {
-      line += ` tint=${node.tint}`
-    }
-
-    if (options.verbose) {
-      const extras: string[] = []
-      if (node.alpha !== undefined && node.alpha !== 1) extras.push(`alpha=${node.alpha}`)
-      if (node.scaleX !== 1 || node.scaleY !== 1) extras.push(`scale=(${node.scaleX},${node.scaleY})`)
-      if (node.rotation !== 0) extras.push(`rot=${node.rotation}°`)
-      if (node.width || node.height) extras.push(`size=${node.width}x${node.height}`)
-      if (extras.length > 0) line += ` ${extras.join(' ')}`
-    }
-
-    lines.push(line)
-  }
-
-  for (const child of node.children || []) {
+  for (const child of node.children ?? []) {
     formatNode(child, depth + 1, lines, options)
   }
+}
+
+function formatLine(node: SceneNode, depth: number, options: SceneOptions): string {
+  const indent = '  '.repeat(depth)
+  const vis = node.visible ? '' : ' [hidden]'
+  const nameStr = node.name ? ` "${node.name}"` : ''
+  let line = `${indent}${node.type}${nameStr} (${node.x},${node.y})${vis}`
+
+  if (node.extras) {
+    for (const [key, value] of Object.entries(node.extras)) {
+      line += ` ${key}=${value}`
+    }
+  }
+  if (options.verbose && node.verboseExtras) {
+    for (const [key, value] of Object.entries(node.verboseExtras)) {
+      line += ` ${key}=${value}`
+    }
+  }
+  return line
+}
+
+function subtreeMatches(node: SceneNode, lowerFilter: string): boolean {
+  if (
+    node.name.toLowerCase().includes(lowerFilter) ||
+    node.type.toLowerCase().includes(lowerFilter)
+  ) {
+    return true
+  }
+  return (node.children ?? []).some(child => subtreeMatches(child, lowerFilter))
 }
 
 export function diffScenes(prev: SceneNode, curr: SceneNode): string {
@@ -53,17 +57,47 @@ function diffNode(prev: SceneNode, curr: SceneNode, depth: number, changes: stri
   const nameStr = curr.name ? ` "${curr.name}"` : ''
   const diffs: string[] = []
 
-  if (prev.x !== curr.x || prev.y !== curr.y) diffs.push(`pos: (${prev.x},${prev.y})→(${curr.x},${curr.y})`)
-  if (prev.visible !== curr.visible) diffs.push(`visible: ${prev.visible}→${curr.visible}`)
-  if (prev.tint !== curr.tint) diffs.push(`tint: ${prev.tint}→${curr.tint}`)
-  if (prev.alpha !== curr.alpha) diffs.push(`alpha: ${prev.alpha}→${curr.alpha}`)
+  if (prev.x !== curr.x || prev.y !== curr.y) {
+    diffs.push(`pos: (${prev.x},${prev.y})→(${curr.x},${curr.y})`)
+  }
+  if (prev.visible !== curr.visible) {
+    diffs.push(`visible: ${prev.visible}→${curr.visible}`)
+  }
+  diffExtras(prev, curr, diffs)
 
   if (diffs.length > 0) {
     changes.push(`${indent}~ ${curr.type}${nameStr}: ${diffs.join(', ')}`)
   }
 
-  const prevChildren = prev.children || []
-  const currChildren = curr.children || []
+  diffChildren(prev, curr, depth, changes, indent)
+}
+
+function diffExtras(prev: SceneNode, curr: SceneNode, diffs: string[]): void {
+  const prevAll = mergeExtras(prev)
+  const currAll = mergeExtras(curr)
+  const keys = new Set([...Object.keys(prevAll), ...Object.keys(currAll)])
+  for (const key of keys) {
+    const before = prevAll[key]
+    const after = currAll[key]
+    if (before !== after) {
+      diffs.push(`${key}: ${before ?? '∅'}→${after ?? '∅'}`)
+    }
+  }
+}
+
+function mergeExtras(node: SceneNode): Record<string, string> {
+  return { ...(node.extras ?? {}), ...(node.verboseExtras ?? {}) }
+}
+
+function diffChildren(
+  prev: SceneNode,
+  curr: SceneNode,
+  depth: number,
+  changes: string[],
+  indent: string,
+): void {
+  const prevChildren = prev.children ?? []
+  const currChildren = curr.children ?? []
   const prevByKey = new Map(prevChildren.map((c, i) => [childKey(c, i), c]))
   const currByKey = new Map(currChildren.map((c, i) => [childKey(c, i), c]))
 
@@ -85,12 +119,4 @@ function diffNode(prev: SceneNode, curr: SceneNode, depth: number, changes: stri
 
 function childKey(node: SceneNode, index: number): string {
   return node.name ? `${node.type}:${node.name}` : `${node.type}:${index}`
-}
-
-export function hasMatch(node: SceneNode, filter: string): boolean {
-  const lower = filter.toLowerCase()
-  if (node.name.toLowerCase().includes(lower) || node.type.toLowerCase().includes(lower)) {
-    return true
-  }
-  return (node.children || []).some(c => hasMatch(c, lower))
 }
