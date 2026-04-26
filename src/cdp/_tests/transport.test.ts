@@ -13,7 +13,6 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
 
     const mockDomBoxModel = vi.fn().mockImplementation(() => {
       callOrder.push('DOM.getBoxModel')
-      // Corners: tl(10,20), tr(30,20), br(30,40), bl(10,40) → center (20,30)
       return Promise.resolve({ model: { content: [10, 20, 30, 20, 30, 40, 10, 40] } })
     })
 
@@ -33,13 +32,27 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
     })
 
     const mockCDP = vi.fn().mockResolvedValue({
-      Runtime: { callFunctionOn: mockCallFunctionOn, evaluate: vi.fn().mockResolvedValue({ result: {} }) },
+      Runtime: {
+        enable: vi.fn().mockResolvedValue({}),
+        callFunctionOn: mockCallFunctionOn,
+        evaluate: vi.fn().mockResolvedValue({ result: { value: undefined } }),
+        consoleAPICalled: vi.fn().mockReturnValue(() => {}),
+      },
+      Log: {
+        enable: vi.fn().mockResolvedValue({}),
+        entryAdded: vi.fn().mockReturnValue(() => {}),
+      },
       Accessibility: {
         enable: vi.fn().mockResolvedValue({}),
         getFullAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
         queryAXTree: vi.fn().mockResolvedValue({ nodes: [] }),
       },
-      Page: { enable: vi.fn().mockResolvedValue({}), captureScreenshot: mockCaptureScreenshot, getLayoutMetrics: mockGetLayoutMetrics, frameNavigated: vi.fn() },
+      Page: {
+        enable: vi.fn().mockResolvedValue({}),
+        captureScreenshot: mockCaptureScreenshot,
+        getLayoutMetrics: mockGetLayoutMetrics,
+        frameNavigated: vi.fn(),
+      },
       DOM: {
         enable: vi.fn().mockResolvedValue({}),
         resolveNode: mockDomResolve,
@@ -56,9 +69,12 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
 
-// Import after mock is registered
-import { connectToTarget } from './transport.js'
-import { AxTreeCache } from './ax-cache.js'
+import { connectToPage, connectToRuntime } from '../transport.js'
+import { AxTreeCache } from '../ax-cache.js'
+import { TargetType, type TargetInfo } from '../types.js'
+
+const pageTarget: TargetInfo = { id: 'target-1', type: TargetType.Page, title: 'Test', url: 'http://x' }
+const workerTarget: TargetInfo = { id: 'worker-1', type: TargetType.SharedWorker, title: 'sw.js', url: 'http://x/sw' }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -69,25 +85,22 @@ describe('captureScreenshot', () => {
   })
 
   it('default (no scale) calls captureScreenshot with png format, no clip', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.captureScreenshot()
-
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
     expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
   })
 
   it('scale=1 behaves same as no scale', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.captureScreenshot({ scale: 1 })
-
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
     expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
   })
 
   it('scale=0.5 fetches layout metrics and passes clip with scale', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.captureScreenshot({ scale: 0.5 })
-
     expect(mockGetLayoutMetrics).toHaveBeenCalledOnce()
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({
       format: 'jpeg',
@@ -101,7 +114,7 @@ describe('captureScreenshot', () => {
       cssLayoutViewport: { clientWidth: 1920, clientHeight: 1080 },
     })
 
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.captureScreenshot({ scale: 0.25 })
 
     expect(mockCaptureScreenshot).toHaveBeenCalledWith(
@@ -122,14 +135,13 @@ describe('clickByNodeId', () => {
   })
 
   it('calls resolveNode and getBoxModel before callFunctionOn (parallel batch)', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const resolveIdx = callOrder.indexOf('DOM.resolveNode')
     const boxIdx = callOrder.indexOf('DOM.getBoxModel')
     const scrollIdx = callOrder.indexOf('Runtime.callFunctionOn')
 
-    // Both resolveNode and getBoxModel must complete before callFunctionOn
     expect(resolveIdx).toBeGreaterThanOrEqual(0)
     expect(boxIdx).toBeGreaterThanOrEqual(0)
     expect(scrollIdx).toBeGreaterThan(resolveIdx)
@@ -137,7 +149,7 @@ describe('clickByNodeId', () => {
   })
 
   it('sends mousePressed before mouseReleased', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const pressIdx = callOrder.indexOf('Input.mousePressed')
@@ -149,7 +161,7 @@ describe('clickByNodeId', () => {
   })
 
   it('dispatches both mousePressed and mouseReleased events', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const mouseCalls = mockDispatchMouse.mock.calls.map((c) => c[0].type)
@@ -159,10 +171,7 @@ describe('clickByNodeId', () => {
   })
 
   it('calculates center coordinates from box model content array', async () => {
-    // content = [x1,y1, x2,y2, x3,y3, x4,y4] (tl, tr, br, bl)
-    // center = avg(x1,x2,x3,x4), avg(y1,y2,y3,y4)
-    // [10,20, 30,20, 30,40, 10,40] → cx=20, cy=30
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
     const pressCall = mockDispatchMouse.mock.calls.find((c) => c[0].type === 'mousePressed')
@@ -171,7 +180,7 @@ describe('clickByNodeId', () => {
   })
 
   it('passes backendNodeId to both resolveNode and getBoxModel', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(99)
 
     expect(mockDomResolve).toHaveBeenCalledWith({ backendNodeId: 99 })
@@ -179,11 +188,55 @@ describe('clickByNodeId', () => {
   })
 
   it('uses objectId from resolveNode for scroll callFunctionOn', async () => {
-    const conn = await connectToTarget(9222, 'target-1', new AxTreeCache())
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
     expect(mockCallFunctionOn).toHaveBeenCalledWith(
       expect.objectContaining({ objectId: 'obj-42' }),
     )
+  })
+})
+
+// ── Session split: page vs runtime factories ──────────────────────────────────
+
+describe('connectToRuntime', () => {
+  it('refuses to enable Page/DOM/Accessibility on a worker target (only Runtime+Log)', async () => {
+    const session = await connectToRuntime(9222, workerTarget)
+    // Smoke: session has evaluate + onConsole + close
+    expect(typeof session.evaluate).toBe('function')
+    expect(typeof session.onConsole).toBe('function')
+    expect(typeof session.close).toBe('function')
+    expect(session.target.type).toBe(TargetType.SharedWorker)
+  })
+})
+
+describe('connectToPage', () => {
+  it('rejects non-page/iframe targets', async () => {
+    await expect(connectToPage(9222, workerTarget, new AxTreeCache())).rejects.toThrow(/requires a page\/iframe target/)
+  })
+})
+
+describe('evaluate', () => {
+  async function getEvalMock(): Promise<ReturnType<typeof vi.fn>> {
+    const client = await mockCDP.mock.results[mockCDP.mock.results.length - 1].value as { Runtime: { evaluate: ReturnType<typeof vi.fn> } }
+    return client.Runtime.evaluate
+  }
+
+  it('returns the unwrapped value (returnByValue: true by default)', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const evalMock = await getEvalMock()
+    evalMock.mockResolvedValueOnce({ result: { value: 42 } })
+    const v = await session.evaluate('1 + 41')
+    expect(v).toBe(42)
+  })
+
+  it('throws EvaluationError when CDP returns exceptionDetails', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const evalMock = await getEvalMock()
+    evalMock.mockResolvedValueOnce({
+      result: {},
+      exceptionDetails: { exception: { description: 'ReferenceError: x is not defined' } },
+    })
+    await expect(session.evaluate('x')).rejects.toThrow(/ReferenceError/)
   })
 })

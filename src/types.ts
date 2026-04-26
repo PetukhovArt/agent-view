@@ -6,6 +6,7 @@ export enum RuntimeType {
 
 export enum WebGLEngine {
   Pixi = 'pixi',
+  CesiumJS = 'cesiumjs',
 }
 
 export type WindowInfo = {

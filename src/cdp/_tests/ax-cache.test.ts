@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { AxTreeCache } from './ax-cache.js'
-import type { AXNode } from './types.js'
+import { AxTreeCache } from '../ax-cache.js'
+import type { AXNode } from '../types.js'
 
 const NODES: AXNode[] = [{ nodeId: '1', ignored: false }] as unknown as AXNode[]
 

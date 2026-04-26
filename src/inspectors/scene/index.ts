@@ -1,11 +1,11 @@
 import { getExtractor } from './registry.js'
 import { formatNode, diffScenes } from './formatter.js'
-import type { CDPConnection } from '../../cdp/types.js'
+import type { RuntimeSession } from '../../cdp/types.js'
 import type { WebGLEngine } from '../../types.js'
 import type { SceneOptions, SceneNode } from './types.js'
 
 export async function getSceneGraph(
-  conn: CDPConnection,
+  conn: RuntimeSession,
   engine: WebGLEngine | undefined,
   options: SceneOptions = {},
 ): Promise<string> {
@@ -26,7 +26,7 @@ export async function getSceneGraph(
 }
 
 export async function getRawScene(
-  conn: CDPConnection,
+  conn: RuntimeSession,
   engine: WebGLEngine | undefined,
 ): Promise<SceneNode | null> {
   if (!engine) return null

@@ -1,5 +1,5 @@
 import { WebGLEngine } from '../../types.js'
-import type { CDPConnection } from '../../cdp/types.js'
+import type { RuntimeSession } from '../../cdp/types.js'
 import type { SceneExtractor, SceneNode } from './types.js'
 
 // Depth limit is also enforced in JS to guard against stack overflow
@@ -48,7 +48,7 @@ function isSceneNode(val: unknown): val is SceneNode {
 
 export const pixiExtractor: SceneExtractor = {
   engine: WebGLEngine.Pixi,
-  async extract(conn: CDPConnection): Promise<SceneNode | null> {
+  async extract(conn: RuntimeSession): Promise<SceneNode | null> {
     const result = await conn.evaluate(EXTRACT_JS)
     return isSceneNode(result) ? result : null
   },

@@ -201,6 +201,66 @@
   </main>
 
   <script>
+    // ── App state for `agent-view eval` ─────────────────────────────────────────
+    // Exposed on window so verification commands can read state without scraping DOM.
+    window.appState = {
+      counter: 0,
+      user: { name: 'Alice', role: 'admin' },
+      lastAction: null,
+      flags: { darkMode: false, betaFeatures: true },
+    }
+
+    // ── Console signals for `agent-view console` ────────────────────────────────
+    console.log('[bench] app booted at', new Date().toISOString())
+    window.addEventListener('error', (e) => {
+      console.error('[bench] window error:', e.message)
+    })
+
+    // ── SharedWorker for `agent-view eval --target` / `targets` ─────────────────
+    // Inline worker via Blob URL so the bench app stays single-file.
+    const workerSource = `
+      let counter = 0
+      const queue = []
+      console.log('[bench-worker] booted at', new Date().toISOString())
+      self.onconnect = (e) => {
+        const port = e.ports[0]
+        console.log('[bench-worker] port connected')
+        port.onmessage = (msg) => {
+          counter++
+          queue.push(msg.data)
+          if (queue.length > 100) queue.shift()
+          console.log('[bench-worker] message #' + counter, JSON.stringify(msg.data))
+          port.postMessage({ ok: true, counter })
+        }
+        port.start()
+      }
+      self.getStats = () => ({ counter, queueLength: queue.length })
+    `
+    const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'application/javascript' }))
+    try {
+      const sw = new SharedWorker(workerUrl, 'bench-shared-worker')
+      sw.port.start()
+      sw.port.postMessage({ hello: 'from-page' })
+      window.benchSharedWorker = sw
+      console.log('[bench] SharedWorker connected')
+    } catch (err) {
+      console.warn('[bench] SharedWorker unavailable:', err.message)
+    }
+
+    // ── Page-wide click instrumentation (drives appState + console signals) ────
+    document.addEventListener('click', (e) => {
+      const target = e.target.closest('button, a')
+      if (!target) return
+      window.appState.counter++
+      window.appState.lastAction = target.textContent.trim().slice(0, 40)
+      const sw = window.benchSharedWorker
+      if (sw) sw.port.postMessage({ click: window.appState.lastAction, ts: Date.now() })
+      // Intentional warn for verification scenarios that check console hygiene
+      if (target.textContent.includes('Submit')) {
+        console.warn('[bench] Submit clicked — counter now', window.appState.counter)
+      }
+    })
+
     // ── Async element (bench scenario: wait_match) ──────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {

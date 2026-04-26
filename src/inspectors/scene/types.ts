@@ -1,4 +1,4 @@
-import type { CDPConnection } from '../../cdp/types.js'
+import type { RuntimeSession } from '../../cdp/types.js'
 import type { WebGLEngine } from '../../types.js'
 
 export type SceneNode = {
@@ -30,5 +30,5 @@ export type SceneDiffResult = {
 
 export type SceneExtractor = {
   readonly engine: WebGLEngine
-  extract(conn: CDPConnection): Promise<SceneNode | null>
+  extract(conn: RuntimeSession): Promise<SceneNode | null>
 }

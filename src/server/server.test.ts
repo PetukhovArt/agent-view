@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { parseFilter, resolveDepth, textContentFallback } from './server.js'
-import type { CDPConnection, AXNode } from '../cdp/types.js'
+import type { PageSession, AXNode } from '../cdp/types.js'
+import { TargetType } from '../cdp/types.js'
 
 // ── resolveDepth ──────────────────────────────────────────────────────────────
 
@@ -97,8 +98,9 @@ function makeNode(backendDOMNodeId: number, role: string, name: string): AXNode 
   } as unknown as AXNode
 }
 
-function makeMockConn(overrides: Partial<CDPConnection> = {}): CDPConnection {
+function makeMockConn(overrides: Partial<PageSession> = {}): PageSession {
   return {
+    target: { id: 't', type: TargetType.Page, title: '', url: '' },
     getAccessibilityTree: vi.fn().mockResolvedValue([]),
     queryAXTree: vi.fn().mockResolvedValue(null),
     captureScreenshot: vi.fn().mockResolvedValue(Buffer.alloc(0)),
@@ -106,6 +108,7 @@ function makeMockConn(overrides: Partial<CDPConnection> = {}): CDPConnection {
     clickAtPosition: vi.fn().mockResolvedValue(undefined),
     fillByNodeId: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockResolvedValue(undefined),
+    onConsole: vi.fn().mockReturnValue(() => {}),
     close: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }

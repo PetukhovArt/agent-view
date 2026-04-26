@@ -36,6 +36,14 @@ function isValidConfig(obj: unknown): obj is AgentViewConfig {
     if (typeof w.engine !== 'string' || !validEngines.includes(w.engine)) return false
   }
 
+  if (c.allowEval !== undefined && typeof c.allowEval !== 'boolean') return false
+  if (c.consoleBufferSize !== undefined) {
+    if (typeof c.consoleBufferSize !== 'number' || c.consoleBufferSize < 1) return false
+  }
+  if (c.consoleTargets !== undefined) {
+    if (!Array.isArray(c.consoleTargets) || !c.consoleTargets.every(t => typeof t === 'string')) return false
+  }
+
   return true
 }
 

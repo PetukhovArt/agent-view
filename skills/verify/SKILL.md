@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Visual verification of desktop app UI after code changes. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM."
+description: "Visual + runtime verification of desktop apps via Chrome DevTools Protocol. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application — DOM, screenshots, scene graph, runtime state in pages and SharedWorkers/ServiceWorkers, or console errors. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM, check store/state, read worker, console errors, runtime check, eval in page."
 allowed-tools: Bash(agent-view *), Bash(rtk agent-view *)
 ---
 
@@ -47,6 +47,59 @@ agent-view screenshot --scale 0.5 --window <id>  # Specific window
 agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
 ```
 
+### Runtime State (`eval`)
+
+Reads runtime values DOM/screenshot can't reveal — store contents, computed flags, worker internals.
+**Requires `"allowEval": true` in `agent-view.config.json`** — if the call returns "eval is disabled", tell the user to add the flag rather than working around it.
+
+```bash
+agent-view eval "store.state.user.role"                       # default page target
+agent-view eval --window "Settings" "router.currentRoute.path"
+agent-view eval --target sync-worker "self.queue.length"      # SharedWorker / ServiceWorker by id or substring
+agent-view eval --await "fetch('/api/health').then(r => r.status)"
+agent-view eval --json "({ buttons: document.querySelectorAll('button').length })"
+```
+
+When to reach for `eval` instead of `dom`:
+- The truth lives in JS state, not the DOM (Pinia/Vuex/Redux/Zustand store, Vue refs, computed values, app singletons).
+- The target is a worker (`shared_worker`, `service_worker`, `worker`) — DOM doesn't exist there.
+- You need a precise number/string answer, not a tree to scan.
+
+### Console (`console`)
+
+Streams `Runtime.consoleAPICalled` + `Log.entryAdded`. Use to confirm a flow finished without errors, or to surface a specific warning after an interaction.
+
+```bash
+agent-view console                              # buffered messages from auto-attached targets
+agent-view console --level error,warn           # filter
+agent-view console --target sync-worker         # one target
+agent-view console --follow --timeout 10        # stream window (use sparingly — 10s of waiting)
+agent-view console --clear                      # baseline before an interaction
+agent-view console --since "2026-04-26T10:00:00Z"
+```
+
+Standard pattern for "did this action error?":
+```bash
+agent-view console --clear
+agent-view click --filter "Save"
+agent-view wait --filter "Saved"
+agent-view console --level error                # expect "(no console messages)"
+```
+
+Default attached target types: `page`, `shared_worker`, `service_worker` (override via `consoleTargets` in config).
+
+### Targets (`targets`)
+
+When `--window` doesn't show what you expected, or you need a worker target id for `eval`/`console`:
+
+```bash
+agent-view targets                                       # everything connectable
+agent-view targets --type shared_worker,service_worker   # filter
+agent-view targets --json                                # machine-readable
+```
+
+You usually don't need this — `eval --target <substring>` and `--window <name>` both do fuzzy matching. Reach for `targets` when the substring is ambiguous.
+
 ### Scene / Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
 
 These commands read the scene graph from canvas-based rendering engines. Skip this section if the project has no `webgl` field in config.
@@ -59,6 +112,21 @@ agent-view scene --diff                 # Changes since last call
 agent-view snap                         # DOM + Scene combined
 ```
 
+## Picking the right tool
+
+Verifications cost very different amounts. Pick the cheapest tool that can actually answer the question:
+
+| The question is about… | Use | Why |
+|---|---|---|
+| Element existence / text / role | `dom --filter` | Cheapest, structured, no vision tokens |
+| App state, store contents, computed values | `eval "expr"` | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable |
+| Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
+| Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
+| Layout, spacing, visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
+| Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
+
+When two tools could answer the same question, prefer the one higher up the table. A common mistake is screenshotting to check "is the count = 5?" when `eval "store.counter"` returns the number directly for ~50 tokens.
+
 ## Verification Workflow
 
 ### Ad-hoc Mode (standalone)
@@ -70,7 +138,9 @@ After making code changes:
 3. **Inspect DOM**: `rtk agent-view dom --filter "<area>" --depth 2` — check structure matches expectations
 4. **Interact if needed**: `agent-view click`/`fill` → `rtk agent-view dom --filter` to verify state changed
 5. **For canvas apps**: `agent-view scene --diff` to see what changed
-6. **Screenshot only for final visual confirm**: `agent-view screenshot --scale 0.5` — captures layout/styling that DOM can't reveal
+6. **For non-DOM truth** (store, computed values, worker state): `agent-view eval` — much cheaper than reading the DOM tree to infer state
+7. **After any interaction that could fail silently**: `agent-view console --level error` — catches uncaught exceptions, network failures, framework warnings
+8. **Screenshot only for final visual confirm**: `agent-view screenshot --scale 0.5` — captures layout/styling that DOM can't reveal
 
 ### Scenario Execution Mode (from plan)
 
@@ -105,9 +175,10 @@ Vision tokens dominate cost. One full-res screenshot ≈ 19k tokens (1920×1080,
 
 | Technique | Savings |
 |---|---|
+| `agent-view eval "expr"` for state checks | Returns one value (~50 tokens) instead of a DOM/screenshot |
 | `rtk agent-view dom --filter X --depth 2` | Compresses text output via RTK |
 | `agent-view screenshot --scale 0.5` | ~3× fewer vision tokens (4 tiles) |
 | `agent-view screenshot --scale 0.25` | ~12× fewer vision tokens (1 tile, ~1.6k tokens) |
-| DOM-first: screenshot only for final visual confirm | Eliminates most screenshot calls |
+| DOM/eval-first: screenshot only for final visual confirm | Eliminates most screenshot calls |
 
-**Default rule**: verify via `rtk agent-view dom --filter` first; only call `screenshot --scale 0.5` for final visual proof or layout bugs that DOM can't reveal.
+**Default rule**: if the answer is a value → `eval`; if the answer is "is element X visible/correct?" → `rtk agent-view dom --filter`; only call `screenshot --scale 0.5` for final visual proof or layout bugs that pixels alone can show.

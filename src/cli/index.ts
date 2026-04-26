@@ -19,12 +19,15 @@ import { runScene } from './commands/scene.js'
 import { runSnap } from './commands/snap.js'
 import { runStop } from './commands/stop.js'
 import { runWait } from './commands/wait.js'
+import { runTargets } from './commands/targets.js'
+import { runEval } from './commands/eval.js'
+import { runConsole } from './commands/console.js'
 import type { AgentViewConfig } from '../config/types.js'
 
 const program = new Command()
   .name('agent-view')
   .description('Visual verification CLI for desktop apps')
-  .version('0.1.0')
+  .version('0.3.0')
 
 program
   .command('init')
@@ -125,6 +128,42 @@ program
   .action(async (options) => {
     const config = requireConfig()
     await runSnap(config, options)
+  })
+
+program
+  .command('targets')
+  .description('List all CDP targets (pages, workers, service workers)')
+  .option('-t, --type <types>', 'Comma-separated type filter (page,shared_worker,service_worker,worker,iframe)')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runTargets(config, options)
+  })
+
+program
+  .command('eval <expression>')
+  .description('Evaluate JS in a target (requires "allowEval": true in config)')
+  .option('-t, --target <id>', 'Target by CDP id, title, or URL substring')
+  .option('-w, --window <id>', 'Page-target by id or title (alias of --target restricted to pages)')
+  .option('--await', 'Set awaitPromise on Runtime.evaluate')
+  .option('--json', 'Output JSON.stringify(result) instead of human-readable')
+  .action(async (expression, options) => {
+    const config = requireConfig()
+    await runEval(config, expression, options)
+  })
+
+program
+  .command('console')
+  .description('Show console messages from attached targets')
+  .option('-t, --target <id>', 'Restrict to one target')
+  .option('-f, --follow', 'Stream new messages until --timeout elapses')
+  .option('--timeout <seconds>', 'Follow window in seconds (default 10)', parseDepth)
+  .option('-l, --level <levels>', 'Comma-separated level filter (log,info,warn,error,debug)')
+  .option('--since <iso>', 'Only messages newer than ISO timestamp')
+  .option('--clear', 'Drop the in-memory ring buffer')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runConsole(config, options)
   })
 
 program

@@ -26,6 +26,17 @@ Code → Launch → See → Verify → Fix → See again
 
 The agent writes code, then immediately checks what the user would see. If something's wrong, it fixes and re-checks — no human needed. This catches problems that builds and tests miss: CSS regressions, broken layouts, missing error messages, silent IPC failures.
 
+## v0.3.0 — DevTools access (eval, console, workers)
+
+Beyond DOM and screenshots, v0.3.0 adds direct access to JS state and console — including SharedWorker / ServiceWorker. Useful when «what's rendered» isn't enough and you need to check what's actually in the store, in a worker, or in the console.
+
+- `eval <expr>` — read state directly (`store.user.role`, computed values, async getters). Gated by `"allowEval": true` in config.
+- `eval --target <worker>` — same, but inside a SharedWorker / ServiceWorker / dedicated Worker.
+- `console` — capture `console.log/warn/error` per page or per worker. `--clear` for baselines, `--level` to filter.
+- `targets` — list every connectable CDP target.
+
+See [Commands](#commands) for flags. Full notes in [CHANGELOG](CHANGELOG.md).
+
 ## Performance
 
 AI agents run dozens of `dom → click → dom` verification cycles per session. Every millisecond compounds. agent-view v0.2.0 is built specifically for this pattern.
@@ -249,6 +260,44 @@ agent-view wait --filter "Dashboard" --timeout 30 # Custom timeout in seconds
 ### `launch`
 
 Starts the app using the `launch` command from config. Polls CDP until ready (60s timeout). Idempotent — skips if already running.
+
+### `targets`
+
+Lists every CDP target — pages, iframes, shared/service/dedicated workers. Use this when you need access to non-page targets (e.g. an Electron app with a `SharedWorker`).
+
+```bash
+agent-view targets                                       # all supported types
+agent-view targets --type shared_worker,service_worker   # filter
+agent-view targets --json                                # machine-readable
+```
+
+### `eval`
+
+Runs `Runtime.evaluate` in any connectable target. **Requires `"allowEval": true` in `agent-view.config.json`** — the local socket is shared and this is the project-owner opt-in.
+
+```bash
+agent-view eval "document.title"
+agent-view eval --target IJ56KL "self.constructor.name"           # by id (or title/url substring)
+agent-view eval --window "Monitor 1" --await "fetch('/api/health').then(r => r.status)"
+agent-view eval --json "({ buttons: document.querySelectorAll('button').length })"
+```
+
+Output is capped at 64 KB. Thrown exceptions and syntax errors propagate as non-zero exit with the CDP error message.
+
+### `console`
+
+Streams or dumps console output (`Runtime.consoleAPICalled` + `Log.entryAdded`) from auto-attached targets. Lazy: first call attaches matching targets, subsequent calls reuse them.
+
+```bash
+agent-view console                              # buffered messages since attach
+agent-view console --follow --timeout 10        # stream for 10s
+agent-view console --target IJ56KL              # restrict to one target
+agent-view console --level error,warn           # level filter
+agent-view console --since "2026-04-26T10:00:00Z"
+agent-view console --clear                      # drop in-memory ring
+```
+
+Default attached target types: `page`, `shared_worker`, `service_worker`. Override with `consoleTargets` in config.
 
 ### `stop`
 

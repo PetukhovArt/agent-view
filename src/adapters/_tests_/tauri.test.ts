@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isAppTarget } from './tauri.js'
+import { isAppTarget } from '../tauri.js'
 
 describe('isAppTarget (Tauri)', () => {
   it('accepts regular page targets', () => {

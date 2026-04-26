@@ -3,7 +3,22 @@ export type CDPTarget = {
   type: string
   title: string
   url: string
-  webSocketDebuggerUrl: string
+  webSocketDebuggerUrl?: string
+}
+
+export enum TargetType {
+  Page = 'page',
+  Iframe = 'iframe',
+  SharedWorker = 'shared_worker',
+  ServiceWorker = 'service_worker',
+  Worker = 'worker',
+}
+
+export type TargetInfo = {
+  id: string
+  type: TargetType
+  title: string
+  url: string
 }
 
 export type ScreenshotOpts = {
@@ -11,17 +26,61 @@ export type ScreenshotOpts = {
   scale?: number
 }
 
-export type CDPConnection = {
+export enum ConsoleLevel {
+  Log = 'log',
+  Info = 'info',
+  Warn = 'warn',
+  Error = 'error',
+  Debug = 'debug',
+}
+
+export enum ConsoleSource {
+  Runtime = 'runtime',
+  Log = 'log',
+}
+
+export type ConsoleMessage = {
+  ts: number
+  level: ConsoleLevel
+  source: ConsoleSource
+  text: string
+  stack?: string
+}
+
+export type EvaluateOpts = {
+  awaitPromise?: boolean
+  /** When true, return the raw RemoteObject instead of unwrapped value. Used by the eval CLI to format DOM nodes etc. */
+  returnByValue?: boolean
+}
+
+export class EvaluationError extends Error {
+  constructor(message: string, public readonly stack?: string) {
+    super(message)
+    this.name = 'EvaluationError'
+  }
+}
+
+export type RuntimeSession = {
+  readonly target: TargetInfo
+  /**
+   * Run JS in the target. Returns the unwrapped value (returnByValue: true by default).
+   * Throws `EvaluationError` if the script throws or has a syntax error.
+   * Only pass trusted, hardcoded expressions or expressions explicitly authorized via `allowEval`.
+   */
+  evaluate: (expression: string, opts?: EvaluateOpts) => Promise<unknown>
+  /** Subscribe to normalized console events. Returns disposer. Multiple subscribers share the underlying CDP subscription. */
+  onConsole: (handler: (msg: ConsoleMessage) => void) => () => void
+  close: () => Promise<void>
+}
+
+export type PageSession = RuntimeSession & {
   getAccessibilityTree: () => Promise<AXNode[]>
   /** Returns matching nodes by accessible name/role. null = API unavailable; [] = no match. */
   queryAXTree: (params: { accessibleName?: string; role?: string }) => Promise<AXNode[] | null>
   captureScreenshot: (opts?: ScreenshotOpts) => Promise<Buffer>
-  clickByNodeId: (backendNodeId: number) => Promise<void>
+  clickByNodeId: (backendDOMNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
-  fillByNodeId: (backendNodeId: number, value: string) => Promise<void>
-  /** Executes arbitrary JS in the target process. Only pass trusted, hardcoded expressions. */
-  evaluate: (js: string) => Promise<unknown>
-  close: () => Promise<void>
+  fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>
 }
 
 export type AXNode = {

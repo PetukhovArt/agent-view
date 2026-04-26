@@ -11,11 +11,19 @@ import { RefStore } from './ref-store.js'
 import { launch, isRunning } from './launcher.js'
 import { readConfig } from '../config/manager.js'
 import { RuntimeType, WebGLEngine, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
-import type { CDPConnection } from '../cdp/types.js'
+import {
+  TargetType,
+  ConsoleLevel,
+  EvaluationError,
+  type PageSession,
+  type RuntimeSession,
+  type TargetInfo,
+} from '../cdp/types.js'
+import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
+import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
 
 const SERVER_PORT = 47922
-const VALID_COMMANDS = new Set(['discover', 'launch', 'dom', 'click', 'fill', 'screenshot', 'scene', 'snap', 'wait', 'stop'])
 const VALID_RUNTIMES = new Set<RuntimeType>(Object.values(RuntimeType))
 const VALID_ENGINES = new Set<WebGLEngine>(Object.values(WebGLEngine))
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
@@ -23,6 +31,14 @@ const DELIMITER = '\n'
 const MAX_BUFFER_SIZE = 1_048_576 // 1 MB
 const TOKEN_DIR = join(homedir(), '.agent-view')
 const TOKEN_PATH = join(TOKEN_DIR, 'token')
+const EVAL_OUTPUT_CAP = 64 * 1024
+const DEFAULT_CONSOLE_TARGETS: ReadonlyArray<TargetType> = [TargetType.Page, TargetType.SharedWorker, TargetType.ServiceWorker]
+
+const RUNTIME_ONLY_TARGETS = new Set<TargetType>([
+  TargetType.SharedWorker,
+  TargetType.ServiceWorker,
+  TargetType.Worker,
+])
 
 function argStr(args: Record<string, unknown>, key: string): string | undefined {
   const v = args[key]
@@ -37,6 +53,12 @@ function argNum(args: Record<string, unknown>, key: string): number | undefined 
 function argBool(args: Record<string, unknown>, key: string): boolean | undefined {
   const v = args[key]
   return typeof v === 'boolean' ? v : undefined
+}
+
+function argStrArray(args: Record<string, unknown>, key: string): string[] | undefined {
+  const v = args[key]
+  if (!Array.isArray(v)) return undefined
+  return v.filter((x): x is string => typeof x === 'string')
 }
 
 const ARIA_ROLES = new Set([
@@ -55,7 +77,7 @@ export function resolveDepth(filter: string | undefined, explicit: number | unde
   return 4  // default snapshot depth
 }
 
-export async function textContentFallback(conn: CDPConnection, filter: string): Promise<string> {
+export async function textContentFallback(conn: PageSession, filter: string): Promise<string> {
   const safeFilter = JSON.stringify(filter)
   const js = `(() => {
     const q = ${safeFilter};
@@ -87,7 +109,6 @@ export async function textContentFallback(conn: CDPConnection, filter: string): 
 }
 
 export function parseFilter(filter: string): ParsedFilter {
-  // "role:name" syntax — only recognized ARIA roles to prevent false matches (e.g. "localhost:3000")
   const colonIdx = filter.indexOf(':')
   if (colonIdx > 0) {
     const role = filter.slice(0, colonIdx).trim().toLowerCase()
@@ -96,22 +117,43 @@ export function parseFilter(filter: string): ParsedFilter {
       return { kind: 'simple', name, role }
     }
   }
-  // heuristic: starts with ~ or contains regex special chars
   if (filter.startsWith('~') || /[.*+?^${}()|[\]\\]/.test(filter)) {
     return { kind: 'heuristic', raw: filter }
   }
-  // plain string → accessible name lookup
   return { kind: 'simple', name: filter }
 }
 
+type CachedSession =
+  | { kind: 'page'; session: PageSession }
+  | { kind: 'runtime'; session: RuntimeSession }
+
 export class AgentViewServer {
   private server: Server | null = null
-  private connections = new Map<string, CDPConnection>()
+  private connections = new Map<string, CachedSession>()
   private refStore = new RefStore()
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private sceneCache = new Map<string, SceneNode>()
   private axTreeCache = new AxTreeCache()
+  private consoleStream = new ConsoleStream()
   private token = ''
+
+  private readonly handlers = {
+    discover: (req: ServerRequest) => this.handleDiscover(req),
+    launch: (req: ServerRequest) => this.handleLaunch(req),
+    dom: (req: ServerRequest) => this.handleDom(req),
+    click: (req: ServerRequest) => this.handleClick(req),
+    fill: (req: ServerRequest) => this.handleFill(req),
+    wait: (req: ServerRequest) => this.handleWait(req),
+    screenshot: (req: ServerRequest) => this.handleScreenshot(req),
+    scene: (req: ServerRequest) => this.handleScene(req),
+    snap: (req: ServerRequest) => this.handleSnap(req),
+    targets: (req: ServerRequest) => this.handleTargets(req),
+    eval: (req: ServerRequest) => this.handleEval(req),
+    console: (req: ServerRequest) => this.handleConsole(req),
+    stop: () => this.handleStop(),
+  } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
+
+  private readonly validCommands: ReadonlySet<string> = new Set(Object.keys(this.handlers))
 
   async start(): Promise<void> {
     mkdirSync(TOKEN_DIR, { recursive: true })
@@ -160,7 +202,7 @@ export class AgentViewServer {
         return
       }
       if (
-        typeof request.command !== 'string' || !VALID_COMMANDS.has(request.command) ||
+        typeof request.command !== 'string' || !this.validCommands.has(request.command) ||
         (request.command !== 'stop' && (
           !VALID_RUNTIMES.has(request.runtime) ||
           typeof request.port !== 'number' || request.port < 1 || request.port > 65535
@@ -189,30 +231,9 @@ export class AgentViewServer {
   }
 
   private async handleCommand(req: ServerRequest): Promise<ServerResponse> {
-    switch (req.command) {
-      case 'discover':
-        return this.handleDiscover(req)
-      case 'launch':
-        return this.handleLaunch(req)
-      case 'dom':
-        return this.handleDom(req)
-      case 'click':
-        return this.handleClick(req)
-      case 'fill':
-        return this.handleFill(req)
-      case 'screenshot':
-        return this.handleScreenshot(req)
-      case 'scene':
-        return this.handleScene(req)
-      case 'snap':
-        return this.handleSnap(req)
-      case 'wait':
-        return this.handleWait(req)
-      case 'stop':
-        return this.handleStop()
-      default:
-        return { ok: false, error: `Unknown command: ${req.command}` }
-    }
+    const handler = this.handlers[req.command as keyof typeof this.handlers]
+    if (!handler) return { ok: false, error: `Unknown command: ${req.command}` }
+    return handler(req)
   }
 
   private async resolveWindow(req: ServerRequest): Promise<{ targetId: string; windows: WindowInfo[] }> {
@@ -241,15 +262,33 @@ export class AgentViewServer {
     return { targetId, windows }
   }
 
-  private async getConnection(req: ServerRequest, targetId: string): Promise<CDPConnection> {
+  private async getPageSession(req: ServerRequest, targetId: string): Promise<PageSession> {
     const connKey = `${req.port}:${targetId}`
-    let conn = this.connections.get(connKey)
-    if (!conn) {
-      const adapter = getAdapter(req.runtime)
-      conn = await adapter.connect(req.port, targetId, this.axTreeCache)
-      this.connections.set(connKey, conn)
+    const cached = this.connections.get(connKey)
+    if (cached) {
+      if (cached.kind === 'page') return cached.session
+      throw new Error(`Cached session for ${targetId} is runtime-only — cannot use page operations.`)
     }
-    return conn
+    const adapter = getAdapter(req.runtime)
+    const session = await adapter.connect(req.port, targetId, this.axTreeCache)
+    this.connections.set(connKey, { kind: 'page', session })
+    return session
+  }
+
+  private async getRuntimeSession(req: ServerRequest, target: TargetInfo): Promise<RuntimeSession> {
+    const connKey = `${req.port}:${target.id}`
+    const cached = this.connections.get(connKey)
+    if (cached) return cached.session
+    if (target.type === TargetType.Page || target.type === TargetType.Iframe) {
+      // Page targets can serve runtime requests via their PageSession (it extends RuntimeSession).
+      return this.getPageSession(req, target.id)
+    }
+    if (!RUNTIME_ONLY_TARGETS.has(target.type)) {
+      throw new Error(`Target type "${target.type}" does not support eval/console.`)
+    }
+    const session = await connectToRuntime(req.port, target)
+    this.connections.set(connKey, { kind: 'runtime', session })
+    return session
   }
 
   private async handleDiscover(req: ServerRequest): Promise<ServerResponse> {
@@ -257,25 +296,16 @@ export class AgentViewServer {
     const windows = await adapter.discover(req.port)
     return {
       ok: true,
-      data: {
-        runtime: req.runtime,
-        port: req.port,
-        windows,
-      },
+      data: { runtime: req.runtime, port: req.port, windows },
     }
   }
 
   private async handleLaunch(req: ServerRequest): Promise<ServerResponse> {
     const launchCmd = argStr(req.args, 'launch')
     const cwd = argStr(req.args, 'cwd')
-    if (!launchCmd) {
-      return { ok: false, error: 'No launch command provided' }
-    }
-    if (!cwd) {
-      return { ok: false, error: 'launch requires cwd to validate config' }
-    }
+    if (!launchCmd) return { ok: false, error: 'No launch command provided' }
+    if (!cwd) return { ok: false, error: 'launch requires cwd to validate config' }
 
-    // Validate launch command against on-disk config to prevent injection
     const config = readConfig(resolve(cwd))
     if (!config || config.launch !== launchCmd) {
       return { ok: false, error: 'Launch command does not match project config' }
@@ -291,7 +321,7 @@ export class AgentViewServer {
 
   private async handleDom(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
 
     const filter = argStr(req.args, 'filter')
     const useText = argBool(req.args, 'text') ?? false
@@ -313,7 +343,7 @@ export class AgentViewServer {
   }
 
   private async findByFilter(
-    conn: CDPConnection,
+    conn: PageSession,
     filter: string,
     req: ServerRequest,
     targetId: string,
@@ -324,10 +354,8 @@ export class AgentViewServer {
     if (parsed.kind === 'simple') {
       const queryNodes = await conn.queryAXTree({ accessibleName: parsed.name, role: parsed.role })
       if (queryNodes !== null) {
-        // queryAXTree is available — use targeted path, no full-tree fallback on miss
         if (queryNodes.length === 0) return null
 
-        // Assign refs to found nodes directly (they're already the match result)
         const startRef = this.refStore.getNextRef()
         let refNum = startRef
         const refs: Array<{ ref: number; backendDOMNodeId: number }> = []
@@ -340,7 +368,6 @@ export class AgentViewServer {
 
         if (refs.length === 0) return null
 
-        // Prefer a node whose role matches preferRoles
         if (preferRoles) {
           for (let i = 0; i < queryNodes.length; i++) {
             const node = queryNodes[i]
@@ -353,10 +380,8 @@ export class AgentViewServer {
         if (!first?.backendDOMNodeId) return null
         return { backendDOMNodeId: first.backendDOMNodeId, name: first.name?.value ?? parsed.name }
       }
-      // queryAXTree unavailable → fall through to full-tree path
     }
 
-    // Full-tree path: used for heuristic filters or when queryAXTree is unavailable
     const nodes = await conn.getAccessibilityTree()
     const { refs, nextRef } = formatAccessibilityTree(nodes, {
       filter,
@@ -367,7 +392,6 @@ export class AgentViewServer {
 
     if (refs.length === 0) return null
 
-    // Build map with fallback name resolution (same logic as dom.ts)
     const nodeById = new Map<string, typeof nodes[0]>()
     for (const node of nodes) nodeById.set(node.nodeId, node)
 
@@ -398,7 +422,6 @@ export class AgentViewServer {
 
     const lowerFilter = filter.toLowerCase()
 
-    // If preferred roles specified, try those first
     if (preferRoles) {
       for (const entry of refs) {
         const info = nodeByDOMId.get(entry.backendDOMNodeId)
@@ -408,7 +431,6 @@ export class AgentViewServer {
       }
     }
 
-    // Pick the deepest match whose name contains the filter text (leaf-first)
     for (let i = refs.length - 1; i >= 0; i--) {
       const info = nodeByDOMId.get(refs[i].backendDOMNodeId)
       if (info && info.name.toLowerCase().includes(lowerFilter)) {
@@ -416,7 +438,6 @@ export class AgentViewServer {
       }
     }
 
-    // Fallback: last ref (deepest element in filtered tree)
     const last = refs[refs.length - 1]
     const lastInfo = nodeByDOMId.get(last.backendDOMNodeId)
     return { backendDOMNodeId: last.backendDOMNodeId, name: lastInfo?.name ?? filter }
@@ -424,7 +445,7 @@ export class AgentViewServer {
 
   private async handleClick(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
     const cacheKey = `${req.port}:${targetId}`
 
     if (req.args.pos && typeof req.args.pos === 'object') {
@@ -465,7 +486,7 @@ export class AgentViewServer {
 
   private async handleFill(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
     const cacheKey = `${req.port}:${targetId}`
 
     const value = argStr(req.args, 'value')
@@ -511,7 +532,7 @@ export class AgentViewServer {
     const maxAttempts = Math.ceil((timeout * 1000) / interval)
 
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
 
     for (let i = 0; i < maxAttempts; i++) {
       const nodes = await conn.getAccessibilityTree()
@@ -533,7 +554,7 @@ export class AgentViewServer {
 
   private async handleScreenshot(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
 
     const scale = argNum(req.args, 'scale')
     const opts = scale !== undefined ? { scale } : undefined
@@ -548,7 +569,7 @@ export class AgentViewServer {
 
   private async handleScene(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
 
     const isDiff = argBool(req.args, 'diff') ?? false
     const cacheKey = `${req.port}:${targetId}`
@@ -588,12 +609,11 @@ export class AgentViewServer {
 
   private async handleSnap(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getConnection(req, targetId)
+    const conn = await this.getPageSession(req, targetId)
 
     const snapFilter = argStr(req.args, 'filter')
     const snapDepth = argNum(req.args, 'depth')
 
-    // DOM section
     const nodes = await conn.getAccessibilityTree()
     const { text: domText, refs, nextRef } = formatAccessibilityTree(nodes, {
       filter: snapFilter,
@@ -617,6 +637,176 @@ export class AgentViewServer {
     return { ok: true, data: sections.join('\n\n') }
   }
 
+  // ── New v0.3.0 commands ────────────────────────────────────────────────────
+
+  private async handleTargets(req: ServerRequest): Promise<ServerResponse> {
+    const targets = await listSupportedTargets(req.port)
+    const typeFilter = argStrArray(req.args, 'types')
+    const filtered = typeFilter && typeFilter.length > 0
+      ? targets.filter(t => typeFilter.includes(t.type))
+      : targets
+    return { ok: true, data: { runtime: req.runtime, port: req.port, targets: filtered } }
+  }
+
+  private async resolveTarget(req: ServerRequest): Promise<TargetInfo> {
+    const explicitId = argStr(req.args, 'target')
+    const windowArg = argStr(req.args, 'window')
+    const allTargets = await listSupportedTargets(req.port)
+
+    if (explicitId) {
+      const byId = allTargets.find(t => t.id === explicitId)
+      if (byId) return byId
+      const bySubstr = allTargets.find(
+        t => t.title.toLowerCase().includes(explicitId.toLowerCase())
+          || t.url.toLowerCase().includes(explicitId.toLowerCase()),
+      )
+      if (bySubstr) return bySubstr
+      throw new Error(`Target not found: "${explicitId}". Run \`agent-view targets\` for the full list.`)
+    }
+
+    if (windowArg) {
+      const pages = allTargets.filter(t => t.type === TargetType.Page)
+      const byId = pages.find(t => t.id === windowArg)
+      const byTitle = pages.find(t => t.title.toLowerCase().includes(windowArg.toLowerCase()))
+      const found = byId ?? byTitle
+      if (!found) {
+        throw new Error(`Window not found: "${windowArg}".`)
+      }
+      return found
+    }
+
+    const firstPage = allTargets.find(t => t.type === TargetType.Page)
+    if (!firstPage) throw new Error('No page targets found.')
+    return firstPage
+  }
+
+  private async handleEval(req: ServerRequest): Promise<ServerResponse> {
+    const cwd = argStr(req.args, 'cwd')
+    if (!cwd) {
+      return { ok: false, error: 'eval requires cwd to validate allowEval policy' }
+    }
+    const config = readConfig(resolve(cwd))
+    if (!config?.allowEval) {
+      return {
+        ok: false,
+        error: 'eval is disabled. Set "allowEval": true in agent-view.config.json to enable.',
+      }
+    }
+
+    const expression = argStr(req.args, 'expression')
+    if (!expression) return { ok: false, error: 'eval requires --expression' }
+
+    const target = await this.resolveTarget(req)
+    if (!RUNTIME_ONLY_TARGETS.has(target.type) && target.type !== TargetType.Page && target.type !== TargetType.Iframe) {
+      return { ok: false, error: `Target type "${target.type}" does not support eval.` }
+    }
+
+    const session = await this.getRuntimeSession(req, target)
+    const awaitPromise = argBool(req.args, 'await') ?? false
+    const asJson = argBool(req.args, 'json') ?? false
+
+    try {
+      const value = await session.evaluate(expression, { awaitPromise })
+      const formatted = asJson ? safeJSONStringify(value) : formatEvalValue(value)
+      const capped = formatted.length > EVAL_OUTPUT_CAP
+        ? `${formatted.slice(0, EVAL_OUTPUT_CAP)}\n... <${formatted.length - EVAL_OUTPUT_CAP} more bytes truncated>`
+        : formatted
+      return { ok: true, data: { target: { id: target.id, type: target.type }, result: capped } }
+    } catch (err) {
+      if (err instanceof EvaluationError) {
+        return { ok: false, error: err.message + (err.stack ? `\n${err.stack}` : '') }
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  private async handleConsole(req: ServerRequest): Promise<ServerResponse> {
+    const cwd = argStr(req.args, 'cwd')
+    const config = cwd ? readConfig(resolve(cwd)) : null
+    const bufferSize = config?.consoleBufferSize ?? 500
+    if (this.consoleStream.attachedCount === 0) {
+      // Recreate with config-tuned capacity on first attach
+      this.consoleStream = new ConsoleStream({ capacity: bufferSize })
+    }
+
+    if (argBool(req.args, 'clear')) {
+      const targetId = argStr(req.args, 'target')
+      this.consoleStream.clear(targetId)
+      return { ok: true, data: 'Console buffer cleared' }
+    }
+
+    const requestedTypes = argStrArray(req.args, 'consoleTargets')
+      ?? (config?.consoleTargets as string[] | undefined)
+      ?? DEFAULT_CONSOLE_TARGETS
+
+    const allowedTypes = new Set<TargetType>(
+      requestedTypes
+        .filter((t): t is string => typeof t === 'string')
+        .filter((t): t is TargetType => Object.values(TargetType).includes(t as TargetType)) as TargetType[],
+    )
+
+    // Lazy attach: ensure every matching target has a session
+    const all = await listSupportedTargets(req.port)
+    const explicitTarget = argStr(req.args, 'target')
+    if (process.env.AV_DEBUG_CONSOLE) {
+      // eslint-disable-next-line no-console
+      console.error(`[av-debug] handleConsole: targets=${all.length} explicit=${explicitTarget ?? 'none'} types=${[...allowedTypes].join(',')}`)
+    }
+    for (const t of all) {
+      if (explicitTarget && t.id !== explicitTarget) continue
+      if (!explicitTarget && !allowedTypes.has(t.type)) continue
+      if (!RUNTIME_ONLY_TARGETS.has(t.type) && t.type !== TargetType.Page && t.type !== TargetType.Iframe) continue
+      try {
+        const session = await this.getRuntimeSession(req, t)
+        this.consoleStream.attach(session)
+        if (process.env.AV_DEBUG_CONSOLE) {
+          // eslint-disable-next-line no-console
+          console.error(`[av-debug] handleConsole: attached ${t.type}:${t.id.slice(0, 8)} (stream now has ${this.consoleStream.attachedCount})`)
+        }
+      } catch (err) {
+        if (process.env.AV_DEBUG_CONSOLE) {
+          // eslint-disable-next-line no-console
+          console.error(`[av-debug] handleConsole: SKIP ${t.type}:${t.id.slice(0, 8)} — ${(err as Error).message}`)
+        }
+      }
+    }
+
+    const levelFilter = parseLevelFilter(argStrArray(req.args, 'levels'))
+    const since = argNum(req.args, 'since')
+
+    const follow = argBool(req.args, 'follow') ?? false
+    if (follow) {
+      const timeoutSec = argNum(req.args, 'timeout') ?? 10
+      const collected: StampedConsoleMessage[] = this.consoleStream.drain({
+        since,
+        level: levelFilter,
+        targetId: explicitTarget,
+      })
+      const seenAt = collected.length > 0 ? collected[collected.length - 1].ts : (since ?? Date.now())
+      await new Promise<void>((resolveFollow) => {
+        const dispose = this.consoleStream.subscribe((msg) => {
+          if (explicitTarget && msg.targetId !== explicitTarget) return
+          if (levelFilter && !levelFilter.has(msg.level)) return
+          if (msg.ts <= seenAt) return
+          collected.push(msg)
+        })
+        const timer = setTimeout(() => {
+          dispose()
+          resolveFollow()
+        }, timeoutSec * 1000)
+        timer.unref?.()
+      })
+      return { ok: true, data: formatConsoleMessages(collected) }
+    }
+
+    const messages = this.consoleStream.drain({
+      since,
+      level: levelFilter,
+      targetId: explicitTarget,
+    })
+    return { ok: true, data: formatConsoleMessages(messages) }
+  }
+
   private async handleStop(): Promise<ServerResponse> {
     setTimeout(() => this.shutdown(), 100)
     return { ok: true, data: 'Server stopping' }
@@ -624,15 +814,54 @@ export class AgentViewServer {
 
   private async shutdown(): Promise<void> {
     if (this.idleTimer) clearTimeout(this.idleTimer)
-
     await unlink(TOKEN_PATH).catch(() => {})
 
-    for (const conn of this.connections.values()) {
-      try { await conn.close() } catch { /* ignore */ }
+    this.consoleStream.detach()
+    for (const cached of this.connections.values()) {
+      try { await cached.session.close() } catch { /* ignore */ }
     }
     this.connections.clear()
 
     this.server?.close()
     process.exit(0)
   }
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function parseLevelFilter(levels: string[] | undefined): ReadonlySet<ConsoleLevel> | undefined {
+  if (!levels || levels.length === 0) return undefined
+  const valid = Object.values(ConsoleLevel) as string[]
+  const set = new Set<ConsoleLevel>()
+  for (const l of levels) {
+    if (valid.includes(l)) set.add(l as ConsoleLevel)
+  }
+  return set.size > 0 ? set : undefined
+}
+
+function formatConsoleMessages(msgs: StampedConsoleMessage[]): string {
+  if (msgs.length === 0) return '(no console messages)'
+  return msgs.map(formatOneConsoleMessage).join('\n')
+}
+
+function formatOneConsoleMessage(msg: StampedConsoleMessage): string {
+  const time = new Date(msg.ts).toISOString().slice(11, 23)
+  const head = `[${time}] [${msg.level}] [${msg.targetType}:${msg.targetId.slice(0, 8)}] ${msg.text}`
+  return msg.stack ? `${head}\n${msg.stack}` : head
+}
+
+function safeJSONStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function formatEvalValue(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return safeJSONStringify(value)
 }

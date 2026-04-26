@@ -1,6 +1,36 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [0.3.0] - 2026-04-26
+
+### Added
+
+- `agent-view targets` — list every CDP target (pages, iframes, shared/service/dedicated workers)
+  with optional `--type` filter and `--json` output
+- `agent-view eval <expression>` — `Runtime.evaluate` against any connectable target. Gated by
+  `"allowEval": true` in `agent-view.config.json`. Supports `--target`, `--window`, `--await`, `--json`
+- `agent-view console` — buffered console stream from auto-attached targets; flags
+  `--target`, `--follow --timeout`, `--level`, `--since`, `--clear`
+- `src/cdp/console-stream.ts` — `ConsoleStream` deep module: per-target ring buffer,
+  level/since/target filtering, live subscription
+- `CONTEXT.md` — domain glossary
+
+### Changed
+
+- `CDPConnection` removed in favour of `PageSession` (extends `RuntimeSession`). Page-only methods
+  are now type-checked; passing a worker session into a page handler fails at compile time
+- `connectToTarget` renamed to `connectToPage`; new `connectToRuntime` factory for worker targets
+- `transport.listSupportedTargets` returns typed `TargetInfo[]` filtered to known types
+- `AgentViewServer` handler dispatch uses a single registry instead of a `Set` + `switch`
+- Connection cache is now kind-tagged (`page` | `runtime`) — page sessions transparently serve
+  runtime requests because `PageSession extends RuntimeSession`
+
+### Config
+
+- `allowEval: boolean` — opt-in gate for `eval`. Required because the local socket is shared
+  across CI agents that should not be able to run arbitrary JS by default
+- `consoleBufferSize: number` (default 500) — per-target console ring capacity
+- `consoleTargets: TargetType[]` — auto-attached target types for `console`
+  (default: `["page", "shared_worker", "service_worker"]`)
 
 ## [0.2.0] - 2026-04-20
 
