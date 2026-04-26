@@ -147,5 +147,4 @@ bench/results.json
 .claude*
 !.claude-plugin
 CLAUDE.md
-agent-view-prd.md
 dist/
