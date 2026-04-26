@@ -108,23 +108,26 @@ If you see a JSON response with browser info — you're good.
 
 ## Install
 
-### As CLI tool
+### 1. Install the CLI (required)
 
 ```bash
 npm install -g @petukhovart/agent-view
+agent-view --version   # should print 0.3.0+
 ```
 
-### As Claude Code plugin
+Everything works from this alone — `agent-view dom`, `screenshot`, `eval`, etc.
+
+### 2. (Optional) Claude Code plugin
+
+If you use Claude Code, also install the plugin so Claude knows *when* and *how* to call agent-view automatically:
 
 ```bash
-# Add marketplace (once)
+# In Claude Code:
 /plugin marketplace add PetukhovArt/agent-view
-
-# Install plugin
 /plugin install agent-view@agent-view
 ```
 
-This gives Claude the `/agent-view:verify` skill — it knows when and how to use agent-view for visual verification during development workflows.
+This adds the `/agent-view:verify` skill — workflow instructions for visual verification after code changes. The plugin **does not bundle the CLI**; the npm install above is still required.
 
 ## Quick start
 
