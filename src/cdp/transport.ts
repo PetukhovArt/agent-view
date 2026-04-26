@@ -321,16 +321,14 @@ export async function connectToPage(
   }
 
   async function resolveBoxCenter(backendNodeId: number, scrollIntoView: boolean): Promise<Point> {
-    const [{ object }, { model }] = await Promise.all([
-      DOM.resolveNode({ backendNodeId }),
-      DOM.getBoxModel({ backendNodeId }),
-    ])
     if (scrollIntoView) {
+      const { object } = await DOM.resolveNode({ backendNodeId })
       await Runtime.callFunctionOn({
         objectId: object.objectId,
         functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
       })
     }
+    const { model } = await DOM.getBoxModel({ backendNodeId })
     const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
     return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 }
   }

@@ -14,6 +14,7 @@ Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but wor
 - **Screenshots** — full-res PNG or scaled JPEG (~3–12× fewer vision tokens)
 - **Interaction** — click, fill, and drag by ref or coordinates; works with Vue/React/native frameworks
 - **JS state via `eval`** — read store contents, computed values, async results without scraping the DOM
+- **Reactive state via `watch`** — stream JSON-patch diffs of any expression (store, ref, computed) until a condition is met
 - **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters
 - **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages
 - **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable
@@ -315,6 +316,20 @@ agent-view console --clear                      # drop in-memory ring
 ```
 
 Default attached target types: `page`, `shared_worker`, `service_worker`. Override with `consoleTargets` in config.
+
+### `watch`
+
+Polls a JS expression and streams JSON-patch (RFC 6902) diffs as it changes. Closes the "what changed between click and final state?" gap that screenshots and DOM dumps can't cover. **Requires `"allowEval": true`** (same gate as `eval`).
+
+```bash
+agent-view watch "store.cart.total"                          # 250ms poll, exits at 10 changes or 30s
+agent-view watch "appState" --interval 100 --duration 60     # tighter cadence, longer window
+agent-view watch "store.status" --until "store.status === 'ready'"  # wait-for assertion
+agent-view watch "appState" --max-changes 1                  # snapshot first change after a click
+agent-view watch "appState" --json                           # NDJSON, one frame per line
+```
+
+Output frames: `init` (baseline value), `diff` (RFC 6902 ops since last frame), `error`, `stop`. SIGINT exits cleanly. Snapshot size cap 256 KB — narrow the expression (e.g. `store.cart.items.length`) when watching large objects.
 
 ### `stop`
 

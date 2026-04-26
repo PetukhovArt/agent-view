@@ -9,6 +9,23 @@
   flags `--from`, `--to`, `--from-pos`, `--to-pos`, `--steps`, `--button`, `--hold-ms`, `--window`.
   Closes #1.
 - `PageSession.getBoxCenter` and `PageSession.dragBetweenPositions` on the CDP session API
+- `agent-view watch <expression>` — reactive state debugger. Polls a JS expression at
+  fixed interval, streams JSON-patch (RFC 6902) diffs to stdout. Flags `--interval`,
+  `--duration`, `--max-changes`, `--until`, `--full`, `--json`, `--target`, `--window`.
+  Gated by `"allowEval": true`. Closes long-standing "what changed between click and
+  final state?" gap.
+- `WatchSession` server-side handler with NDJSON streaming over the existing socket
+  framing; idle-timer pause while streaming handlers are alive
+- `fast-json-patch` dependency for diff computation
+- `bench/app` — drag/drop section (handle + drop-zone in fixed-size absolute stage) for
+  end-to-end exercise of the new `drag` command
+
+### Fixed
+
+- `resolveBoxCenter` now scrolls the element into view **before** reading the box model.
+  Previously `DOM.resolveNode`/`DOM.getBoxModel` ran in parallel with `scrollIntoViewIfNeeded`,
+  so coordinates were captured pre-scroll. Critical for `drag` on off-screen elements
+  (click was tolerant since the element usually ended up in viewport anyway).
 
 ## [0.3.0] - 2026-04-26
 

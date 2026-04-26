@@ -4,25 +4,29 @@ Planned features to research and ship, ordered by priority (highest first). Each
 
 ---
 
+## Done
+
+### ✅ `agent-view watch <expr>` — reactive state debugger (Iteration 7, 2026-04-27)
+Polls a JS expression at fixed interval, streams JSON-patch (RFC 6902) diffs to stdout.
+Flags: `--interval`, `--duration`, `--max-changes`, `--until`, `--full`, `--json`, `--target`, `--window`.
+Generic-expression MVP shipped; framework adapters (Pinia/Redux/Zustand/MobX/Vue ref) deferred to Iteration 2.
+Spec: `docs/superpowers/specs/2026-04-27-watch-design.md`.
+
 ## High priority
 
-### 1. `agent-view watch <expr>` — reactive state debugger
-Polls or Proxy-traps a runtime expression, emits a diff log of every change with timestamp and (where possible) stack trace. Works against Vue refs, Pinia, Redux, Zustand, MobX.
-**Payoff:** answers "the click did X but the state shows Y — what happened in between?". Today only the final state is visible; this is the biggest agent-debugging gap that screenshots and DOM dumps can't cover. Also enables time-based assertions (`wait until store.status === 'ready'`) that currently require bash polling.
-
-### 2. `agent-view skill init` — project-aware skill generation
+### 1. `agent-view skill init` — project-aware skill generation
 Reads `package.json`, entry files, and `agent-view.config.json`; emits a project-specific section for `verify/SKILL.md` with real store paths, worker target ids, and common UI surfaces.
 **Payoff:** every new project today re-discovers the same patterns. With this the skill ships pre-tuned per repo, agent onboarding drops from minutes to seconds, and `eval` calls hit the right path on the first try instead of probing.
 
-### 3. `agent-view mcp` — MCP server mode
+### 2. `agent-view mcp` — MCP server mode
 Wraps the existing CLI as an MCP server. No core changes; one new transport.
 **Payoff:** Cursor, Cline, Aider, Continue, and any MCP-aware agent get the same verification loop for free. Single library, every agent.
 
-### 4. `agent-view network` — Network domain capture
+### 3. `agent-view network` — Network domain capture
 Captures CDP `Network` events: request/response timeline, headers, response body via `Network.getResponseBody`. Separate RFC.
 **Payoff:** closes the largest remaining verify-flow blind spot. Catches silent 404s, CORS blocks, missing auth headers, slow XHRs that never surface in console.
 
-### 5. `agent-view eval --main` — Electron main-process eval
+### 4. `agent-view eval --main` — Electron main-process eval
 Connects to Electron's Node inspector port (`--inspect=PORT`) and evaluates in the main process.
 **Payoff:** today agent-view sees only the renderer. IPC handlers, fs operations, native modules, and app lifecycle are invisible. This closes the one Electron gap Playwright has and we don't.
 

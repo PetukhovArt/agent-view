@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Visual + runtime verification of desktop apps via Chrome DevTools Protocol. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application — DOM, screenshots, scene graph, runtime state in pages and SharedWorkers/ServiceWorkers, or console errors. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM, check store/state, read worker, console errors, runtime check, eval in page."
+description: "Visual + runtime verification of desktop apps via Chrome DevTools Protocol. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application — DOM, screenshots, scene graph, runtime state in pages and SharedWorkers/ServiceWorkers, console errors, or reactive-state diffs over time. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM, check store/state, watch state changes, what changed after click, wait until state, read worker, console errors, runtime check, eval in page."
 allowed-tools: Bash(agent-view *), Bash(rtk agent-view *)
 ---
 
@@ -65,6 +65,24 @@ When to reach for `eval` instead of `dom`:
 - The target is a worker (`shared_worker`, `service_worker`, `worker`) — DOM doesn't exist there.
 - You need a precise number/string answer, not a tree to scan.
 
+### Reactive State (`watch`)
+
+Streams JSON-patch diffs of an expression over time. Use when you need to see *what changed* between an action and a final state — `eval` shows the snapshot, `watch` shows the trajectory. **Requires `"allowEval": true`.**
+
+```bash
+agent-view watch "store.cart.total"                                # 250ms poll, default 10 changes or 30s
+agent-view watch "appState" --until "appState.status === 'ready'"  # wait-for-condition with diff log
+agent-view watch "store.user" --max-changes 1                      # capture exactly one change after a click
+agent-view watch "appState" --json                                 # NDJSON, machine-readable
+```
+
+When to reach for `watch` instead of `eval`:
+- Debugging "the click did X but state shows Y — what happened in between?"
+- Time-based assertions ("wait until store.status === 'ready'") — `--until` exits cleanly when truthy.
+- Confirming an action triggered the *expected* sequence of mutations, not just the final state.
+
+Output: `init` line (baseline), one line per RFC 6902 op (`replace /path old → new`, `add /items/0 ...`), final `stop` line with reason. Snapshot size cap 256 KB — narrow the expression (`store.x.y`, not `store`) for large objects.
+
 ### Console (`console`)
 
 Streams `Runtime.consoleAPICalled` + `Log.entryAdded`. Use to confirm a flow finished without errors, or to surface a specific warning after an interaction.
@@ -120,6 +138,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 |---|---|---|
 | Element existence / text / role | `dom --filter` | Cheapest, structured, no vision tokens |
 | App state, store contents, computed values | `eval "expr"` | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable |
+| State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
 | Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
 | Layout, spacing, visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |

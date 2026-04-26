@@ -134,7 +134,7 @@ describe('clickByNodeId', () => {
     mockDispatchMouse.mockClear()
   })
 
-  it('calls resolveNode and getBoxModel before callFunctionOn (parallel batch)', async () => {
+  it('scrolls element into view before reading the box model (so coords are post-scroll)', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
@@ -145,7 +145,7 @@ describe('clickByNodeId', () => {
     expect(resolveIdx).toBeGreaterThanOrEqual(0)
     expect(boxIdx).toBeGreaterThanOrEqual(0)
     expect(scrollIdx).toBeGreaterThan(resolveIdx)
-    expect(scrollIdx).toBeGreaterThan(boxIdx)
+    expect(boxIdx).toBeGreaterThan(scrollIdx)
   })
 
   it('sends mousePressed before mouseReleased', async () => {

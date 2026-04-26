@@ -37,6 +37,7 @@
     <a href="#search">Search</a>
     <a href="#modal">Modal</a>
     <a href="#table">Table</a>
+    <a href="#drag">Drag</a>
   </nav>
 
   <main>
@@ -192,6 +193,24 @@
       <h2>Hidden Modal B</h2>
       <button>Hidden Button B1</button>
       <p>This section is also hidden.</p>
+    </section>
+
+    <section id="drag" class="section" aria-labelledby="drag-heading">
+      <h2 id="drag-heading">Drag</h2>
+      <div id="drag-stage" style="position:relative;height:240px;width:100%;max-width:360px;">
+        <div id="drag-handle"
+             role="button"
+             aria-label="Drag handle"
+             style="position:absolute;left:0;top:0;width:80px;height:80px;background:#4a90e2;color:#fff;display:flex;align-items:center;justify-content:center;cursor:grab;user-select:none;border-radius:8px;touch-action:none;">
+          Drag me
+        </div>
+        <div id="drop-zone"
+             aria-label="Drop zone"
+             style="position:absolute;left:120px;top:60px;width:200px;height:120px;border:2px dashed #888;display:flex;align-items:center;justify-content:center;color:#555;">
+          Drop here
+        </div>
+      </div>
+      <p id="drag-status" role="status" aria-live="polite" style="margin-top:8px;">idle</p>
     </section>
 
     <section id="async-container" class="section" aria-labelledby="async-heading">
@@ -386,6 +405,55 @@
 
     document.getElementById('reset-btn').addEventListener('click', () => {
       resetFeedback()
+    })
+
+    // ── Drag & drop (mouse-based, CDP-friendly) ─────────────────────────────────
+    const dragHandle = document.getElementById('drag-handle')
+    const dragStage = document.getElementById('drag-stage')
+    const dropZone = document.getElementById('drop-zone')
+    const dragStatus = document.getElementById('drag-status')
+    let dragging = false
+    let offsetX = 0
+    let offsetY = 0
+
+    dragHandle.addEventListener('mousedown', (e) => {
+      dragging = true
+      const r = dragHandle.getBoundingClientRect()
+      offsetX = e.clientX - r.left
+      offsetY = e.clientY - r.top
+      dragHandle.style.cursor = 'grabbing'
+      dragStatus.textContent = 'dragging'
+      window.appState.lastAction = 'drag:start'
+      console.log('[bench] drag:start at', e.clientX, e.clientY)
+    })
+
+    function setHandleViewportPos(clientX, clientY) {
+      const stage = dragStage.getBoundingClientRect()
+      dragHandle.style.left = (clientX - offsetX - stage.left) + 'px'
+      dragHandle.style.top = (clientY - offsetY - stage.top) + 'px'
+    }
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return
+      setHandleViewportPos(e.clientX, e.clientY)
+    })
+
+    document.addEventListener('mouseup', (e) => {
+      if (!dragging) return
+      dragging = false
+      dragHandle.style.cursor = 'grab'
+      const dz = dropZone.getBoundingClientRect()
+      const inside = e.clientX >= dz.left && e.clientX <= dz.right && e.clientY >= dz.top && e.clientY <= dz.bottom
+      if (inside) {
+        dragStatus.textContent = 'dropped'
+        dropZone.style.background = '#cfe9c8'
+        window.appState.lastAction = 'drag:dropped'
+        console.log('[bench] drag:dropped at', e.clientX, e.clientY)
+      } else {
+        dragStatus.textContent = 'released-outside'
+        window.appState.lastAction = 'drag:released-outside'
+        console.log('[bench] drag:released-outside at', e.clientX, e.clientY)
+      }
     })
   </script>
 </body>
