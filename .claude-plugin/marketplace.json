@@ -1,0 +1,14 @@
+{
+  "name": "agent-view",
+  "owner": {
+    "name": "PetukhovArt",
+    "url": "https://github.com/PetukhovArt"
+  },
+  "plugins": [
+    {
+      "name": "agent-view",
+      "source": ".",
+      "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, and read WebGL scene graphs."
+    }
+  ]
+}
