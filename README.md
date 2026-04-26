@@ -1,12 +1,22 @@
 # agent-view
 
-**Give your AI agent eyes and hands for desktop apps.**
+**Give your AI agent eyes and hands for complex desktop apps verification**
 
 AI coding agents can write code, run tests, and read logs — but they can't *see* what the app actually looks like. Without visual verification, an agent is essentially **coding blind** — builds pass, tests are green, but the login form is broken, the button is off-screen, or the modal never appears.
 
-agent-view bridges that gap: it connects to any Chromium-based desktop app via Chrome DevTools Protocol and lets the agent inspect the UI, take screenshots, click buttons, and fill forms.
+agent-view bridges that gap: it connects to any Chromium-based desktop app via Chrome DevTools Protocol and lets the agent inspect, interact, and verify.
 
 Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but works with any AI agent or automation pipeline that can call CLI commands.
+
+## What it does
+
+- **DOM accessibility tree** with ref IDs — compact, LLM-friendly, with text/role filters
+- **Screenshots** — full-res PNG or scaled JPEG (~3–12× fewer vision tokens)
+- **Interaction** — click and fill by ref or coordinates; works with Vue/React/native frameworks
+- **JS state via `eval`** — read store contents, computed values, async results without scraping the DOM
+- **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters
+- **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages
+- **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable
 
 ## Why CLI, not MCP?
 
@@ -26,58 +36,55 @@ Code → Launch → See → Verify → Fix → See again
 
 The agent writes code, then immediately checks what the user would see. If something's wrong, it fixes and re-checks — no human needed. This catches problems that builds and tests miss: CSS regressions, broken layouts, missing error messages, silent IPC failures.
 
-## v0.3.0 — DevTools access (eval, console, workers)
+## Install
 
-Beyond DOM and screenshots, v0.3.0 adds direct access to JS state and console — including SharedWorker / ServiceWorker. Useful when «what's rendered» isn't enough and you need to check what's actually in the store, in a worker, or in the console.
+### Claude Code (recommended)
 
-- `eval <expr>` — read state directly (`store.user.role`, computed values, async getters). Gated by `"allowEval": true` in config.
-- `eval --target <worker>` — same, but inside a SharedWorker / ServiceWorker / dedicated Worker.
-- `console` — capture `console.log/warn/error` per page or per worker. `--clear` for baselines, `--level` to filter.
-- `targets` — list every connectable CDP target.
+Two steps — both required:
 
-See [Commands](#commands) for flags. Full notes in [CHANGELOG](CHANGELOG.md).
+```bash
+# 1. Install the plugin — adds the /agent-view:verify skill so Claude knows when and how to call agent-view
+/plugin marketplace add PetukhovArt/agent-view
+/plugin install agent-view@agent-view
 
-## Performance
+# 2. Install the CLI — the skill calls these binaries; the plugin doesn't bundle them
+npm install -g @petukhovart/agent-view
+```
 
-AI agents run dozens of `dom → click → dom` verification cycles per session. Every millisecond compounds. agent-view v0.2.0 is built specifically for this pattern.
+Verify:
 
-### Benchmark results (Electron app, ~200 AX nodes)
+```bash
+agent-view --version   # 0.3.0+
+```
 
-| Scenario | v0.1.0 | v0.2.0 | vs Playwright* |
-|---|---|---|---|
-| `dom` cold fetch | 10ms | 2ms | ~30–80ms |
-| `dom` warm (cache hit) | 10ms | 1ms | ~30–80ms |
-| Full cycle `dom → click → dom` | 27ms | 17ms | ~75ms |
-| `click --filter "Save"` | 12ms | 17ms† | ~15–30ms |
+### Standalone CLI (any other agent, CI, or scripting)
 
-\* *Playwright estimate based on architectural analysis — no published Electron-specific benchmarks exist*
-† *queryAXTree has CDP overhead that exceeds the benefit on small DOMs; improves on large production DOMs (1000+ nodes)*
+```bash
+npm install -g @petukhovart/agent-view
+```
 
-### What makes it fast
-
-**AX tree cache (300ms TTL).** The single biggest win. When an agent calls `dom`, then immediately `click --filter`, the second fetch hits the in-process cache instead of making a CDP round-trip. Cache is invalidated aggressively — busted on every `click`, `fill`, or page navigation.
-
-**Parallel CDP calls in click.** Previously 5 serial round-trips; now 3 parallel batches. `DOM.resolveNode` and `DOM.getBoxModel` run concurrently, then mouse events fire back-to-back without waiting for each response (the same approach Playwright uses internally).
-
-**`Accessibility.queryAXTree` for targeted lookups.** Plain string filters (`click --filter "Save"`) and `role:name` filters (`click --filter "button:Save"`) query the browser directly instead of fetching the full tree. Falls back gracefully on older Electron versions.
-
-**Raw CDP, no relay.** No Playwright client-server relay between your agent and the browser. The server process holds the CDP WebSocket connection and reuses it across commands.
+Everything works from this alone — `agent-view dom`, `screenshot`, `eval`, etc. Skip the plugin step.
 
 ## Enabling CDP
+
+agent-view talks to your app over Chrome DevTools Protocol. Your app must be launched with a debugging port open.
 
 ### Recommended: in code (reliable, works with any build tool)
 
 Add to your Electron main process:
 
 ```js
-app.commandLine.appendSwitch('remote-debugging-port', '9222');
+app.commandLine.appendSwitch('remote-debugging-port', '9876');
 ```
+
+> Any free port works — `9876` is just an example. Avoid `9222` (Chrome's own default remote-debugging port) to prevent
+> collisions when Chrome is open.
 
 For dev-only:
 
 ```js
 if (!app.isPackaged) {
-  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+    app.commandLine.appendSwitch('remote-debugging-port', '9876');
 }
 ```
 
@@ -85,49 +92,26 @@ if (!app.isPackaged) {
 
 ```bash
 # Plain Electron
-electron . --remote-debugging-port=9222
+electron . --remote-debugging-port=9876
 
 # electron-vite (note the -- to forward the flag past the build tool)
-npx electron-vite dev -- --remote-debugging-port=9222
+npx electron-vite dev -- --remote-debugging-port=9876
 ```
 
 ### Other runtimes
 
-| Runtime | Setup |
-|---------|-------|
-| **Tauri** | CDP via devtools configuration |
-| **Any Chromium app** | `--remote-debugging-port=9222` launch flag |
+| Runtime              | Setup                                      |
+|----------------------|--------------------------------------------|
+| **Tauri**            | CDP via devtools configuration             |
+| **Any Chromium app** | `--remote-debugging-port=9876` launch flag |
 
 ### Verify CDP is working
 
 ```bash
-curl -s http://localhost:9222/json/version
+curl -s http://localhost:9876/json/version
 ```
 
-If you see a JSON response with browser info — you're good.
-
-## Install
-
-### 1. Install the CLI (required)
-
-```bash
-npm install -g @petukhovart/agent-view
-agent-view --version   # should print 0.3.0+
-```
-
-Everything works from this alone — `agent-view dom`, `screenshot`, `eval`, etc.
-
-### 2. (Optional) Claude Code plugin
-
-If you use Claude Code, also install the plugin so Claude knows *when* and *how* to call agent-view automatically:
-
-```bash
-# In Claude Code:
-/plugin marketplace add PetukhovArt/agent-view
-/plugin install agent-view@agent-view
-```
-
-This adds the `/agent-view:verify` skill — workflow instructions for visual verification after code changes. The plugin **does not bundle the CLI**; the npm install above is still required.
+If you see a JSON response with process info — you're good.
 
 ## Quick start
 
@@ -147,7 +131,7 @@ agent-view screenshot        # PNG screenshot
 
 # 4. Interact
 agent-view click 5           # Click element by ref
-agent-view fill 3 "hello"   # Type into input
+agent-view fill 3 "hello"    # Type into input
 
 # 5. Verify the result
 agent-view dom --filter "success"   # Check for expected element
@@ -169,22 +153,25 @@ Running `agent-view init` in your project root generates `agent-view.config.json
 ```json
 {
   "runtime": "electron",
-  "port": 9222,
+  "port": 9876,
   "launch": "npm run dev"
 }
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `runtime` | yes | `"electron"`, `"tauri"`, or `"browser"` |
-| `port` | yes | CDP debugging port |
-| `launch` | no | Command to start the app |
-| `webgl.engine` | no | `"pixi"` (scene extractor architecture supports adding more engines) |
-| `allowEval` | no | `true` to enable `agent-view eval`. Off by default — opt-in for arbitrary JS execution |
-| `consoleBufferSize` | no | Per-target console ring capacity. Default `500` |
-| `consoleTargets` | no | Target types `agent-view console` auto-attaches to. Default `["page", "shared_worker", "service_worker"]` |
+| Field               | Required | Description                                                                                               |
+|---------------------|----------|-----------------------------------------------------------------------------------------------------------|
+| `runtime`           | yes      | `"electron"`, `"tauri"`, or `"browser"`                                                                   |
+| `port`              | yes      | CDP debugging port                                                                                        |
+| `launch`            | no       | Command to start the app                                                                                  |
+| `webgl.engine`      | no       | `"pixi"` (scene extractor architecture supports adding more engines)                                      |
+| `allowEval`         | no       | `true` to enable `agent-view eval`. Off by default — opt-in for arbitrary JS execution                    |
+| `consoleBufferSize` | no       | Per-target console ring capacity. Default `500`                                                           |
+| `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to. Default `["page", "shared_worker", "service_worker"]` |
 
 ## Commands
+
+Every command targeting a window accepts `--window <id|title-substring>` (IDs come from `discover`). Examples below omit
+it for brevity.
 
 ### `init`
 
@@ -206,7 +193,6 @@ Dumps the accessibility tree in compact text format. Each element gets a session
 agent-view dom
 agent-view dom --filter "Submit"    # Filter by text/role
 agent-view dom --depth 3            # Limit tree depth
-agent-view dom --window "Settings"  # Target specific window
 agent-view dom --text               # Fall back to DOM textContent search when AX returns no match
 ```
 
@@ -235,7 +221,6 @@ Captures a screenshot, saves to temp dir, prints the file path. PNG by default; 
 
 ```bash
 agent-view screenshot
-agent-view screenshot --window "Settings"
 agent-view screenshot --scale 0.5             # Half-res JPEG (~3× fewer vision tokens)
 agent-view screenshot --scale 0.25            # Quarter-res JPEG (~12× fewer, 1 tile)
 ```
@@ -316,43 +301,47 @@ Default attached target types: `page`, `shared_worker`, `service_worker`. Overri
 
 Stops the background lazy server.
 
-## Multiwindow
-
-All commands accept `--window` with either an ID (from `discover`) or a window title substring:
-
-```bash
-agent-view dom --window "Settings"
-agent-view screenshot --window "About"
-```
-
 ## Output format
 
-| Command | Format | Why |
-|---------|--------|-----|
+| Command                | Format     | Why                          |
+|------------------------|------------|------------------------------|
 | `dom`, `scene`, `snap` | Plain text | LLM-friendly, minimal tokens |
-| `discover` | JSON | Machine-parseable |
-| `screenshot` | File path | Agent reads the image |
+| `discover`             | JSON       | Machine-parseable            |
+| `screenshot`           | File path  | Agent reads the image        |
 
-## Claude Code plugin
+## Performance
 
-agent-view ships as a Claude Code plugin with a built-in `verify` skill. The skill teaches Claude how to use agent-view for UI verification after code changes.
+AI agents run dozens of `dom → click → dom` verification cycles per session. Every millisecond compounds. agent-view is
+built specifically for this pattern.
 
-### Local development
+### Benchmark results (Electron app, ~200 AX nodes)
 
-```bash
-claude --plugin-dir /path/to/agent-view
-```
+| Scenario                       | v0.1.0 | v0.2.0+ | vs Playwright* |
+|--------------------------------|--------|---------|----------------|
+| `dom` cold fetch               | 10ms   | 2ms     | ~30–80ms       |
+| `dom` warm (cache hit)         | 10ms   | 1ms     | ~30–80ms       |
+| Full cycle `dom → click → dom` | 27ms   | 17ms    | ~75ms          |
+| `click --filter "Save"`        | 12ms   | 17ms†   | ~15–30ms       |
 
-The skill becomes available as `/agent-view:verify`.
+\* *Playwright estimate based on architectural analysis — no published Electron-specific benchmarks exist*
+† *queryAXTree has CDP overhead that exceeds the benefit on small DOMs; improves on large production DOMs (1000+ nodes)*
 
-### After npm install
+### What makes it fast
 
-```bash
-# Find where the package is installed
-npm root -g
-# Use that path with --plugin-dir
-claude --plugin-dir "$(npm root -g)/agent-view"
-```
+**AX tree cache (300ms TTL).** The single biggest win. When an agent calls `dom`, then immediately `click --filter`, the
+second fetch hits the in-process cache instead of making a CDP round-trip. Cache is invalidated aggressively — busted on
+every `click`, `fill`, or page navigation.
+
+**Parallel CDP calls in click.** Previously 5 serial round-trips; now 3 parallel batches. `DOM.resolveNode` and
+`DOM.getBoxModel` run concurrently, then mouse events fire back-to-back without waiting for each response (the same
+approach Playwright uses internally).
+
+**`Accessibility.queryAXTree` for targeted lookups.** Plain string filters (`click --filter "Save"`) and `role:name`
+filters (`click --filter "button:Save"`) query the browser directly instead of fetching the full tree. Falls back
+gracefully on older Electron versions.
+
+**Raw CDP, no relay.** No Playwright client-server relay between your agent and the browser. The server process holds
+the CDP WebSocket connection and reuses it across commands.
 
 ## Example: testing a login flow
 
@@ -381,8 +370,8 @@ agent-view screenshot
 
 ### CDP not responding
 
-1. Check the port is listening: `curl -s http://localhost:9222/json/version`
-2. For electron-vite: make sure you use `--` before the flag: `npx electron-vite dev -- --remote-debugging-port=9222`
+1. Check the port is listening: `curl -s http://localhost:9876/json/version`
+2. For electron-vite: make sure you use `--` before the flag: `npx electron-vite dev -- --remote-debugging-port=9876`
 3. Restart the app — HMR doesn't restart the main process
 
 ### Stale refs after HMR

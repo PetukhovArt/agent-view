@@ -18,5 +18,4 @@ export type AgentViewConfig = {
   consoleBufferSize?: number
   /** Target types that `agent-view console` auto-attaches to on first call. */
   consoleTargets?: ReadonlyArray<TargetType>
-  verify?: Record<string, { steps: string[] }>
 }

@@ -61,7 +61,7 @@ export function generateConfig(cwd: string): AgentViewConfig {
 
   const config: AgentViewConfig = {
     runtime,
-    port: 9222,
+    port: 9876,
     launch,
   }
 
