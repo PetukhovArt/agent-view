@@ -12,7 +12,7 @@ Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but wor
 
 - **DOM accessibility tree** with ref IDs — compact, LLM-friendly, with text/role filters
 - **Screenshots** — full-res PNG or scaled JPEG (~3–12× fewer vision tokens)
-- **Interaction** — click and fill by ref or coordinates; works with Vue/React/native frameworks
+- **Interaction** — click, fill, and drag by ref or coordinates; works with Vue/React/native frameworks
 - **JS state via `eval`** — read store contents, computed values, async results without scraping the DOM
 - **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters
 - **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages
@@ -214,6 +214,25 @@ Types text into an input. Uses native value setter + dispatches input/change eve
 ```bash
 agent-view fill 3 "hello@example.com"
 ```
+
+### `drag`
+
+HTML5 / pointer-driven drag-and-drop via CDP `Input.dispatchMouseEvent`
+(`mousePressed` → N × `mouseMoved` → `mouseReleased`). Real mouse events, not
+synthesized JS events — works with `vue-draggable-resizable`, `react-grid-layout`,
+gridstack, kanban boards, file drop zones, map pin drags, resize handles.
+
+```bash
+agent-view drag --from 42 --to 88                   # ref → ref
+agent-view drag --from-pos 86,792 --to-pos 640,200  # coord → coord (canvas, custom DnD)
+agent-view drag --from 42 --to-pos 640,200          # mixed
+agent-view drag --from 5 --to 9 --steps 20 --hold-ms 150
+```
+
+`--steps` (default 10) controls intermediate `mouseMoved` events so libraries
+that throttle on movement deltas still see continuous motion. `--hold-ms`
+inserts a pause between press and the first move (some libs require >100ms
+for touch-style activation). `--button` accepts `left|right|middle`.
 
 ### `screenshot`
 

@@ -107,6 +107,8 @@ function makeMockConn(overrides: Partial<PageSession> = {}): PageSession {
     clickByNodeId: vi.fn().mockResolvedValue(undefined),
     clickAtPosition: vi.fn().mockResolvedValue(undefined),
     fillByNodeId: vi.fn().mockResolvedValue(undefined),
+    getBoxCenter: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
+    dragBetweenPositions: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockResolvedValue(undefined),
     onConsole: vi.fn().mockReturnValue(() => {}),
     close: vi.fn().mockResolvedValue(undefined),

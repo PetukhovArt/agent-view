@@ -15,9 +15,12 @@ import {
   TargetType,
   ConsoleLevel,
   EvaluationError,
+  MouseButton,
   type PageSession,
   type RuntimeSession,
   type TargetInfo,
+  type Point,
+  type DragOpts,
 } from '../cdp/types.js'
 import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
@@ -142,6 +145,7 @@ export class AgentViewServer {
     launch: (req: ServerRequest) => this.handleLaunch(req),
     dom: (req: ServerRequest) => this.handleDom(req),
     click: (req: ServerRequest) => this.handleClick(req),
+    drag: (req: ServerRequest) => this.handleDrag(req),
     fill: (req: ServerRequest) => this.handleFill(req),
     wait: (req: ServerRequest) => this.handleWait(req),
     screenshot: (req: ServerRequest) => this.handleScreenshot(req),
@@ -482,6 +486,56 @@ export class AgentViewServer {
     await conn.clickByNodeId(entry.backendDOMNodeId)
     this.axTreeCache.invalidate(cacheKey)
     return { ok: true, data: `Clicked ref ${ref}` }
+  }
+
+  private async handleDrag(req: ServerRequest): Promise<ServerResponse> {
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const cacheKey = `${req.port}:${targetId}`
+
+    const from = await this.resolveDragPoint(req, conn, 'from', { scrollIntoView: true })
+    if ('error' in from) return { ok: false, error: from.error }
+    const to = await this.resolveDragPoint(req, conn, 'to', { scrollIntoView: false })
+    if ('error' in to) return { ok: false, error: to.error }
+
+    const opts: DragOpts = {
+      steps: argNum(req.args, 'steps'),
+      button: parseMouseButton(argStr(req.args, 'button')),
+      holdMs: argNum(req.args, 'holdMs'),
+    }
+
+    await conn.dragBetweenPositions(from.point, to.point, opts)
+    this.axTreeCache.invalidate(cacheKey)
+    return {
+      ok: true,
+      data: `Dragged (${from.point.x.toFixed(0)}, ${from.point.y.toFixed(0)}) → (${to.point.x.toFixed(0)}, ${to.point.y.toFixed(0)})`,
+    }
+  }
+
+  private async resolveDragPoint(
+    req: ServerRequest,
+    conn: PageSession,
+    side: 'from' | 'to',
+    opts: { scrollIntoView: boolean },
+  ): Promise<{ point: Point } | { error: string }> {
+    const ref = argNum(req.args, `${side}Ref`)
+    const x = argNum(req.args, `${side}X`)
+    const y = argNum(req.args, `${side}Y`)
+
+    if (ref !== undefined) {
+      const entry = this.refStore.get(ref)
+      if (!entry) {
+        return { error: `Invalid --${side} ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
+      }
+      const point = await conn.getBoxCenter(entry.backendDOMNodeId, opts)
+      return { point }
+    }
+
+    if (x !== undefined && y !== undefined) {
+      return { point: { x, y } }
+    }
+
+    return { error: `drag requires --${side} <ref> or --${side}-pos <x,y>` }
   }
 
   private async handleFill(req: ServerRequest): Promise<ServerResponse> {
@@ -828,6 +882,12 @@ export class AgentViewServer {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+function parseMouseButton(value: string | undefined): MouseButton | undefined {
+  if (!value) return undefined
+  const valid = Object.values(MouseButton) as string[]
+  return valid.includes(value) ? (value as MouseButton) : undefined
+}
 
 function parseLevelFilter(levels: string[] | undefined): ReadonlySet<ConsoleLevel> | undefined {
   if (!levels || levels.length === 0) return undefined

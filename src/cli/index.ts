@@ -13,6 +13,7 @@ import { runDiscover } from './commands/discover.js'
 import { runLaunch } from './commands/launch.js'
 import { runDom } from './commands/dom.js'
 import { runClick } from './commands/click.js'
+import { runDrag } from './commands/drag.js'
 import { runFill } from './commands/fill.js'
 import { runScreenshot } from './commands/screenshot.js'
 import { runScene } from './commands/scene.js'
@@ -73,6 +74,22 @@ program
   .action(async (ref, options) => {
     const config = requireConfig()
     await runClick(config, ref, options)
+  })
+
+program
+  .command('drag')
+  .description('Drag from one point to another via CDP mouse events (HTML5/pointer DnD)')
+  .option('--from <ref>', 'Source element by ref from `dom`')
+  .option('--to <ref>', 'Target element by ref from `dom`')
+  .option('--from-pos <x,y>', 'Source coordinates (canvas, custom DnD)')
+  .option('--to-pos <x,y>', 'Target coordinates')
+  .option('--steps <n>', 'Intermediate mouseMoved events (default 10)')
+  .option('--button <name>', 'Mouse button: left|right|middle (default left)')
+  .option('--hold-ms <n>', 'Pause between press and first move, ms (default 0)')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runDrag(config, options)
   })
 
 program

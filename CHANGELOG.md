@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `agent-view drag` — HTML5/pointer drag-and-drop via CDP `Input.dispatchMouseEvent`
+  (`mousePressed` → N × `mouseMoved` → `mouseReleased`). Endpoints by ref or coordinates;
+  flags `--from`, `--to`, `--from-pos`, `--to-pos`, `--steps`, `--button`, `--hold-ms`, `--window`.
+  Closes #1.
+- `PageSession.getBoxCenter` and `PageSession.dragBetweenPositions` on the CDP session API
+
 ## [0.3.0] - 2026-04-26
 
 ### Added

@@ -197,6 +197,93 @@ describe('clickByNodeId', () => {
   })
 })
 
+describe('dragBetweenPositions', () => {
+  beforeEach(() => {
+    callOrder.length = 0
+    mockDispatchMouse.mockClear()
+  })
+
+  it('emits press → moves → release in order', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 50 }, { steps: 4 })
+
+    const types = mockDispatchMouse.mock.calls.map((c) => c[0].type)
+    expect(types[0]).toBe('mousePressed')
+    expect(types[types.length - 1]).toBe('mouseReleased')
+    // 4 intermediate + 1 final move = 5 mouseMoved events
+    const moves = types.filter((t) => t === 'mouseMoved')
+    expect(moves).toHaveLength(5)
+  })
+
+  it('default steps = 10 produces 11 mouseMoved events (10 interior + 1 final)', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 })
+
+    const moves = mockDispatchMouse.mock.calls.filter((c) => c[0].type === 'mouseMoved')
+    expect(moves).toHaveLength(11)
+  })
+
+  it('final mouseReleased lands exactly at the destination', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.dragBetweenPositions({ x: 10, y: 20 }, { x: 200, y: 300 }, { steps: 3 })
+
+    const release = mockDispatchMouse.mock.calls.find((c) => c[0].type === 'mouseReleased')
+    expect(release?.[0].x).toBe(200)
+    expect(release?.[0].y).toBe(300)
+  })
+
+  it('intermediate moves interpolate linearly between from and to', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 100 }, { steps: 3 })
+
+    const moves = mockDispatchMouse.mock.calls
+      .filter((c) => c[0].type === 'mouseMoved')
+      .map((c) => ({ x: c[0].x, y: c[0].y }))
+
+    // steps=3 → t = 1/4, 2/4, 3/4, then final at 1
+    expect(moves[0]).toEqual({ x: 25, y: 25 })
+    expect(moves[1]).toEqual({ x: 50, y: 50 })
+    expect(moves[2]).toEqual({ x: 75, y: 75 })
+    expect(moves[3]).toEqual({ x: 100, y: 100 })
+  })
+
+  it('passes button option through to all dispatched events', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 50, y: 50 }, { steps: 2, button: 'right' as never })
+
+    const buttons = new Set(mockDispatchMouse.mock.calls.map((c) => c[0].button))
+    expect(buttons).toEqual(new Set(['right']))
+  })
+})
+
+describe('getBoxCenter', () => {
+  beforeEach(() => {
+    callOrder.length = 0
+    mockDomResolve.mockClear()
+    mockDomBoxModel.mockClear()
+    mockCallFunctionOn.mockClear()
+  })
+
+  it('returns center coordinates from box model', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const point = await conn.getBoxCenter(42)
+    // box content [10,20, 30,20, 30,40, 10,40] → center (20, 30)
+    expect(point).toEqual({ x: 20, y: 30 })
+  })
+
+  it('scrollIntoView=false skips the scroll callFunctionOn', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.getBoxCenter(42, { scrollIntoView: false })
+    expect(mockCallFunctionOn).not.toHaveBeenCalled()
+  })
+
+  it('scrollIntoView default = true triggers callFunctionOn', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.getBoxCenter(42)
+    expect(mockCallFunctionOn).toHaveBeenCalledOnce()
+  })
+})
+
 // ── Session split: page vs runtime factories ──────────────────────────────────
 
 describe('connectToRuntime', () => {

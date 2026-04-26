@@ -26,6 +26,22 @@ export type ScreenshotOpts = {
   scale?: number
 }
 
+export enum MouseButton {
+  Left = 'left',
+  Right = 'right',
+  Middle = 'middle',
+}
+
+export type DragOpts = {
+  /** Number of intermediate `mouseMoved` events between press and release. Default 10. */
+  steps?: number
+  button?: MouseButton
+  /** Pause between `mousePressed` and the first `mouseMoved`, in ms. Some libs require >100ms. */
+  holdMs?: number
+}
+
+export type Point = { x: number; y: number }
+
 export enum ConsoleLevel {
   Log = 'log',
   Info = 'info',
@@ -81,6 +97,10 @@ export type PageSession = RuntimeSession & {
   clickByNodeId: (backendDOMNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
   fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>
+  /** Resolve box-model center for an element. `scrollIntoView` defaults to true. */
+  getBoxCenter: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<Point>
+  /** CDP-level mouse drag: press → N × move → release. */
+  dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<void>
 }
 
 export type AXNode = {

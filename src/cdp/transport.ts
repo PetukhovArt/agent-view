@@ -5,6 +5,7 @@ import {
   ConsoleLevel,
   ConsoleSource,
   EvaluationError,
+  MouseButton,
   type CDPTarget,
   type AXNode,
   type ScreenshotOpts,
@@ -13,6 +14,8 @@ import {
   type PageSession,
   type ConsoleMessage,
   type EvaluateOpts,
+  type DragOpts,
+  type Point,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
 
@@ -299,6 +302,39 @@ export async function connectToPage(
     await Promise.all([pressed, released])
   }
 
+  async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<void> {
+    const steps = Math.max(0, opts?.steps ?? 10)
+    const button = opts?.button ?? MouseButton.Left
+    const holdMs = Math.max(0, opts?.holdMs ?? 0)
+
+    await Input.dispatchMouseEvent({ type: 'mousePressed', x: from.x, y: from.y, button, clickCount: 1 })
+    if (holdMs > 0) await new Promise(r => setTimeout(r, holdMs))
+
+    for (let i = 1; i <= steps; i++) {
+      const t = i / (steps + 1)
+      const x = from.x + (to.x - from.x) * t
+      const y = from.y + (to.y - from.y) * t
+      await Input.dispatchMouseEvent({ type: 'mouseMoved', x, y, button })
+    }
+    await Input.dispatchMouseEvent({ type: 'mouseMoved', x: to.x, y: to.y, button })
+    await Input.dispatchMouseEvent({ type: 'mouseReleased', x: to.x, y: to.y, button, clickCount: 1 })
+  }
+
+  async function resolveBoxCenter(backendNodeId: number, scrollIntoView: boolean): Promise<Point> {
+    const [{ object }, { model }] = await Promise.all([
+      DOM.resolveNode({ backendNodeId }),
+      DOM.getBoxModel({ backendNodeId }),
+    ])
+    if (scrollIntoView) {
+      await Runtime.callFunctionOn({
+        objectId: object.objectId,
+        functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
+      })
+    }
+    const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
+    return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 }
+  }
+
   return {
     target,
 
@@ -345,22 +381,20 @@ export async function connectToPage(
     },
 
     async clickByNodeId(backendNodeId: number): Promise<void> {
-      const [{ object }, { model }] = await Promise.all([
-        DOM.resolveNode({ backendNodeId }),
-        DOM.getBoxModel({ backendNodeId }),
-      ])
-      await Runtime.callFunctionOn({
-        objectId: object.objectId,
-        functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
-      })
-      const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
-      const cx = (x1 + x2 + x3 + x4) / 4
-      const cy = (y1 + y2 + y3 + y4) / 4
-      await dispatchClick(cx, cy)
+      const { x, y } = await resolveBoxCenter(backendNodeId, true)
+      await dispatchClick(x, y)
     },
 
     async clickAtPosition(x: number, y: number): Promise<void> {
       await dispatchClick(x, y)
+    },
+
+    async getBoxCenter(backendNodeId: number, opts?: { scrollIntoView?: boolean }): Promise<Point> {
+      return resolveBoxCenter(backendNodeId, opts?.scrollIntoView ?? true)
+    },
+
+    async dragBetweenPositions(from: Point, to: Point, opts?: DragOpts): Promise<void> {
+      await dispatchDrag(from, to, opts)
     },
 
     async fillByNodeId(backendNodeId: number, value: string): Promise<void> {
