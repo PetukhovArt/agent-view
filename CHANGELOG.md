@@ -10,6 +10,9 @@
   `"allowEval": true` in `agent-view.config.json`. Supports `--target`, `--window`, `--await`, `--json`
 - `agent-view console` — buffered console stream from auto-attached targets; flags
   `--target`, `--follow --timeout`, `--level`, `--since`, `--clear`
+- `screenshot --scale <0..1>` — CDP clip + JPEG encode; ~3–12× fewer Claude vision tokens
+- `dom --text` — DOM `textContent` fallback when the AX tree returns no match
+- `dom --filter` — depth now defaults to unlimited so deep matches aren't truncated
 - `src/cdp/console-stream.ts` — `ConsoleStream` deep module: per-target ring buffer,
   level/since/target filtering, live subscription
 - `CONTEXT.md` — domain glossary

@@ -177,6 +177,9 @@ Running `agent-view init` in your project root generates `agent-view.config.json
 | `port` | yes | CDP debugging port |
 | `launch` | no | Command to start the app |
 | `webgl.engine` | no | `"pixi"` (scene extractor architecture supports adding more engines) |
+| `allowEval` | no | `true` to enable `agent-view eval`. Off by default — opt-in for arbitrary JS execution |
+| `consoleBufferSize` | no | Per-target console ring capacity. Default `500` |
+| `consoleTargets` | no | Target types `agent-view console` auto-attaches to. Default `["page", "shared_worker", "service_worker"]` |
 
 ## Commands
 
@@ -201,7 +204,10 @@ agent-view dom
 agent-view dom --filter "Submit"    # Filter by text/role
 agent-view dom --depth 3            # Limit tree depth
 agent-view dom --window "Settings"  # Target specific window
+agent-view dom --text               # Fall back to DOM textContent search when AX returns no match
 ```
+
+When `--filter` is set, depth defaults to unlimited so deep matches aren't truncated.
 
 ### `click`
 
@@ -222,12 +228,16 @@ agent-view fill 3 "hello@example.com"
 
 ### `screenshot`
 
-Captures a PNG screenshot, saves to temp dir, prints the file path.
+Captures a screenshot, saves to temp dir, prints the file path. PNG by default; JPEG when `--scale` is set.
 
 ```bash
 agent-view screenshot
 agent-view screenshot --window "Settings"
+agent-view screenshot --scale 0.5             # Half-res JPEG (~3× fewer vision tokens)
+agent-view screenshot --scale 0.25            # Quarter-res JPEG (~12× fewer, 1 tile)
 ```
+
+`--scale` accepts a factor in `(0, 1]`. CDP-side clip + JPEG encode — recommended for agent loops where vision tokens dominate cost.
 
 ### `scene`
 
