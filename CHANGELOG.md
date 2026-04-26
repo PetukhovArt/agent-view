@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-27
+
 ### Added
 
 - `agent-view drag` — HTML5/pointer drag-and-drop via CDP `Input.dispatchMouseEvent`
@@ -19,13 +21,6 @@
 - `fast-json-patch` dependency for diff computation
 - `bench/app` — drag/drop section (handle + drop-zone in fixed-size absolute stage) for
   end-to-end exercise of the new `drag` command
-
-### Fixed
-
-- `resolveBoxCenter` now scrolls the element into view **before** reading the box model.
-  Previously `DOM.resolveNode`/`DOM.getBoxModel` ran in parallel with `scrollIntoViewIfNeeded`,
-  so coordinates were captured pre-scroll. Critical for `drag` on off-screen elements
-  (click was tolerant since the element usually ended up in viewport anyway).
 
 ## [0.3.0] - 2026-04-26
 
