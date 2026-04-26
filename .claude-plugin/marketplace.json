@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "agent-view",
-      "source": ".",
+      "source": "./",
       "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, and read WebGL scene graphs."
     }
   ]
