@@ -77,16 +77,18 @@ agent-view talks to your app over Chrome DevTools Protocol. Your app must be lau
 
 ### Recommended: in code (reliable, works with any build tool)
 
-Add to your Electron main process:
+Add to your Electron main process, **before `app.whenReady()`** (top of `main.ts`/`main.js`, right after the `electron` import — switches set after the app is ready are ignored):
 
 ```js
+import { app } from 'electron';
+
 app.commandLine.appendSwitch('remote-debugging-port', '9876');
 ```
 
 > Any free port works — `9876` is just an example. Avoid `9222` (Chrome's own default remote-debugging port) to prevent
 > collisions when Chrome is open.
 
-For dev-only:
+**Production safety:** an open CDP port in a signed/notarized build is a remote-code-execution surface. Gate it on `!app.isPackaged` so it only opens in dev:
 
 ```js
 if (!app.isPackaged) {
