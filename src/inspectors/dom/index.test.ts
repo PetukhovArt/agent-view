@@ -469,4 +469,20 @@ describe('diffDomText', () => {
     expect(result).toContain('+ button "OK" [ref=1]')
     // The empty string '' itself is an empty line — it won't show as removed if curr also has no empty lines
   })
+
+  it('refs differ but content same → No changes (refs normalised)', () => {
+    const prev = 'button "Submit" [ref=1]\n  link "Home" [ref=2]'
+    const curr = 'button "Submit" [ref=99]\n  link "Home" [ref=100]'
+    expect(diffDomText(prev, curr)).toBe('No changes')
+  })
+
+  it('real change with shifted refs reports only the actual delta', () => {
+    const prev = 'button "Submit" [ref=1]\nbutton "Cancel" [ref=2]'
+    const curr = 'button "Submit" [ref=10]\nbutton "Confirm" [ref=11]'
+    const result = diffDomText(prev, curr)
+    expect(result).toContain('+ button "Confirm" [ref=11]')
+    expect(result).toContain('- button "Cancel" [ref=2]')
+    // Submit line stayed (only ref changed), should NOT appear
+    expect(result).not.toContain('Submit')
+  })
 })

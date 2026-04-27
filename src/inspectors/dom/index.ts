@@ -23,42 +23,67 @@ export type DOMCountResult = {
   count: number
 }
 
+const REF_PATTERN = /\[ref=\d+\]/g
+
+function normalizeRef(line: string): string {
+  return line.replace(REF_PATTERN, '[ref=*]')
+}
+
 /**
- * Compute a line-level diff between two formatted DOM texts.
- * Lines present only in `curr` → `+`; only in `prev` → `-`. Returns
- * `'No changes'` when identical.
+ * Compute a line-level diff between two formatted DOM texts. Refs are
+ * normalised before comparison (sessions reuse ids monotonically; without
+ * normalisation every line would look "changed"). Emitted lines retain the
+ * real `[ref=N]` from the *current* snapshot so the user can still click them.
  */
 export function diffDomText(prev: string, curr: string): string {
-  if (prev === curr) return 'No changes'
+  if (normalizeRef(prev) === normalizeRef(curr)) return 'No changes'
 
   const prevLines = prev.split('\n')
   const currLines = curr.split('\n')
 
   const prevCounts = new Map<string, number>()
   for (const line of prevLines) {
-    prevCounts.set(line, (prevCounts.get(line) ?? 0) + 1)
+    const key = normalizeRef(line)
+    prevCounts.set(key, (prevCounts.get(key) ?? 0) + 1)
   }
 
   const currCounts = new Map<string, number>()
+  const currByKey = new Map<string, string[]>()
   for (const line of currLines) {
-    currCounts.set(line, (currCounts.get(line) ?? 0) + 1)
+    const key = normalizeRef(line)
+    currCounts.set(key, (currCounts.get(key) ?? 0) + 1)
+    const bucket = currByKey.get(key)
+    if (bucket) bucket.push(line)
+    else currByKey.set(key, [line])
+  }
+
+  const prevByKey = new Map<string, string[]>()
+  for (const line of prevLines) {
+    const key = normalizeRef(line)
+    const bucket = prevByKey.get(key)
+    if (bucket) bucket.push(line)
+    else prevByKey.set(key, [line])
   }
 
   const changes: string[] = []
 
-  for (const [line, count] of currCounts) {
-    const prevCount = prevCounts.get(line) ?? 0
+  for (const [key, count] of currCounts) {
+    const prevCount = prevCounts.get(key) ?? 0
     const added = count - prevCount
-    for (let i = 0; i < added; i++) {
-      changes.push(`+ ${line}`)
+    if (added <= 0) continue
+    const bucket = currByKey.get(key) ?? []
+    for (let i = bucket.length - added; i < bucket.length; i++) {
+      changes.push(`+ ${bucket[i]}`)
     }
   }
 
-  for (const [line, count] of prevCounts) {
-    const currCount = currCounts.get(line) ?? 0
+  for (const [key, count] of prevCounts) {
+    const currCount = currCounts.get(key) ?? 0
     const removed = count - currCount
-    for (let i = 0; i < removed; i++) {
-      changes.push(`- ${line}`)
+    if (removed <= 0) continue
+    const bucket = prevByKey.get(key) ?? []
+    for (let i = bucket.length - removed; i < bucket.length; i++) {
+      changes.push(`- ${bucket[i]}`)
     }
   }
 
