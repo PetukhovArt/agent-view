@@ -648,8 +648,10 @@ export class AgentViewServer {
     return { ok: false, error: `Timeout: "${filter}" not found after ${timeout}s` }
   }
 
-  private async captureScreenshotToFile(conn: PageSession, scale?: number): Promise<string> {
-    const opts = scale !== undefined ? { scale } : undefined
+  private async captureScreenshotToFile(
+    conn: PageSession,
+    opts: { scale?: number; clip?: { x: number; y: number; width: number; height: number } } = {},
+  ): Promise<string> {
     const { buffer, format } = await conn.captureScreenshot(opts)
     const ext = format === 'jpeg' ? 'jpg' : format
     const filename = `agent-view-screenshot-${Date.now()}.${ext}`
@@ -661,9 +663,24 @@ export class AgentViewServer {
   private async handleScreenshot(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getPageSession(req, targetId)
+
     const scale = argNum(req.args, 'scale')
-    const filepath = await this.captureScreenshotToFile(conn, scale)
-    return { ok: true, data: filepath }
+    const cropFilter = argStr(req.args, 'crop')
+
+    let warning: string | undefined
+    let clip: { x: number; y: number; width: number; height: number } | undefined
+
+    if (cropFilter !== undefined) {
+      const found = await this.findByFilter(conn, cropFilter, req, targetId)
+      if (!found) {
+        warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
+      } else {
+        clip = await conn.getBoxRect(found.backendDOMNodeId, { scrollIntoView: true })
+      }
+    }
+
+    const filepath = await this.captureScreenshotToFile(conn, { scale, clip })
+    return { ok: true, data: filepath, warning }
   }
 
   private async handleScene(req: ServerRequest): Promise<ServerResponse> {
@@ -738,7 +755,7 @@ export class AgentViewServer {
     }
 
     if (snapScale !== undefined) {
-      const filepath = await this.captureScreenshotToFile(conn, snapScale)
+      const filepath = await this.captureScreenshotToFile(conn, { scale: snapScale })
       sections.push(`=== Screenshot ===\n${filepath}`)
     }
 

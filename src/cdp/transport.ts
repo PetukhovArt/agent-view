@@ -8,6 +8,7 @@ import {
   MouseButton,
   type CDPTarget,
   type AXNode,
+  type ScreenshotClip,
   type ScreenshotOpts,
   type TargetInfo,
   type RuntimeSession,
@@ -322,17 +323,30 @@ export async function connectToPage(
     await Input.dispatchMouseEvent({ type: 'mouseReleased', x: to.x, y: to.y, button, clickCount: 1 })
   }
 
+  async function scrollNodeIntoView(backendNodeId: number): Promise<void> {
+    const { object } = await DOM.resolveNode({ backendNodeId })
+    await Runtime.callFunctionOn({
+      objectId: object.objectId,
+      functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
+    })
+  }
+
   async function resolveBoxCenter(backendNodeId: number, scrollIntoView: boolean): Promise<Point> {
-    if (scrollIntoView) {
-      const { object } = await DOM.resolveNode({ backendNodeId })
-      await Runtime.callFunctionOn({
-        objectId: object.objectId,
-        functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
-      })
-    }
+    if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
     const { model } = await DOM.getBoxModel({ backendNodeId })
     const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
     return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 }
+  }
+
+  async function resolveBoxRect(backendNodeId: number, scrollIntoView: boolean): Promise<ScreenshotClip> {
+    if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
+    const { model } = await DOM.getBoxModel({ backendNodeId })
+    const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
+    const xs = [x1, x2, x3, x4]
+    const ys = [y1, y2, y3, y4]
+    const minX = Math.min(...xs)
+    const minY = Math.min(...ys)
+    return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY }
   }
 
   return {
@@ -377,10 +391,21 @@ export async function connectToPage(
 
     async captureScreenshot(opts?: ScreenshotOpts): Promise<{ buffer: Buffer; format: 'png' | 'jpeg' | 'webp' }> {
       const scale = opts?.scale ?? 1
+      const explicitClip = opts?.clip
+
+      if (explicitClip !== undefined) {
+        const format = scale < 1 ? 'jpeg' : 'png'
+        const params: Record<string, unknown> = { format, clip: { ...explicitClip, scale } }
+        if (format === 'jpeg') params.quality = 80
+        const { data } = await Page.captureScreenshot(params)
+        return { buffer: Buffer.from(data, 'base64'), format }
+      }
+
       if (scale >= 1) {
         const { data } = await Page.captureScreenshot({ format: 'png' })
         return { buffer: Buffer.from(data, 'base64'), format: 'png' }
       }
+
       const { cssLayoutViewport } = await Page.getLayoutMetrics()
       const clip = { x: 0, y: 0, width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight, scale }
 
@@ -413,6 +438,10 @@ export async function connectToPage(
 
     async getBoxCenter(backendNodeId: number, opts?: { scrollIntoView?: boolean }): Promise<Point> {
       return resolveBoxCenter(backendNodeId, opts?.scrollIntoView ?? true)
+    },
+
+    async getBoxRect(backendNodeId: number, opts?: { scrollIntoView?: boolean }): Promise<ScreenshotClip> {
+      return resolveBoxRect(backendNodeId, opts?.scrollIntoView ?? true)
     },
 
     async dragBetweenPositions(from: Point, to: Point, opts?: DragOpts): Promise<void> {

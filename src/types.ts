@@ -35,4 +35,6 @@ export type ServerResponse = {
   ok: boolean
   data?: unknown
   error?: string
+  /** Non-fatal warning — emit to stderr on the CLI side, still print data. */
+  warning?: string
 }

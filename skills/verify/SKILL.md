@@ -60,8 +60,12 @@ Increase `--steps` for handlers using `globalpointermove` so intermediate frames
 ```bash
 agent-view screenshot --scale 0.5              # Recommended: JPEG at half-res (~3× fewer vision tokens)
 agent-view screenshot --scale 0.5 --window <id>  # Specific window
+agent-view screenshot --crop "Sidebar"         # Crop to element bounding box (~1.6k tokens — 12× win)
+agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
 agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
 ```
+
+`--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing.
 
 ### Runtime State (`eval`)
 
@@ -160,7 +164,8 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
 | Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
-| Layout, spacing, visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
+| Layout/visual of a specific element | `screenshot --crop "<element>"` | ~1.6k tokens (1 tile) — crops to bounding box, massive token win |
+| Layout, spacing, full-window visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
 | Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
 | What DOM nodes changed after an interaction | `dom --diff` | Returns only `+`/`-` lines; much cheaper than re-reading the full tree |
 
@@ -219,6 +224,7 @@ Vision tokens dominate cost. One full-res screenshot ≈ 19k tokens (1920×1080,
 | `rtk agent-view dom --filter X --depth 2` | Compresses text output via RTK |
 | `agent-view screenshot --scale 0.5` | ~3× fewer vision tokens (4 tiles) |
 | `agent-view screenshot --scale 0.25` | ~12× fewer vision tokens (1 tile, ~1.6k tokens) |
+| `agent-view screenshot --crop "<element>"` | ~12× fewer in best case (1 tile) — crops to element bounding box |
 | DOM/eval-first: screenshot only for final visual confirm | Eliminates most screenshot calls |
 
-**Default rule**: if the answer is a value → `eval`; if the answer is "is element X visible/correct?" → `rtk agent-view dom --filter`; only call `screenshot --scale 0.5` for final visual proof or layout bugs that pixels alone can show.
+**Default rule**: if the answer is a value → `eval`; if the answer is "is element X visible/correct?" → `rtk agent-view dom --filter`; if you need pixels for a specific section → `screenshot --crop "<element>"` (one tile); only call `screenshot --scale 0.5` for full-window visual proof.

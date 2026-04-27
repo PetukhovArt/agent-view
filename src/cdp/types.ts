@@ -21,9 +21,18 @@ export type TargetInfo = {
   url: string
 }
 
+export type ScreenshotClip = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export type ScreenshotOpts = {
   /** Scale factor (0 < scale ≤ 1). Values < 1 use WebP at q=80 (JPEG fallback for old Chrome/Electron). */
   scale?: number
+  /** Crop to this rect before capturing. Combined with scale when both are set. */
+  clip?: ScreenshotClip
 }
 
 export type ScreenshotResult = {
@@ -106,6 +115,8 @@ export type PageSession = RuntimeSession & {
   fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>
   /** Resolve box-model center for an element. `scrollIntoView` defaults to true. */
   getBoxCenter: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<Point>
+  /** Resolve axis-aligned bounding rect for an element. `scrollIntoView` defaults to true. */
+  getBoxRect: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<ScreenshotClip>
   /** CDP-level mouse drag: press → N × move → release. */
   dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<void>
 }
