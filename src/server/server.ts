@@ -343,7 +343,7 @@ export class AgentViewServer {
     const filter = argStr(req.args, 'filter')
     const useText = argBool(req.args, 'text') ?? false
 
-    const nodes = await conn.getAccessibilityTree()
+    const { nodes, fromCache } = await conn.getAccessibilityTreeMeta()
     const { text, refs, nextRef } = formatAccessibilityTree(nodes, {
       filter,
       depth: resolveDepth(filter, argNum(req.args, 'depth')),
@@ -356,7 +356,8 @@ export class AgentViewServer {
       return { ok: true, data: await textContentFallback(conn, filter) }
     }
 
-    return { ok: true, data: text }
+    const data = fromCache ? `[cache]\n${text}` : text
+    return { ok: true, data }
   }
 
   private async findByFilter(

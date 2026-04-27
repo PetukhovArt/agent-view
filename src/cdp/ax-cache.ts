@@ -7,6 +7,11 @@ type CacheEntry = {
   timestamp: number
 }
 
+export type AxTreeResult = {
+  nodes: AXNode[]
+  fromCache: boolean
+}
+
 export class AxTreeCache {
   private entries = new Map<string, CacheEntry>()
 
@@ -18,6 +23,14 @@ export class AxTreeCache {
       return null
     }
     return entry.nodes
+  }
+
+  getWithMeta(key: string): AxTreeResult & { found: boolean } {
+    const cached = this.get(key)
+    if (cached) {
+      return { nodes: cached, fromCache: true, found: true }
+    }
+    return { nodes: [], fromCache: false, found: false }
   }
 
   set(key: string, nodes: AXNode[]): void {

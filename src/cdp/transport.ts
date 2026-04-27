@@ -347,6 +347,16 @@ export async function connectToPage(
       return nodes
     },
 
+    async getAccessibilityTreeMeta(): Promise<{ nodes: AXNode[]; fromCache: boolean }> {
+      const meta = cache.getWithMeta(cacheKey)
+      if (meta.found) {
+        return { nodes: meta.nodes, fromCache: true }
+      }
+      const { nodes } = await Accessibility.getFullAXTree()
+      cache.set(cacheKey, nodes)
+      return { nodes, fromCache: false }
+    },
+
     async queryAXTree({ accessibleName, role }: { accessibleName?: string; role?: string }): Promise<AXNode[] | null> {
       if (queryAXTreeAvailable === false) return null
       try {

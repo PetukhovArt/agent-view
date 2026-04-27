@@ -58,4 +58,30 @@ describe('AxTreeCache', () => {
     expect(cache.get('a')).toBeNull()
     expect(cache.get('b')).toBeNull()
   })
+
+  describe('getWithMeta', () => {
+    it('returns found=false when cache is empty', () => {
+      const cache = new AxTreeCache()
+      expect(cache.getWithMeta('key').found).toBe(false)
+    })
+
+    it('returns found=true and fromCache=true on a hit within TTL', () => {
+      vi.useFakeTimers()
+      const cache = new AxTreeCache()
+      cache.set('k', NODES)
+      vi.advanceTimersByTime(299)
+      const result = cache.getWithMeta('k')
+      expect(result.found).toBe(true)
+      expect(result.fromCache).toBe(true)
+      expect(result.nodes).toBe(NODES)
+    })
+
+    it('returns found=false after TTL expires', () => {
+      vi.useFakeTimers()
+      const cache = new AxTreeCache()
+      cache.set('k', NODES)
+      vi.advanceTimersByTime(301)
+      expect(cache.getWithMeta('k').found).toBe(false)
+    })
+  })
 })
