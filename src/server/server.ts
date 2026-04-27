@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
-import { formatAccessibilityTree } from '../inspectors/dom/index.js'
+import { formatAccessibilityTree, countAccessibilityNodes } from '../inspectors/dom/index.js'
 import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning } from './launcher.js'
@@ -343,8 +343,18 @@ export class AgentViewServer {
     const filter = argStr(req.args, 'filter')
     const useText = argBool(req.args, 'text') ?? false
     const compact = argBool(req.args, 'compact') ?? false
+    const useCount = argBool(req.args, 'count') ?? false
 
     const { nodes, fromCache } = await conn.getAccessibilityTreeMeta()
+
+    if (useCount) {
+      const { count } = countAccessibilityNodes(nodes, {
+        filter,
+        depth: resolveDepth(filter, argNum(req.args, 'depth')),
+      })
+      return { ok: true, data: String(count) }
+    }
+
     const { text, refs, nextRef } = formatAccessibilityTree(nodes, {
       filter,
       depth: resolveDepth(filter, argNum(req.args, 'depth')),

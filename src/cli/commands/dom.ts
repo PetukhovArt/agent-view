@@ -7,6 +7,7 @@ type DomOptions = {
   depth?: number
   text?: boolean
   compact?: boolean
+  count?: boolean
 }
 
 export async function runDom(config: AgentViewConfig, options: DomOptions): Promise<void> {
@@ -20,6 +21,7 @@ export async function runDom(config: AgentViewConfig, options: DomOptions): Prom
       depth: options.depth,
       text: options.text,
       compact: options.compact,
+      count: options.count,
     },
   })
 

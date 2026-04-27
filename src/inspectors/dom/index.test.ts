@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { AXNode } from '../../cdp/types.js'
-import { formatAccessibilityTree } from './index.js'
+import { formatAccessibilityTree, countAccessibilityNodes } from './index.js'
 
 function node(
   nodeId: string,
@@ -279,5 +279,81 @@ describe('formatAccessibilityTree --compact', () => {
     const result = formatAccessibilityTree(nodes, { compact: true })
     // group → section → button "Go" should merge onto one line
     expect(result.text).toBe('group > section > button "Go" [ref=3]')
+  })
+})
+
+describe('countAccessibilityNodes', () => {
+  it('returns 0 for empty node list', () => {
+    expect(countAccessibilityNodes([]).count).toBe(0)
+  })
+
+  it('counts all visible nodes without filter', () => {
+    const nodes = [
+      node('1', 'group', 'Root', ['2', '3']),
+      node('2', 'button', 'A'),
+      node('3', 'button', 'B'),
+    ]
+    expect(countAccessibilityNodes(nodes).count).toBe(3)
+  })
+
+  it('count with filter — only matching branch counted', () => {
+    const nodes = [
+      node('1', 'group', undefined, ['2', '3']),
+      node('2', 'button', 'Submit'),
+      node('3', 'button', 'Cancel'),
+    ]
+    expect(countAccessibilityNodes(nodes, { filter: 'Submit' }).count).toBe(2)
+  })
+
+  it('count with no matches returns 0', () => {
+    const nodes = [node('1', 'button', 'OK')]
+    expect(countAccessibilityNodes(nodes, { filter: 'nonexistent' }).count).toBe(0)
+  })
+
+  it('count with depth limit respects maxDepth', () => {
+    const nodes = [
+      node('1', 'group', 'Root', ['2']),
+      node('2', 'group', 'Level1', ['3']),
+      node('3', 'button', 'Level2'),
+    ]
+    expect(countAccessibilityNodes(nodes, { depth: 1 }).count).toBe(2)
+  })
+
+  it('always-skip roles (InlineTextBox) are not counted', () => {
+    const nodes = [
+      node('1', 'button', 'Click', ['2']),
+      node('2', 'InlineTextBox', 'text'),
+    ]
+    expect(countAccessibilityNodes(nodes).count).toBe(1)
+  })
+
+  it('skip-when-empty roles without resolvable name are not counted but children still are', () => {
+    const nodes = [
+      node('1', 'generic', undefined, ['2']),
+      node('2', 'button'),
+    ]
+    expect(countAccessibilityNodes(nodes).count).toBe(1)
+  })
+
+  it('count matches line count from formatter (no filter)', () => {
+    const nodes = [
+      node('1', 'group', 'G', ['2', '3'], 100),
+      node('2', 'button', 'A', undefined, 101),
+      node('3', 'button', 'B', undefined, 102),
+    ]
+    const formatted = formatAccessibilityTree(nodes)
+    const lineCount = formatted.text.split('\n').length
+    expect(countAccessibilityNodes(nodes).count).toBe(lineCount)
+  })
+
+  it('count matches line count from formatter (with filter)', () => {
+    const nodes = [
+      node('1', 'group', undefined, ['2', '3']),
+      node('2', 'button', 'Submit', undefined, 10),
+      node('3', 'button', 'Cancel', undefined, 11),
+    ]
+    const formatted = formatAccessibilityTree(nodes, { filter: 'submit' })
+    const lineCount = formatted.text === '(no matching elements)' ? 0 : formatted.text.split('\n').length
+    expect(countAccessibilityNodes(nodes, { filter: 'submit' }).count).toBe(lineCount)
   })
 })

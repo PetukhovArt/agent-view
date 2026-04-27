@@ -18,6 +18,127 @@ export type DOMSnapshotResult = {
   nextRef: number
 }
 
+export type DOMCountResult = {
+  count: number
+}
+
+const ALWAYS_SKIP_ROLES = new Set(['InlineTextBox'])
+const SKIP_WHEN_EMPTY_ROLES = new Set(['none', 'generic', 'StaticText'])
+const HARD_MAX_DEPTH = 100
+
+type VisitContext = {
+  nodeMap: Map<string, AXNode>
+  lowerFilter: string | undefined
+  maxDepth: number | undefined
+}
+
+function resolveNameFromChildren(node: AXNode, nodeMap: Map<string, AXNode>, depthLimit = 5): string {
+  if (depthLimit <= 0 || !node.childIds) return ''
+  for (const childId of node.childIds) {
+    const child = nodeMap.get(childId)
+    if (!child) continue
+    if (child.name?.value) return child.name.value
+    const desc = child.properties?.find(p => p.name === 'description')
+    if (desc?.value?.value && typeof desc.value.value === 'string') return desc.value.value
+    const deeper = resolveNameFromChildren(child, nodeMap, depthLimit - 1)
+    if (deeper) return deeper
+  }
+  return ''
+}
+
+function getDescendantText(node: AXNode, nodeMap: Map<string, AXNode>, depthLimit = 10): string {
+  const parts: string[] = []
+  function collect(n: AXNode, depth: number): void {
+    if (depth > depthLimit || !n.childIds) return
+    for (const childId of n.childIds) {
+      const child = nodeMap.get(childId)
+      if (!child) continue
+      if (child.name?.value) parts.push(child.name.value)
+      const desc = child.properties?.find(p => p.name === 'description')
+      if (desc?.value?.value && typeof desc.value.value === 'string') parts.push(desc.value.value)
+      collect(child, depth + 1)
+    }
+  }
+  collect(node, 0)
+  return parts.join(' ').toLowerCase()
+}
+
+function hasMatchingDescendant(node: AXNode, nodeMap: Map<string, AXNode>, lowerFilter: string): boolean {
+  if (!node.childIds) return false
+  for (const childId of node.childIds) {
+    const child = nodeMap.get(childId)
+    if (!child) continue
+    const childRole = child.role?.value ?? ''
+    if (ALWAYS_SKIP_ROLES.has(childRole)) continue
+    const childName = child.name?.value?.toLowerCase() ?? ''
+    if (childName.includes(lowerFilter) || childRole.toLowerCase().includes(lowerFilter)) return true
+    if (hasMatchingDescendant(child, nodeMap, lowerFilter)) return true
+  }
+  return false
+}
+
+function nodePassesFilter(node: AXNode, name: string, role: string, ctx: VisitContext): boolean {
+  if (!ctx.lowerFilter) return true
+  const lf = ctx.lowerFilter
+  const matchesName = name.toLowerCase().includes(lf)
+  const matchesRole = role.toLowerCase().includes(lf)
+  const matchesDescendants = !matchesName && !matchesRole
+    ? getDescendantText(node, ctx.nodeMap, 10).includes(lf)
+    : false
+  return matchesName || matchesRole || matchesDescendants || hasMatchingDescendant(node, ctx.nodeMap, lf)
+}
+
+function walkVisibleNodes(
+  nodeId: string,
+  indent: number,
+  ctx: VisitContext,
+  onVisit: (node: AXNode, name: string, isFallback: boolean, indent: number) => void,
+): void {
+  if (indent > HARD_MAX_DEPTH) return
+  if (ctx.maxDepth !== undefined && indent > ctx.maxDepth) return
+
+  const node = ctx.nodeMap.get(nodeId)
+  if (!node) return
+
+  const role = node.role?.value ?? ''
+  const ownName = node.name?.value ?? ''
+  const fallbackName = !ownName ? resolveNameFromChildren(node, ctx.nodeMap) : ''
+  const name = ownName || fallbackName
+
+  if (ALWAYS_SKIP_ROLES.has(role)) return
+
+  const skip = SKIP_WHEN_EMPTY_ROLES.has(role) && !name
+
+  if (!skip) {
+    if (nodePassesFilter(node, name, role, ctx)) {
+      onVisit(node, name, !ownName && !!fallbackName, indent)
+    } else {
+      return
+    }
+  }
+
+  if (node.childIds) {
+    for (const childId of node.childIds) {
+      walkVisibleNodes(childId, skip ? indent : indent + 1, ctx, onVisit)
+    }
+  }
+}
+
+function effectiveChildren(node: AXNode, nodeMap: Map<string, AXNode>): string[] {
+  if (!node.childIds) return []
+  return node.childIds.filter(childId => {
+    const child = nodeMap.get(childId)
+    if (!child) return false
+    const childRole = child.role?.value ?? ''
+    if (ALWAYS_SKIP_ROLES.has(childRole)) return false
+    const childName = child.name?.value ?? ''
+    const fallback = !childName ? resolveNameFromChildren(child, nodeMap) : ''
+    const resolvedName = childName || fallback
+    if (SKIP_WHEN_EMPTY_ROLES.has(childRole) && !resolvedName) return false
+    return true
+  })
+}
+
 export function formatAccessibilityTree(
   nodes: AXNode[],
   options: DOMSnapshotOptions = {},
@@ -35,155 +156,116 @@ export function formatAccessibilityTree(
   const rootNodeId = nodes[0]?.nodeId
   if (!rootNodeId) return { text: '(empty)', refs: [], nextRef }
 
-  const ALWAYS_SKIP_ROLES = new Set(['InlineTextBox'])
-  const SKIP_WHEN_EMPTY_ROLES = new Set(['none', 'generic', 'StaticText'])
+  const ctx: VisitContext = { nodeMap, lowerFilter: filter?.toLowerCase(), maxDepth }
 
-  // WAI-ARIA-like fallback: when a node has no accessible name,
-  // walk its children to find the first non-empty name, description, or title.
-  // This handles cases like v-list-item with title on a child v-icon.
-  function resolveNameFromChildren(node: AXNode, depthLimit = 5): string {
-    if (depthLimit <= 0 || !node.childIds) return ''
-    for (const childId of node.childIds) {
-      const child = nodeMap.get(childId)
-      if (!child) continue
-      // Check child's own name
-      if (child.name?.value) return child.name.value
-      // Check description/title in AX properties
-      const desc = child.properties?.find(p => p.name === 'description')
-      if (desc?.value?.value && typeof desc.value.value === 'string') return desc.value.value
-      // Recurse into grandchildren
-      const deeper = resolveNameFromChildren(child, depthLimit - 1)
-      if (deeper) return deeper
-    }
-    return ''
-  }
-
-  // Collect all descendant text for heuristic filter matching.
-  // Searches name and description of all descendants, not just current node.
-  function getDescendantText(node: AXNode, depthLimit = 10): string {
-    const parts: string[] = []
-    function collect(n: AXNode, depth: number): void {
-      if (depth > depthLimit || !n.childIds) return
-      for (const childId of n.childIds) {
-        const child = nodeMap.get(childId)
-        if (!child) continue
-        if (child.name?.value) parts.push(child.name.value)
-        const desc = child.properties?.find(p => p.name === 'description')
-        if (desc?.value?.value && typeof desc.value.value === 'string') parts.push(desc.value.value)
-        collect(child, depth + 1)
-      }
-    }
-    collect(node, 0)
-    return parts.join(' ').toLowerCase()
-  }
-
-  function hasMatchingDescendant(node: AXNode, lowerFilter: string): boolean {
-    if (!node.childIds) return false
-    for (const childId of node.childIds) {
-      const child = nodeMap.get(childId)
-      if (!child) continue
-      const childRole = child.role?.value ?? ''
-      if (ALWAYS_SKIP_ROLES.has(childRole)) continue
-      const childName = child.name?.value?.toLowerCase() ?? ''
-      if (childName.includes(lowerFilter) || childRole.toLowerCase().includes(lowerFilter)) return true
-      if (hasMatchingDescendant(child, lowerFilter)) return true
-    }
-    return false
-  }
-
-  // Returns the renderable (non-skipped) child IDs for a given node,
-  // accounting for ALWAYS_SKIP_ROLES and SKIP_WHEN_EMPTY_ROLES.
-  function effectiveChildren(node: AXNode): string[] {
-    if (!node.childIds) return []
-    return node.childIds.filter(childId => {
-      const child = nodeMap.get(childId)
-      if (!child) return false
-      const childRole = child.role?.value ?? ''
-      if (ALWAYS_SKIP_ROLES.has(childRole)) return false
-      const childName = child.name?.value ?? ''
-      const fallback = !childName ? resolveNameFromChildren(child) : ''
-      const resolvedName = childName || fallback
-      if (SKIP_WHEN_EMPTY_ROLES.has(childRole) && !resolvedName) return false
-      return true
-    })
-  }
-
-  const HARD_MAX_DEPTH = 100
-
-  // chain: roles of ancestor nodes merged onto this line (compact mode only).
-  // chainIndent: the indent at which the chain started (where the line will be emitted).
-  function walk(nodeId: string, depth: number, indent: number, chain: string[], chainIndent: number): void {
-    if (indent > HARD_MAX_DEPTH) return
-    if (maxDepth !== undefined && indent > maxDepth) return
-
-    const node = nodeMap.get(nodeId)
-    if (!node) return
-
-    const role = node.role?.value ?? ''
-    const ownName = node.name?.value ?? ''
-    // Fallback: resolve name from children when node has no accessible name
-    const fallbackName = !ownName ? resolveNameFromChildren(node) : ''
-    const name = ownName || fallbackName
-
-    if (ALWAYS_SKIP_ROLES.has(role)) return
-
-    const skip = SKIP_WHEN_EMPTY_ROLES.has(role) && !name
-
-    if (!skip) {
-      if (filter) {
-        const lowerFilter = filter.toLowerCase()
-        const matchesName = name.toLowerCase().includes(lowerFilter)
-        const matchesRole = role.toLowerCase().includes(lowerFilter)
-        // Heuristic: also search descendant names/descriptions
-        const matchesDescendants = !matchesName && !matchesRole
-          ? getDescendantText(node, 10).includes(lowerFilter)
-          : false
-        if (!matchesName && !matchesRole && !matchesDescendants && !hasMatchingDescendant(node, lowerFilter)) {
-          return
-        }
-      }
-
+  if (!compact) {
+    walkVisibleNodes(rootNodeId, 0, ctx, (node, name, isFallback, indent) => {
       const ref = nextRef++
       if (node.backendDOMNodeId) {
         refs.push({ ref, backendDOMNodeId: node.backendDOMNodeId })
       }
-
-      const effChildren = compact ? effectiveChildren(node) : []
-      const isSingleChild = effChildren.length === 1
-
-      if (compact && isSingleChild && !ownName) {
-        // This node has no own accessible name and is a single-child link — accumulate into chain.
-        // Ref is already registered above; it won't appear inline but remains clickable.
-        walk(effChildren[0], depth + 1, indent + 1, [...chain, role], chainIndent)
-      } else {
-        // Flush: emit accumulated chain + this node on one line.
-        const isFallback = !ownName && fallbackName
-        const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
-        const padding = '  '.repeat(compact ? chainIndent : indent)
-        const chainPrefix = chain.length > 0 ? `${chain.join(' > ')} > ` : ''
-        lines.push(`${padding}${chainPrefix}${role}${nameStr} [ref=${ref}]`)
-
-        if (node.childIds) {
-          for (const childId of node.childIds) {
-            walk(childId, depth + 1, indent + 1, [], compact ? chainIndent + 1 : indent + 1)
-          }
+      const padding = '  '.repeat(indent)
+      const role = node.role?.value ?? ''
+      const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
+      lines.push(`${padding}${role}${nameStr} [ref=${ref}]`)
+    })
+  } else {
+    walkCompact(rootNodeId, 0, [], 0, ctx, {
+      allocRef: (backendDOMNodeId) => {
+        const ref = nextRef++
+        if (backendDOMNodeId !== undefined) {
+          refs.push({ ref, backendDOMNodeId })
         }
-      }
-    } else {
-      // Skipped node — pass through children at same indent, reset chain
-      if (node.childIds) {
-        for (const childId of node.childIds) {
-          walk(childId, depth + 1, indent, chain, chainIndent)
-        }
-      }
-    }
+        return ref
+      },
+      pushLine: (line) => lines.push(line),
+    })
   }
-
-  walk(rootNodeId, 0, 0, [], 0)
 
   return {
     text: lines.join('\n') || '(no matching elements)',
     refs,
     nextRef,
   }
+}
+
+type CompactSink = {
+  allocRef: (backendDOMNodeId: number | undefined) => number
+  pushLine: (line: string) => void
+}
+
+function walkCompact(
+  nodeId: string,
+  indent: number,
+  chain: string[],
+  chainIndent: number,
+  ctx: VisitContext,
+  sink: CompactSink,
+): void {
+  if (indent > HARD_MAX_DEPTH) return
+  if (ctx.maxDepth !== undefined && indent > ctx.maxDepth) return
+
+  const node = ctx.nodeMap.get(nodeId)
+  if (!node) return
+
+  const role = node.role?.value ?? ''
+  const ownName = node.name?.value ?? ''
+  const fallbackName = !ownName ? resolveNameFromChildren(node, ctx.nodeMap) : ''
+  const name = ownName || fallbackName
+
+  if (ALWAYS_SKIP_ROLES.has(role)) return
+
+  const skip = SKIP_WHEN_EMPTY_ROLES.has(role) && !name
+
+  if (skip) {
+    if (node.childIds) {
+      for (const childId of node.childIds) {
+        walkCompact(childId, indent, chain, chainIndent, ctx, sink)
+      }
+    }
+    return
+  }
+
+  if (!nodePassesFilter(node, name, role, ctx)) return
+
+  const ref = sink.allocRef(node.backendDOMNodeId)
+  const effChildren = effectiveChildren(node, ctx.nodeMap)
+  const isSingleChild = effChildren.length === 1
+
+  if (isSingleChild && !ownName) {
+    walkCompact(effChildren[0], indent + 1, [...chain, role], chainIndent, ctx, sink)
+    return
+  }
+
+  const isFallback = !ownName && !!fallbackName
+  const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
+  const padding = '  '.repeat(chainIndent)
+  const chainPrefix = chain.length > 0 ? `${chain.join(' > ')} > ` : ''
+  sink.pushLine(`${padding}${chainPrefix}${role}${nameStr} [ref=${ref}]`)
+
+  if (node.childIds) {
+    for (const childId of node.childIds) {
+      walkCompact(childId, indent + 1, [], chainIndent + 1, ctx, sink)
+    }
+  }
+}
+
+export function countAccessibilityNodes(
+  nodes: AXNode[],
+  options: Pick<DOMSnapshotOptions, 'filter' | 'depth'> = {},
+): DOMCountResult {
+  const nodeMap = new Map<string, AXNode>()
+  for (const node of nodes) {
+    nodeMap.set(node.nodeId, node)
+  }
+
+  const rootNodeId = nodes[0]?.nodeId
+  if (!rootNodeId) return { count: 0 }
+
+  const ctx: VisitContext = { nodeMap, lowerFilter: options.filter?.toLowerCase(), maxDepth: options.depth }
+  let count = 0
+
+  walkVisibleNodes(rootNodeId, 0, ctx, () => { count++ })
+
+  return { count }
 }
