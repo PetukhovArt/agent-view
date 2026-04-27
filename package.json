@@ -1,6 +1,6 @@
 {
   "name": "@petukhovart/agent-view",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "CLI tool for visual verification of desktop apps (Electron/Tauri) via Chrome DevTools Protocol",
   "type": "module",
   "main": "dist/index.js",
@@ -11,6 +11,7 @@
     "dist",
     ".claude-plugin",
     "skills",
+    "agents",
     "README.md",
     "LICENSE"
   ],

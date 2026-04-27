@@ -178,6 +178,26 @@ When two tools could answer the same question, prefer the one higher up the tabl
 
 ## Verification Workflow
 
+### Recipe Execution Mode (preferred when a recipe exists)
+
+If the developer points you at a `.claude/verify-recipes/<slug>.md` file, OR you discover one matching the current task via `ls .claude/verify-recipes/`, **delegate execution to the `verify-runner` subagent** instead of running commands yourself.
+
+Why: recipe execution is mechanical (run commands, compare to `Expected:`, report). It does not need Opus-level reasoning, but the raw output (DOM dumps, screenshots, eval results) easily exceeds 30k tokens of context noise. Delegating to a Haiku subagent keeps your context clean and cuts cost ~10×.
+
+How to delegate:
+
+1. Resolve the window id once: `agent-view discover` → pick the main window's id.
+2. Spawn `verify-runner` via the Agent tool with a prompt containing:
+   - Absolute `recipe_path`
+   - Resolved `window_id`
+   - Any extra context (e.g. "user is already logged in", "GIS widget already mounted")
+3. Wait for the JSON report. Read `summary`, `blocking_issues`, and any `failed` step diagnoses.
+4. **If `design_conformance_section: true`** in the report: also spawn `design-conformance-runner` in parallel, passing the `design_conformance_pairs` array. Merge both reports before answering the user.
+5. For `requires_visual_review` steps that have no design ref attached: open the screenshot yourself with `Read` and decide pass/fail.
+6. For `failed` steps: re-run the specific failing command yourself if you need richer evidence to diagnose. Do not re-execute the whole recipe.
+
+Output to the user: a tight summary — what passed, what failed, what needs visual review, and (if any) which design conformance issues to fix. Do not paste the raw JSON unless asked.
+
 ### Ad-hoc Mode (standalone)
 
 After making code changes:

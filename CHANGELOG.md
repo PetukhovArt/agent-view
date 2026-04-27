@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.0] - 2026-04-27
+
+### Added — bundled subagents
+
+- `verify-runner` (Haiku) — executes a `.claude/verify-recipes/<slug>.md` recipe end-to-end and returns a compact JSON report. The `verify` skill now delegates recipe execution to this subagent so the main agent's context stays clean (~50k → ~2k tokens for a typical recipe).
+- `design-conformance-runner` (Haiku) — compares pairs of (actual screenshot, expected design reference) and reports visual deviations against the mockup. Local image files only (Figma exports, hand-off PNGs, screenshots from disk) — no Figma URL fetching.
+
+### Added — `verify-recipe` skill
+
+- Optional **Design Conformance** section in generated recipes. The skill now asks for design reference paths during context-gathering and, if provided, emits a screenshot↔reference mapping table that `design-conformance-runner` consumes. Anti-pattern explicitly added: never invent design ref paths when the developer didn't supply them.
+
+### Added — `verify` skill
+
+- **Recipe Execution Mode**. When a recipe file is referenced (or auto-discovered in `.claude/verify-recipes/`), the skill spawns `verify-runner` instead of executing inline. If the recipe contains a Design Conformance section, `design-conformance-runner` is spawned in parallel and reports merged.
+
+### Added — README workflow docs
+
+- `5-minute quickstart` checklist at the top.
+- `Quick start with Claude Code (Prompting)` — replaces the old CLI-only quickstart with a Claude Code-first flow, with raw CLI usage moved to a `Without Claude Code` fallback block.
+- `Recommended workflow with Claude Code` — canonical 3-phase prompt flow (author recipe → run via Haiku subagent → iterate on failures), with one-shot prompt and anti-patterns sections.
+- Removed the standalone `Output format` section (duplicated info already in `Commands`) and the duplicate login-flow CLI example.
+
+### Internal
+
+- Plugin manifest now ships `agents/` alongside `skills/`. Updated `package.json` `files` array accordingly.
+
 ## [0.5.0] - 2026-04-27
 
 ### Added — token-savers

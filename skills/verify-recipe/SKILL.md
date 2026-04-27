@@ -48,7 +48,8 @@ Pick the first row that can answer the question. Only go lower when the row abov
 - Opening with a screenshot to "see the state" — use `dom --filter` or `eval` first
 - Using `eval` when `dom --filter` answers the question
 - Assertions that depend on transient state without `watch --until` to stabilize first
-- "Check that it looks right" — every assertion must be a concrete pass/fail criterion
+- "Check that it looks right" — every assertion must be a concrete pass/fail criterion. The single legitimate exception is the `## Design Conformance` section, which delegates visual judgment to the design-conformance-runner subagent against an explicit reference image.
+- Inventing design reference paths (`.figma-refs/...`, `assets/mockups/...`) when the developer did not provide them. No refs → no Design Conformance section.
 
 ## Workflow
 
@@ -59,8 +60,11 @@ When invoked, ask the developer in plain text (no tool calls yet):
 1. What was shipped or fixed? (feature name or bug description)
 2. What was the original symptom or expected behavior?
 3. Any known failure mode or edge case to cover?
+4. (Optional) Are there design reference images to verify against? If yes — local path, glob, or list of files. **Only local files are supported.**
 
 Wait for the response before continuing.
+
+If the user provides design refs in step 4, store them for Step 2's optional `Design Conformance` section. If not provided, skip that section entirely — never invent a path or assume a convention.
 
 ### Step 2 — draft the recipe
 
@@ -97,6 +101,19 @@ Cost: ~<N> tokens
 
 ## Regression Checks
 - [ ] <adjacent flow> — `agent-view <command>` → `<expected>`
+
+## Design Conformance
+<!-- INCLUDE THIS SECTION ONLY IF the developer provided design refs in Step 1 question 4. -->
+<!-- Each pair: a screenshot command + an absolute path to the expected reference image. -->
+<!-- The design-conformance-runner subagent reads this section, runs the screenshot commands, and visually compares against the expected refs. -->
+<!-- Do NOT invent design ref paths. Do NOT assume a convention (e.g. .figma-refs/). Use exactly what the developer provided. -->
+
+| Step Label | Screenshot Command | Expected Reference |
+|---|---|---|
+| <area name e.g. "filter panel"> | `agent-view screenshot --crop "<area>" --scale 0.5` | `<absolute path to expected PNG/JPEG>` |
+| <area name> | `agent-view screenshot --window $W --scale 0.5` | `<absolute path>` |
+
+Tolerance: `normal` (default — flag deviations a designer would notice in code review). Use `loose` only if the developer says exact pixel parity is not required.
 
 ## Anti-patterns avoided
 - <note any recipe-specific traps, e.g. "state resets on reload — watch needed before dom check">

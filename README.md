@@ -8,6 +8,16 @@ agent-view bridges that gap: it connects to any Chromium-based desktop app via C
 
 Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but works with any AI agent or automation pipeline that can call CLI commands.
 
+## 5-minute quickstart
+
+1. **[Install](#install--update)** — `npm i -g @petukhovart/agent-view` plus the Claude Code plugin.
+2. **[Enable CDP](#enabling-cdp) in your app** — one line in your Electron `main.ts`, gated to dev builds.
+3. **`agent-view init`** in your project — then add `"allowEval": true` to the generated `agent-view.config.json`.
+4. **`agent-view launch`** — starts your app and waits for CDP readiness.
+5. **In Claude Code:** describe what you want verified — see [example prompts](#recommended-workflow-with-claude-code).
+
+Each step links to the full explanation below.
+
 ## What it does
 
 - **DOM accessibility tree** with ref IDs — compact, LLM-friendly, with text/role filters; `--compact` merges single-child chains for 40–60% fewer tokens, `--count` returns just the match count, `--max-lines` caps output, `--diff` emits only what changed since the last call
@@ -18,6 +28,9 @@ Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but wor
 - **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters and `--follow --until <pattern>` for early exit on a matching log
 - **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages; fuzzy `--target` resolution everywhere (id → title → URL)
 - **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable; `--compact` mirrors the DOM mode
+- **Design-conformance verification** — pair screenshot commands with local design references (Figma export, hand-off
+  PNGs, any image on disk) inside a verify-recipe; the `design-conformance-runner` subagent reports visual deviations
+  against the mockup
 
 ## Why CLI, not MCP?
 
@@ -43,6 +56,9 @@ npm install -g @petukhovart/agent-view
 ```
 
 The plugin ships two skills. **`verify`** executes visual and runtime checks against a running app. **`verify-recipe`** generates a `.claude/verify-recipes/<slug>.md` file — a disciplined, cheapest-first command sequence for a feature or bugfix — that you or any AI agent can run later. Trigger it with phrases like "write a verify-recipe for the login fix" or "generate a verification plan for this feature".
+
+For Haiku-cost recipe execution and visual conformance against design mockups,
+see [Recommended workflow with Claude Code](#recommended-workflow-with-claude-code) below.
 
 Verify:
 
@@ -121,30 +137,141 @@ curl -s http://localhost:9876/json/version
 
 If you see a JSON response with process info — you're good.
 
-## Quick start
+## Quick start with Claude Code (Prompting)
+
+Assumes the plugin and CLI are installed (see [Install & Update](#install--update)) and CDP is enabled in your app (
+see [Enabling CDP](#enabling-cdp)).
+
+**1. Generate config once:**
 
 ```bash
 cd your-electron-project
-
-# 1. Generate config (auto-detects runtime, port, launch command)
-agent-view init
-
-# 2. Start your app (or let agent-view do it)
-agent-view launch
-
-# 3. See what's on screen
-agent-view discover          # List all windows
-agent-view dom               # Accessibility tree with ref IDs
-agent-view screenshot        # PNG screenshot
-
-# 4. Interact
-agent-view click 5           # Click element by ref
-agent-view fill 3 "hello"    # Type into input
-
-# 5. Verify the result
-agent-view dom --filter "success"   # Check for expected element
-agent-view screenshot               # Visual confirmation
+agent-view init   # writes agent-view.config.json — auto-detects runtime, port, launch script, webgl engine
 ```
+
+Then open `agent-view.config.json` and add `"allowEval": true` if you want recipes to use `eval` / `watch` (most do —
+store/state assertions are 100× cheaper than DOM scraping). Off by default for security; see [Config](#config) for the
+full field list.
+
+**2. Start your app:**
+
+```bash
+agent-view launch   # uses the `launch` command from config, waits for CDP readiness, idempotent
+```
+
+(Or start it yourself with `npm run dev` etc. — `launch` is just a convenience.)
+
+**3. From Claude Code, ask for a verification:**
+
+```text
+The "Save" button on the Settings dialog stayed enabled while a save was in flight.
+I added a `saving` ref bound to :disabled. Verify it works:
+- after click, button must be disabled until network completes
+- no console errors in the flow
+```
+
+Claude picks the `verify` skill, runs a handful of `eval` / `dom --filter` / `console` calls against your live app,
+reports what passed and what failed. No CLI commands typed by you.
+
+For a repeatable, multi-step verification (PRD/plan-driven, with optional design-mockup conformance),
+see [Recommended workflow with Claude Code](#recommended-workflow-with-claude-code) — it's the canonical 3-phase prompt
+flow this package is built around.
+
+### Without Claude Code (manual CLI / CI / other agents)
+
+If you're scripting from CI or another agent, the CLI works standalone:
+
+```bash
+agent-view discover                  # List all windows (JSON)
+agent-view dom --filter "Submit"     # Accessibility tree, filtered, with ref IDs
+agent-view fill 3 "hello@example.com"
+agent-view click 7
+agent-view eval "store.state.user.role"
+agent-view screenshot --crop "Sidebar" --scale 0.5
+```
+
+Full surface in [Commands](#commands) below.
+
+## Recommended workflow with Claude Code
+
+A repeatable, token-efficient flow for "I shipped a feature/fix → confirm it actually works visually and at runtime".
+Three phases, each driven by a focused prompt.
+
+### Phase 1 — Author the verification plan (Opus / Sonnet)
+
+Generate the recipe **once**, from a PRD / plan file / Jira ticket / commit range. The recipe is reusable — re-run after
+every iteration on the same feature.
+
+```text
+Generate a verify-recipe for the changes in commits <hash1>..<hash2>.
+Source plan: .claude/plans/2026-04-27-login-redirect.md
+Original symptom: after login, redirect went to /home instead of /dashboard.
+
+Design references (if any):
+- /abs/path/figma-exports/login-success.png    → label "post-login dashboard"
+- /abs/path/figma-exports/error-state.png      → label "invalid creds error"
+```
+
+What this triggers: the `verify-recipe` skill interviews you (if more context needed), then writes a
+`.claude/verify-recipes/<slug>.md` with `Repro Steps`, `Evidence Commands` (cheapest-first: `eval` / `dom --filter`
+before `screenshot`), `Regression Checks`, and — if you provided design refs — a `Design Conformance` table mapping
+screenshot commands to expected reference images.
+
+**Tip:** if you implemented from a Figma file via the `figma-implement-design` skill, it likely already saved exports
+somewhere on disk — pass those paths. agent-view does NOT fetch from Figma URLs; provide local files only.
+
+### Phase 2 — Run the recipe (delegated to Haiku)
+
+```text
+Run the verify-recipe at .claude/verify-recipes/<slug>.md.
+```
+
+What this triggers: the `verify` skill resolves the window via `agent-view discover`, then spawns the `verify-runner`
+subagent (Haiku) to execute every step and return a compact JSON report. If the recipe has a `Design Conformance`
+section, `design-conformance-runner` (also Haiku) runs in parallel and visually compares screenshots against the
+references.
+
+**Effect on cost:** raw output (DOM dumps, screenshots, eval values) stays in the subagent. The main agent only sees the
+merged JSON report — typically <2k tokens vs ~50k if Opus ran the recipe directly.
+
+### Phase 3 — Iterate on failures (Opus / Sonnet)
+
+The merged report lists `failed`, `requires_visual_review`, and `major_mismatch` items with one-sentence diagnoses. Hand
+any subset back to the main agent:
+
+```text
+Three steps failed in the verify run. Fix step 4 (zone filter not mutating store)
+and step 7 (selective filter heading missing). Re-run only those two steps after the fix.
+```
+
+The main agent re-runs only the failing commands itself for richer evidence, makes the fix, and re-spawns
+`verify-runner` for the targeted re-check — not the whole recipe.
+
+### One-shot prompt (when there's no plan to convert)
+
+For small fixes where you don't want a persistent recipe file:
+
+```text
+The "Save" button on the Settings dialog wasn't disabling while a save was in flight.
+I added a `saving` ref and bound it to :disabled. Verify it works:
+- after click, button must be disabled until network completes
+- no console errors
+- visual: button greys out (compare to /abs/path/saving-state.png if one is provided)
+```
+
+Claude will pick the right skill (usually `verify` ad-hoc mode), run a handful of `eval` / `dom --filter` / `console`
+calls, and only screenshot if the visual claim needs it.
+
+### Anti-patterns to avoid
+
+- "Just verify the feature" with no plan or symptom — the recipe author can't pick the cheapest signal without knowing
+  what "works" means. Give it the symptom that motivated the fix.
+- Pasting Figma URLs and expecting agent-view to download them — it won't. Export the frames you care about to PNG
+  first.
+- Running the recipe directly with Opus when a recipe file exists — that's exactly the case `verify-runner` is for.
+  Prefer Phase 2's prompt.
+- Stuffing 50 assertions into one recipe — split per-feature. A recipe should run in <2 minutes and produce a report you
+  can read in 30 seconds.
 
 ## How it works
 
@@ -382,14 +509,6 @@ Output frames: `init` (baseline value), `diff` (RFC 6902 ops since last frame), 
 
 Stops the background lazy server.
 
-## Output format
-
-| Command                | Format     | Why                          |
-|------------------------|------------|------------------------------|
-| `dom`, `scene`, `snap` | Plain text | LLM-friendly, minimal tokens |
-| `discover`             | JSON       | Machine-parseable            |
-| `screenshot`           | File path  | Agent reads the image        |
-
 ## Performance
 
 Built for tight `dom → click → dom` loops. Typical Electron app, ~200 AX nodes:
@@ -403,29 +522,6 @@ Built for tight `dom → click → dom` loops. Typical Electron app, ~200 AX nod
 What makes it fast: 300ms AX-tree cache (invalidated on `click`/`fill`/navigation; cached responses prefixed with
 `[cache]`), parallel CDP calls in `click`, `Accessibility.queryAXTree` for filter lookups, and a single persistent CDP
 WebSocket reused across commands (no relay).
-
-## Example: testing a login flow
-
-```bash
-# Start the app
-agent-view launch
-
-# See the login page
-agent-view dom --filter "login"
-# RootWebArea "My App"
-#   textbox "Email" [ref=3]
-#   textbox "Password" [ref=5]
-#   button "Sign in" [ref=7]
-
-# Fill credentials and submit
-agent-view fill 3 "admin@example.com"
-agent-view fill 5 "password123"
-agent-view click 7
-
-# Verify — did we land on the dashboard?
-agent-view dom --depth 2
-agent-view screenshot
-```
 
 ## Troubleshooting
 
