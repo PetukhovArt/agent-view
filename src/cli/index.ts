@@ -61,6 +61,7 @@ program
   .option('-f, --filter <text>', 'Filter by text/name')
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
   .option('--text', 'Fall back to DOM textContent search when AX tree returns no match')
+  .option('--compact', 'Merge single-child chains onto one line to reduce token count')
   .action(async (options) => {
     const config = requireConfig()
     await runDom(config, options)

@@ -168,3 +168,116 @@ describe('formatAccessibilityTree', () => {
     expect(result.nextRef).toBe(4)
   })
 })
+
+describe('formatAccessibilityTree --compact', () => {
+  it('empty tree returns (empty) regardless of compact', () => {
+    const result = formatAccessibilityTree([], { compact: true })
+    expect(result.text).toBe('(empty)')
+  })
+
+  it('single-child chain is merged onto one line', () => {
+    // group(no name) → section(no name) → button "Save"
+    const nodes = [
+      node('1', 'group', undefined, ['2']),
+      node('2', 'section', undefined, ['3']),
+      node('3', 'button', 'Save', undefined, 30),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    expect(result.text).toBe('group > section > button "Save" [ref=3]')
+  })
+
+  it('intermediate refs are stored even though they are not printed', () => {
+    const nodes = [
+      node('1', 'group', undefined, ['2'], 10),
+      node('2', 'section', undefined, ['3'], 20),
+      node('3', 'button', 'Save', undefined, 30),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    // All three refs must be present in refs array
+    expect(result.refs).toContainEqual({ ref: 1, backendDOMNodeId: 10 })
+    expect(result.refs).toContainEqual({ ref: 2, backendDOMNodeId: 20 })
+    expect(result.refs).toContainEqual({ ref: 3, backendDOMNodeId: 30 })
+    expect(result.nextRef).toBe(4)
+  })
+
+  it('multi-child nodes render normally, not merged', () => {
+    const nodes = [
+      node('1', 'group', undefined, ['2', '3']),
+      node('2', 'button', 'A', undefined, 10),
+      node('3', 'button', 'B', undefined, 20),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    const lines = result.text.split('\n')
+    // group has two children → emits on its own line (may have fallback name)
+    expect(lines[0]).toMatch(/^group/)
+    expect(lines[1]).toMatch(/^\s+button "A" \[ref=\d+\]$/)
+    expect(lines[2]).toMatch(/^\s+button "B" \[ref=\d+\]$/)
+    // Crucially, group must NOT be merged with its children
+    expect(lines).toHaveLength(3)
+  })
+
+  it('named intermediate node breaks the chain', () => {
+    // group "Nav"(has name) → button "Save" — chain should NOT merge
+    const nodes = [
+      node('1', 'group', 'Nav', ['2']),
+      node('2', 'button', 'Save'),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    const lines = result.text.split('\n')
+    // group "Nav" has a name, so it emits on its own line
+    expect(lines[0]).toContain('group "Nav"')
+    expect(lines[1]).toContain('button "Save"')
+    expect(lines).toHaveLength(2)
+  })
+
+  it('chain resets at multi-child node, children are indented from there', () => {
+    // wrapper(no name) → container(no name) → [buttonA, buttonB]
+    // Use nodes without names so fallback resolution doesn't add a name to container
+    const nodes = [
+      node('1', 'wrapper', undefined, ['2']),
+      node('2', 'container', undefined, ['3', '4']),
+      node('3', 'button', undefined, undefined, 10),
+      node('4', 'button', undefined, undefined, 20),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    const lines = result.text.split('\n')
+    // wrapper → container is a single-child chain; emits merged at indent 0
+    expect(lines[0]).toBe('wrapper > container [ref=2]')
+    // container has two children → they appear at chainIndent+1 = 1 → 2 spaces
+    expect(lines[1]).toBe('  button [ref=3]')
+    expect(lines[2]).toBe('  button [ref=4]')
+  })
+
+  it('filter + compact combined: only matching nodes appear, chain still merges', () => {
+    const nodes = [
+      node('1', 'group', undefined, ['2']),
+      node('2', 'section', undefined, ['3', '4']),
+      node('3', 'button', 'Submit', undefined, 10),
+      node('4', 'button', 'Cancel', undefined, 20),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true, filter: 'Submit' })
+    expect(result.text).toContain('Submit')
+    expect(result.text).not.toContain('Cancel')
+  })
+
+  it('compact without options: no effect when single root with no children', () => {
+    const nodes = [node('1', 'button', 'OK', undefined, 5)]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    expect(result.text).toBe('button "OK" [ref=1]')
+    expect(result.refs).toEqual([{ ref: 1, backendDOMNodeId: 5 }])
+  })
+
+  it('effectively-single-child node (InlineTextBox sibling skipped) still chains', () => {
+    // section has two raw children, but one is InlineTextBox (always skipped)
+    // → effectively single child → should chain
+    const nodes = [
+      node('1', 'group', undefined, ['2']),
+      node('2', 'section', undefined, ['3', '4']),
+      node('3', 'InlineTextBox', 'ignored'),
+      node('4', 'button', 'Go', undefined, 40),
+    ]
+    const result = formatAccessibilityTree(nodes, { compact: true })
+    // group → section → button "Go" should merge onto one line
+    expect(result.text).toBe('group > section > button "Go" [ref=3]')
+  })
+})

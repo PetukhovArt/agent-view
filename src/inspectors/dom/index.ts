@@ -9,6 +9,7 @@ export type DOMSnapshotOptions = {
   filter?: string
   depth?: number
   startRef?: number
+  compact?: boolean
 }
 
 export type DOMSnapshotResult = {
@@ -21,7 +22,7 @@ export function formatAccessibilityTree(
   nodes: AXNode[],
   options: DOMSnapshotOptions = {},
 ): DOMSnapshotResult {
-  const { filter, depth: maxDepth } = options
+  const { filter, depth: maxDepth, compact = false } = options
   const refs: RefEntry[] = []
   let nextRef = options.startRef ?? 1
   const lines: string[] = []
@@ -90,9 +91,28 @@ export function formatAccessibilityTree(
     return false
   }
 
+  // Returns the renderable (non-skipped) child IDs for a given node,
+  // accounting for ALWAYS_SKIP_ROLES and SKIP_WHEN_EMPTY_ROLES.
+  function effectiveChildren(node: AXNode): string[] {
+    if (!node.childIds) return []
+    return node.childIds.filter(childId => {
+      const child = nodeMap.get(childId)
+      if (!child) return false
+      const childRole = child.role?.value ?? ''
+      if (ALWAYS_SKIP_ROLES.has(childRole)) return false
+      const childName = child.name?.value ?? ''
+      const fallback = !childName ? resolveNameFromChildren(child) : ''
+      const resolvedName = childName || fallback
+      if (SKIP_WHEN_EMPTY_ROLES.has(childRole) && !resolvedName) return false
+      return true
+    })
+  }
+
   const HARD_MAX_DEPTH = 100
 
-  function walk(nodeId: string, depth: number, indent: number): void {
+  // chain: roles of ancestor nodes merged onto this line (compact mode only).
+  // chainIndent: the indent at which the chain started (where the line will be emitted).
+  function walk(nodeId: string, depth: number, indent: number, chain: string[], chainIndent: number): void {
     if (indent > HARD_MAX_DEPTH) return
     if (maxDepth !== undefined && indent > maxDepth) return
 
@@ -128,20 +148,38 @@ export function formatAccessibilityTree(
         refs.push({ ref, backendDOMNodeId: node.backendDOMNodeId })
       }
 
-      const padding = '  '.repeat(indent)
-      const isFallback = !ownName && fallbackName
-      const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
-      lines.push(`${padding}${role}${nameStr} [ref=${ref}]`)
-    }
+      const effChildren = compact ? effectiveChildren(node) : []
+      const isSingleChild = effChildren.length === 1
 
-    if (node.childIds) {
-      for (const childId of node.childIds) {
-        walk(childId, depth + 1, skip ? indent : indent + 1)
+      if (compact && isSingleChild && !ownName) {
+        // This node has no own accessible name and is a single-child link — accumulate into chain.
+        // Ref is already registered above; it won't appear inline but remains clickable.
+        walk(effChildren[0], depth + 1, indent + 1, [...chain, role], chainIndent)
+      } else {
+        // Flush: emit accumulated chain + this node on one line.
+        const isFallback = !ownName && fallbackName
+        const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
+        const padding = '  '.repeat(compact ? chainIndent : indent)
+        const chainPrefix = chain.length > 0 ? `${chain.join(' > ')} > ` : ''
+        lines.push(`${padding}${chainPrefix}${role}${nameStr} [ref=${ref}]`)
+
+        if (node.childIds) {
+          for (const childId of node.childIds) {
+            walk(childId, depth + 1, indent + 1, [], compact ? chainIndent + 1 : indent + 1)
+          }
+        }
+      }
+    } else {
+      // Skipped node — pass through children at same indent, reset chain
+      if (node.childIds) {
+        for (const childId of node.childIds) {
+          walk(childId, depth + 1, indent, chain, chainIndent)
+        }
       }
     }
   }
 
-  walk(rootNodeId, 0, 0)
+  walk(rootNodeId, 0, 0, [], 0)
 
   return {
     text: lines.join('\n') || '(no matching elements)',

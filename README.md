@@ -197,6 +197,7 @@ agent-view dom
 agent-view dom --filter "Submit"    # Filter by text/role
 agent-view dom --depth 3            # Limit tree depth
 agent-view dom --text               # Fall back to DOM textContent search when AX returns no match
+agent-view dom --compact            # Merge single-child chains onto one line (saves ~40-60% tokens)
 ```
 
 When `--filter` is set, depth defaults to unlimited so deep matches aren't truncated.
