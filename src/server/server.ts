@@ -721,13 +721,8 @@ export class AgentViewServer {
     const allTargets = await listSupportedTargets(req.port)
 
     if (explicitId) {
-      const byId = allTargets.find(t => t.id === explicitId)
-      if (byId) return byId
-      const bySubstr = allTargets.find(
-        t => t.title.toLowerCase().includes(explicitId.toLowerCase())
-          || t.url.toLowerCase().includes(explicitId.toLowerCase()),
-      )
-      if (bySubstr) return bySubstr
+      const found = findTargetByIdOrSubstring(allTargets, explicitId)
+      if (found) return found
       throw new Error(`Target not found: "${explicitId}". Run \`agent-view targets\` for the full list.`)
     }
 
@@ -882,9 +877,21 @@ export class AgentViewServer {
       this.consoleStream = new ConsoleStream({ capacity: bufferSize })
     }
 
+    const targetQuery = argStr(req.args, 'target')
+
+    // Fuzzy-resolve the target query once (id exact → title substring → url substring)
+    const all = await listSupportedTargets(req.port)
+    let resolvedTargetId: string | undefined
+    if (targetQuery) {
+      const resolved = findTargetByIdOrSubstring(all, targetQuery)
+      if (!resolved) {
+        return { ok: false, error: `Target not found: "${targetQuery}". Run \`agent-view targets\` for the full list.` }
+      }
+      resolvedTargetId = resolved.id
+    }
+
     if (argBool(req.args, 'clear')) {
-      const targetId = argStr(req.args, 'target')
-      this.consoleStream.clear(targetId)
+      this.consoleStream.clear(resolvedTargetId)
       return { ok: true, data: 'Console buffer cleared' }
     }
 
@@ -899,15 +906,13 @@ export class AgentViewServer {
     )
 
     // Lazy attach: ensure every matching target has a session
-    const all = await listSupportedTargets(req.port)
-    const explicitTarget = argStr(req.args, 'target')
     if (process.env.AV_DEBUG_CONSOLE) {
       // eslint-disable-next-line no-console
-      console.error(`[av-debug] handleConsole: targets=${all.length} explicit=${explicitTarget ?? 'none'} types=${[...allowedTypes].join(',')}`)
+      console.error(`[av-debug] handleConsole: targets=${all.length} explicit=${resolvedTargetId ?? 'none'} types=${[...allowedTypes].join(',')}`)
     }
     for (const t of all) {
-      if (explicitTarget && t.id !== explicitTarget) continue
-      if (!explicitTarget && !allowedTypes.has(t.type)) continue
+      if (resolvedTargetId && t.id !== resolvedTargetId) continue
+      if (!resolvedTargetId && !allowedTypes.has(t.type)) continue
       if (!RUNTIME_ONLY_TARGETS.has(t.type) && t.type !== TargetType.Page && t.type !== TargetType.Iframe) continue
       try {
         const session = await this.getRuntimeSession(req, t)
@@ -933,12 +938,12 @@ export class AgentViewServer {
       const collected: StampedConsoleMessage[] = this.consoleStream.drain({
         since,
         level: levelFilter,
-        targetId: explicitTarget,
+        targetId: resolvedTargetId,
       })
       const seenAt = collected.length > 0 ? collected[collected.length - 1].ts : (since ?? Date.now())
       await new Promise<void>((resolveFollow) => {
         const dispose = this.consoleStream.subscribe((msg) => {
-          if (explicitTarget && msg.targetId !== explicitTarget) return
+          if (resolvedTargetId && msg.targetId !== resolvedTargetId) return
           if (levelFilter && !levelFilter.has(msg.level)) return
           if (msg.ts <= seenAt) return
           collected.push(msg)
@@ -955,7 +960,7 @@ export class AgentViewServer {
     const messages = this.consoleStream.drain({
       since,
       level: levelFilter,
-      targetId: explicitTarget,
+      targetId: resolvedTargetId,
     })
     return { ok: true, data: formatConsoleMessages(messages) }
   }
@@ -984,6 +989,15 @@ export class AgentViewServer {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+export function findTargetByIdOrSubstring(targets: TargetInfo[], query: string): TargetInfo | null {
+  const byId = targets.find(t => t.id === query)
+  if (byId) return byId
+  const q = query.toLowerCase()
+  return targets.find(
+    t => t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q),
+  ) ?? null
+}
 
 function parseMouseButton(value: string | undefined): MouseButton | undefined {
   if (!value) return undefined

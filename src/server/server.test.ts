@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseFilter, resolveDepth, textContentFallback } from './server.js'
-import type { PageSession, AXNode } from '../cdp/types.js'
+import { parseFilter, resolveDepth, textContentFallback, findTargetByIdOrSubstring } from './server.js'
+import type { PageSession, AXNode, TargetInfo } from '../cdp/types.js'
 import { TargetType } from '../cdp/types.js'
 
 // ── resolveDepth ──────────────────────────────────────────────────────────────
@@ -173,5 +173,56 @@ describe('queryAXTree routing in findByFilter', () => {
   it('heuristic filter does not produce a simple parsed result', () => {
     expect(parseFilter('~partial match').kind).toBe('heuristic')
     expect(parseFilter('text.*pattern').kind).toBe('heuristic')
+  })
+})
+
+// ── findTargetByIdOrSubstring ─────────────────────────────────────────────────
+
+function makeTarget(id: string, title: string, url: string): TargetInfo {
+  return { id, title, url, type: TargetType.Page }
+}
+
+describe('findTargetByIdOrSubstring', () => {
+  const targets: TargetInfo[] = [
+    makeTarget('abc123', 'Main App', 'http://localhost:3000/'),
+    makeTarget('def456', 'Sync Worker', 'http://localhost:3000/worker.js'),
+    makeTarget('ghi789', 'Settings', 'http://localhost:3000/settings'),
+  ]
+
+  it('exact id match wins', () => {
+    expect(findTargetByIdOrSubstring(targets, 'abc123')?.id).toBe('abc123')
+  })
+
+  it('title substring match (case-insensitive)', () => {
+    expect(findTargetByIdOrSubstring(targets, 'sync')?.id).toBe('def456')
+  })
+
+  it('url substring match', () => {
+    expect(findTargetByIdOrSubstring(targets, 'settings')?.id).toBe('ghi789')
+  })
+
+  it('exact id wins over title substring when both match', () => {
+    const mixed: TargetInfo[] = [
+      makeTarget('worker', 'Something Else', 'http://localhost/other'),
+      makeTarget('zzzzzz', 'Worker Page', 'http://localhost/worker'),
+    ]
+    // 'worker' matches as exact id → first wins
+    expect(findTargetByIdOrSubstring(mixed, 'worker')?.id).toBe('worker')
+  })
+
+  it('first substring match returned when multiple match', () => {
+    const dupes: TargetInfo[] = [
+      makeTarget('id1', 'App Worker A', 'http://localhost/a'),
+      makeTarget('id2', 'App Worker B', 'http://localhost/b'),
+    ]
+    expect(findTargetByIdOrSubstring(dupes, 'worker')?.id).toBe('id1')
+  })
+
+  it('no match → null', () => {
+    expect(findTargetByIdOrSubstring(targets, 'nonexistent')).toBeNull()
+  })
+
+  it('empty targets → null', () => {
+    expect(findTargetByIdOrSubstring([], 'abc')).toBeNull()
   })
 })

@@ -99,7 +99,8 @@ Streams `Runtime.consoleAPICalled` + `Log.entryAdded`. Use to confirm a flow fin
 ```bash
 agent-view console                              # buffered messages from auto-attached targets
 agent-view console --level error,warn           # filter
-agent-view console --target sync-worker         # one target
+agent-view console --target sync-worker         # one target (title/URL substring, same fuzzy semantics as eval --target)
+agent-view console --target IJ56KL              # one target (exact id)
 agent-view console --follow --timeout 10        # stream window (use sparingly — 10s of waiting)
 agent-view console --clear                      # baseline before an interaction
 agent-view console --since "2026-04-26T10:00:00Z"
