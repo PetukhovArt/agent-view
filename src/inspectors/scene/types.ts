@@ -18,6 +18,7 @@ export type SceneOptions = {
   filter?: string
   depth?: number
   verbose?: boolean
+  compact?: boolean
 }
 
 export type SceneDiffResult = {
