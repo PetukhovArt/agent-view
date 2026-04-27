@@ -1,7 +1,7 @@
 ---
 name: verify-recipe
 description: "Generates a concrete, command-by-command agent-view recipe for verifying a feature or bugfix. Use when the developer wants to write a verify-recipe.md, create a verification plan, build an agent-view recipe, or produce a verify checklist for a change they shipped. Triggers on: write a verify-recipe, write verification steps, generate verify steps for the feature/bug I just shipped/fixed, make a verify-recipe.md, what should I run to verify X, create a verification plan, agent-view recipe for this fix, verify checklist for this feature. Does NOT execute the checks — it authors the plan. For running checks against a live app, use the verify skill instead."
-allowed-tools: Read, Write, Bash(agent-view *), Bash(rtk agent-view *)
+allowed-tools: Read, Write, Bash(agent-view *)
 ---
 
 # Verification Recipe Generator

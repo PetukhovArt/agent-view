@@ -27,17 +27,7 @@ agent-view is a CLI. One Bash call, compact text output, zero schema overhead. T
 
 And CLI works everywhere — Claude Code, Copilot, Codex, custom pipelines, CI. No MCP client required.
 
-## The feedback loop
-
-The real power isn't in individual commands — it's in the **loop**:
-
-```
-Code → Launch → See → Verify → Fix → See again
-```
-
-The agent writes code, then immediately checks what the user would see. If something's wrong, it fixes and re-checks — no human needed. This catches problems that builds and tests miss: CSS regressions, broken layouts, missing error messages, silent IPC failures.
-
-## Install
+## Install & Update
 
 ### Claude Code (recommended)
 
@@ -67,6 +57,19 @@ npm install -g @petukhovart/agent-view
 ```
 
 Everything works from this alone — `agent-view dom`, `screenshot`, `eval`, etc. Skip the plugin step.
+
+### Update
+
+```bash
+# Update the CLI to the latest version
+npm update -g @petukhovart/agent-view
+
+# Update the Claude Code plugin (refreshes skills from the marketplace)
+/plugin marketplace update agent-view
+/plugin install agent-view@agent-view   # re-run to pick up new skill versions
+```
+
+The two are independent — bump the CLI when a new release ships features (see `CHANGELOG.md`), bump the plugin when skill instructions change.
 
 ## Enabling CDP
 
@@ -151,7 +154,7 @@ A background server connects to your app's CDP port, caches sessions, and auto-s
 
 ## Config
 
-Running `agent-view init` in your project root generates `agent-view.config.json`:
+Running `agent-view init` in your project root generates `agent-view.config.json`. Minimal form:
 
 ```json
 {
@@ -161,13 +164,29 @@ Running `agent-view init` in your project root generates `agent-view.config.json
 }
 ```
 
+Full form with all optional fields:
+
+```json
+{
+  "runtime": "electron",
+  "port": 9876,
+  "launch": "npm run dev",
+  "allowEval": true,
+  "webgl": {
+    "engine": "pixi"
+  },
+  "consoleBufferSize": 500,
+  "consoleTargets": ["page", "shared_worker", "service_worker"]
+}
+```
+
 | Field               | Required | Description                                                                                               |
 |---------------------|----------|-----------------------------------------------------------------------------------------------------------|
 | `runtime`           | yes      | `"electron"`, `"tauri"`, or `"browser"`                                                                   |
 | `port`              | yes      | CDP debugging port                                                                                        |
 | `launch`            | no       | Command to start the app                                                                                  |
 | `webgl.engine`      | no       | `"pixi"` (scene extractor architecture supports adding more engines)                                      |
-| `allowEval`         | no       | `true` to enable `agent-view eval`. Off by default — opt-in for arbitrary JS execution                    |
+| `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default — opt-in for arbitrary JS execution        |
 | `consoleBufferSize` | no       | Per-target console ring capacity. Default `500`                                                           |
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to. Default `["page", "shared_worker", "service_worker"]` |
 
@@ -371,39 +390,17 @@ Stops the background lazy server.
 
 ## Performance
 
-AI agents run dozens of `dom → click → dom` verification cycles per session. Every millisecond compounds. agent-view is
-built specifically for this pattern.
+Built for tight `dom → click → dom` loops. Typical Electron app, ~200 AX nodes:
 
-### Benchmark results (Electron app, ~200 AX nodes)
+| Scenario                       | agent-view | Playwright (estimate) |
+|--------------------------------|------------|-----------------------|
+| `dom` cold fetch               | 2ms        | ~30–80ms              |
+| `dom` warm (cache hit)         | 1ms        | ~30–80ms              |
+| Full cycle `dom → click → dom` | 17ms       | ~75ms                 |
 
-| Scenario                       | v0.1.0 | v0.2.0+ | vs Playwright* |
-|--------------------------------|--------|---------|----------------|
-| `dom` cold fetch               | 10ms   | 2ms     | ~30–80ms       |
-| `dom` warm (cache hit)         | 10ms   | 1ms     | ~30–80ms       |
-| Full cycle `dom → click → dom` | 27ms   | 17ms    | ~75ms          |
-| `click --filter "Save"`        | 12ms   | 17ms†   | ~15–30ms       |
-
-\* *Playwright estimate based on architectural analysis — no published Electron-specific benchmarks exist*
-† *queryAXTree has CDP overhead that exceeds the benefit on small DOMs; improves on large production DOMs (1000+ nodes)*
-
-### What makes it fast
-
-**AX tree cache (300ms TTL).** The single biggest win. When an agent calls `dom`, then immediately `click --filter`, the
-second fetch hits the in-process cache instead of making a CDP round-trip. Cache is invalidated aggressively — busted on
-every `click`, `fill`, or page navigation. When a `dom` response is served from the cache, the output is prefixed with
-`[cache]` so the agent (or human) can decide whether to trust the cached tree or force a fresh fetch by running an
-action first.
-
-**Parallel CDP calls in click.** Previously 5 serial round-trips; now 3 parallel batches. `DOM.resolveNode` and
-`DOM.getBoxModel` run concurrently, then mouse events fire back-to-back without waiting for each response (the same
-approach Playwright uses internally).
-
-**`Accessibility.queryAXTree` for targeted lookups.** Plain string filters (`click --filter "Save"`) and `role:name`
-filters (`click --filter "button:Save"`) query the browser directly instead of fetching the full tree. Falls back
-gracefully on older Electron versions.
-
-**Raw CDP, no relay.** No Playwright client-server relay between your agent and the browser. The server process holds
-the CDP WebSocket connection and reuses it across commands.
+What makes it fast: 300ms AX-tree cache (invalidated on `click`/`fill`/navigation; cached responses prefixed with
+`[cache]`), parallel CDP calls in `click`, `Accessibility.queryAXTree` for filter lookups, and a single persistent CDP
+WebSocket reused across commands (no relay).
 
 ## Example: testing a login flow
 

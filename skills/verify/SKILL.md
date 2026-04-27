@@ -1,7 +1,7 @@
 ---
 name: verify
 description: "Visual + runtime verification of desktop apps via Chrome DevTools Protocol. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application — DOM, screenshots, scene graph, runtime state in pages and SharedWorkers/ServiceWorkers, console errors, or reactive-state diffs over time. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM, check store/state, watch state changes, what changed after click, wait until state, read worker, console errors, runtime check, eval in page."
-allowed-tools: Bash(agent-view *), Bash(rtk agent-view *)
+allowed-tools: Bash(agent-view *)
 ---
 
 # Visual Verification with agent-view
@@ -12,7 +12,7 @@ You have access to `agent-view` CLI for inspecting and interacting with desktop 
 
 The target project must have:
 1. `agent-view.config.json` in project root (run `agent-view init` to generate)
-2. CDP enabled in the app (e.g. `--remote-debugging-port=9222` for Electron)
+2. CDP enabled in the app (e.g. `--remote-debugging-port=9876` for Electron — avoid `9222`, it's Chrome's own default and collides when Chrome is open)
 
 If config is missing, run `agent-view init` first.
 
@@ -27,15 +27,15 @@ agent-view stop                        # Stop the lazy server
 
 ### DOM Inspection
 ```bash
-rtk agent-view dom                          # DOM accessibility tree (default window)
-rtk agent-view dom --window <id|name>       # Specific window
-rtk agent-view dom --filter "button"        # Filter by text/role
-rtk agent-view dom --depth 3                # Limit tree depth
-rtk agent-view dom --compact                # Merge single-child chains onto one line (~40-60% fewer tokens)
+agent-view dom                          # DOM accessibility tree (default window)
+agent-view dom --window <id|name>       # Specific window
+agent-view dom --filter "button"        # Filter by text/role
+agent-view dom --depth 3                # Limit tree depth
+agent-view dom --compact                # Merge single-child chains onto one line (~40-60% fewer tokens)
 agent-view dom --count                      # Count of all visible nodes (single integer line)
 agent-view dom --filter "row" --count       # Count matching nodes — e.g. "does this table have 5 rows?"
-rtk agent-view dom --max-lines 200          # Hard line budget; refs for truncated nodes still stored
-rtk agent-view dom --diff                   # Lines changed since last dom call (+ added / - removed)
+agent-view dom --max-lines 200          # Hard line budget; refs for truncated nodes still stored
+agent-view dom --diff                   # Lines changed since last dom call (+ added / - removed)
 ```
 
 `--count` skips tree output and ref mutations — cheapest way to assert "element exists N times" without loading the full tree into context.
@@ -184,8 +184,8 @@ After making code changes:
 
 1. **Determine affected areas** from git diff
 2. **Ensure app is running**: `agent-view launch` or `agent-view discover`
-3. **Inspect DOM**: `rtk agent-view dom --filter "<area>" --depth 2` — check structure matches expectations
-4. **Interact if needed**: `agent-view click`/`fill` → `rtk agent-view dom --filter` to verify state changed
+3. **Inspect DOM**: `agent-view dom --filter "<area>" --depth 2` — check structure matches expectations
+4. **Interact if needed**: `agent-view click`/`fill` → `agent-view dom --filter` to verify state changed
 5. **For canvas apps**: `agent-view scene --diff` to see what changed
 6. **For non-DOM truth** (store, computed values, worker state): `agent-view eval` — much cheaper than reading the DOM tree to infer state
 7. **After any interaction that could fail silently**: `agent-view console --level error` — catches uncaught exceptions, network failures, framework warnings
@@ -226,10 +226,10 @@ Vision tokens dominate cost. One full-res screenshot ≈ 19k tokens (1920×1080,
 |---|---|
 | `agent-view eval "expr"` for state checks | Returns one value (~50 tokens) instead of a DOM/screenshot |
 | `agent-view dom --filter "row" --count` | Single integer answer — zero tree tokens |
-| `rtk agent-view dom --filter X --depth 2` | Compresses text output via RTK |
+| `agent-view dom --filter X --depth 2` | Narrow tree to relevant subtree, cap depth |
 | `agent-view screenshot --scale 0.5` | ~3× fewer vision tokens (4 tiles) |
 | `agent-view screenshot --scale 0.25` | ~12× fewer vision tokens (1 tile, ~1.6k tokens) |
 | `agent-view screenshot --crop "<element>"` | ~12× fewer in best case (1 tile) — crops to element bounding box |
 | DOM/eval-first: screenshot only for final visual confirm | Eliminates most screenshot calls |
 
-**Default rule**: if the answer is a value → `eval`; if the answer is "is element X visible/correct?" → `rtk agent-view dom --filter`; if you need pixels for a specific section → `screenshot --crop "<element>"` (one tile); only call `screenshot --scale 0.5` for full-window visual proof.
+**Default rule**: if the answer is a value → `eval`; if the answer is "is element X visible/correct?" → `agent-view dom --filter`; if you need pixels for a specific section → `screenshot --crop "<element>"` (one tile); only call `screenshot --scale 0.5` for full-window visual proof.

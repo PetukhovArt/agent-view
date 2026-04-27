@@ -22,7 +22,7 @@
 - `agent-view console --target <substring>` — fuzzy resolve by id, then title, then URL substring (mirrors `eval --target`).
 - `[cache]` annotation — first line of `dom` output is prefixed with `[cache]` when the AX tree was served from the in-process cache.
 
-### Added — marketplace
+### Added — new marketplace SKILL
 
 - New `verify-recipe` skill in the plugin (alongside `verify`). Triggers on phrases like "write verify recipe for X" / "generate verification plan for fix Y". Walks through the hard-debug methodology (REPRO → narrowed signal → cheapest-first command sequence) and emits `.claude/verify-recipes/<slug>.md`.
 

@@ -1,26 +1,10 @@
 # Roadmap
 
-Planned features to research and ship, ordered by priority (highest first). Each item lists the concrete payoff — why it's worth building, not just what it is.
+Planned features to research and ship, ordered by priority (highest first).
+Each item in list is a TODO feature.
+Shipped features are in CHANGELOG.md
 
 ---
-
-## Done
-
-### ✅ v0.5.0 token-savers + workflow polish (2026-04-27)
-- `dom --compact` / `--count` / `--max-lines <n>` / `--diff` (with ref-normalised comparison)
-- `scene --compact`
-- `screenshot --crop <filter>` + WebP for scaled screenshots
-- `snap --scale` passthrough
-- `console --follow --until <pattern>` (early exit on match)
-- `console --target <substring>` (fuzzy match, parity with `eval --target`)
-- `[cache]` annotation on `dom` output served from AX cache
-- New marketplace skill `verify-recipe` for authoring verification plans
-
-### ✅ `agent-view watch <expr>` — reactive state debugger (Iteration 7, 2026-04-27)
-Polls a JS expression at fixed interval, streams JSON-patch (RFC 6902) diffs to stdout.
-Flags: `--interval`, `--duration`, `--max-changes`, `--until`, `--full`, `--json`, `--target`, `--window`.
-Generic-expression MVP shipped; framework adapters (Pinia/Redux/Zustand/MobX/Vue ref) deferred to Iteration 2.
-Spec: `docs/superpowers/specs/2026-04-27-watch-design.md`.
 
 ## High priority
 
