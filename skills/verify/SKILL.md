@@ -31,6 +31,7 @@ rtk agent-view dom                          # DOM accessibility tree (default wi
 rtk agent-view dom --window <id|name>       # Specific window
 rtk agent-view dom --filter "button"        # Filter by text/role
 rtk agent-view dom --depth 3                # Limit tree depth
+rtk agent-view dom --diff                   # Lines changed since last dom call (+ added / - removed)
 ```
 
 ### Interaction
@@ -152,6 +153,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
 | Layout, spacing, visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
 | Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
+| What DOM nodes changed after an interaction | `dom --diff` | Returns only `+`/`-` lines; much cheaper than re-reading the full tree |
 
 When two tools could answer the same question, prefer the one higher up the table. A common mistake is screenshotting to check "is the count = 5?" when `eval "store.counter"` returns the number directly for ~50 tokens.
 

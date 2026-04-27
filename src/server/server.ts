@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
-import { formatAccessibilityTree } from '../inspectors/dom/index.js'
+import { formatAccessibilityTree, diffDomText } from '../inspectors/dom/index.js'
 import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning } from './launcher.js'
@@ -138,6 +138,7 @@ export class AgentViewServer {
   private refStore = new RefStore()
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private sceneCache = new Map<string, SceneNode>()
+  private domTextCache = new Map<string, string>()
   private axTreeCache = new AxTreeCache()
   private consoleStream = new ConsoleStream()
   private token = ''
@@ -342,6 +343,8 @@ export class AgentViewServer {
 
     const filter = argStr(req.args, 'filter')
     const useText = argBool(req.args, 'text') ?? false
+    const isDiff = argBool(req.args, 'diff') ?? false
+    const cacheKey = `${req.port}:${targetId}`
 
     const nodes = await conn.getAccessibilityTree()
     const { text, refs, nextRef } = formatAccessibilityTree(nodes, {
@@ -351,6 +354,18 @@ export class AgentViewServer {
     })
 
     this.refStore.store(refs, req.port, targetId, nextRef)
+
+    if (isDiff) {
+      const prev = this.domTextCache.get(cacheKey)
+      this.domTextCache.set(cacheKey, text)
+
+      if (prev === undefined) {
+        // First call — no snapshot yet, return full tree
+        return { ok: true, data: text }
+      }
+
+      return { ok: true, data: diffDomText(prev, text) }
+    }
 
     if (useText && filter && text.startsWith('(no matching')) {
       return { ok: true, data: await textContentFallback(conn, filter) }

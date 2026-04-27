@@ -195,9 +195,12 @@ agent-view dom
 agent-view dom --filter "Submit"    # Filter by text/role
 agent-view dom --depth 3            # Limit tree depth
 agent-view dom --text               # Fall back to DOM textContent search when AX returns no match
+agent-view dom --diff               # Show only lines that changed since last call
 ```
 
 When `--filter` is set, depth defaults to unlimited so deep matches aren't truncated.
+
+`--diff` computes a line-level diff against the previous `dom` call for the same target. The first call always returns the full tree (no prior snapshot). Subsequent calls emit only added (`+ `) and removed (`- `) lines. Returns `No changes` when the tree is identical.
 
 ### `click`
 

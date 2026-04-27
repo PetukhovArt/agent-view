@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { AXNode } from '../../cdp/types.js'
-import { formatAccessibilityTree } from './index.js'
+import { formatAccessibilityTree, diffDomText } from './index.js'
 
 function node(
   nodeId: string,
@@ -166,5 +166,52 @@ describe('formatAccessibilityTree', () => {
     expect(result.refs[1]).toEqual({ ref: 2, backendDOMNodeId: 101 })
     expect(result.refs[2]).toEqual({ ref: 3, backendDOMNodeId: 102 })
     expect(result.nextRef).toBe(4)
+  })
+})
+
+describe('diffDomText', () => {
+  it('identical text returns No changes', () => {
+    const text = 'button "Submit" [ref=1]\n  link "Home" [ref=2]'
+    expect(diffDomText(text, text)).toBe('No changes')
+  })
+
+  it('added line is prefixed with +', () => {
+    const prev = 'button "Submit" [ref=1]'
+    const curr = 'button "Submit" [ref=1]\nbutton "Cancel" [ref=2]'
+    const result = diffDomText(prev, curr)
+    expect(result).toContain('+ button "Cancel" [ref=2]')
+    expect(result).not.toContain('-')
+  })
+
+  it('removed line is prefixed with -', () => {
+    const prev = 'button "Submit" [ref=1]\nbutton "Cancel" [ref=2]'
+    const curr = 'button "Submit" [ref=1]'
+    const result = diffDomText(prev, curr)
+    expect(result).toContain('- button "Cancel" [ref=2]')
+    expect(result).not.toContain('+')
+  })
+
+  it('changed line appears as removal + addition', () => {
+    const prev = 'button "Submit" [ref=1]'
+    const curr = 'button "Save" [ref=1]'
+    const result = diffDomText(prev, curr)
+    expect(result).toContain('+ button "Save" [ref=1]')
+    expect(result).toContain('- button "Submit" [ref=1]')
+  })
+
+  it('duplicate lines counted correctly — one removed, one kept', () => {
+    const prev = 'button [ref=1]\nbutton [ref=2]'
+    const curr = 'button [ref=1]'
+    const result = diffDomText(prev, curr)
+    // one "button [ref=2]" removed
+    expect(result).toContain('- button [ref=2]')
+    // the shared "button [ref=1]" should NOT appear
+    expect(result).not.toContain('button [ref=1]')
+  })
+
+  it('empty prev vs non-empty curr: all lines added', () => {
+    const result = diffDomText('', 'button "OK" [ref=1]')
+    expect(result).toContain('+ button "OK" [ref=1]')
+    // The empty string '' itself is an empty line — it won't show as removed if curr also has no empty lines
   })
 })

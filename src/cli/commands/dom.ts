@@ -6,19 +6,22 @@ type DomOptions = {
   filter?: string
   depth?: number
   text?: boolean
+  diff?: boolean
 }
 
 export async function runDom(config: AgentViewConfig, options: DomOptions): Promise<void> {
+  const args: Record<string, unknown> = {}
+  if (options.window) args.window = options.window
+  if (options.filter) args.filter = options.filter
+  if (options.depth !== undefined) args.depth = options.depth
+  if (options.text) args.text = true
+  if (options.diff) args.diff = true
+
   const response = await sendCommand({
     command: 'dom',
     port: config.port,
     runtime: config.runtime,
-    args: {
-      window: options.window,
-      filter: options.filter,
-      depth: options.depth,
-      text: options.text,
-    },
+    args,
   })
 
   if (!response.ok) {

@@ -17,6 +17,58 @@ export type DOMSnapshotResult = {
   nextRef: number
 }
 
+/**
+ * Compute a line-level diff between two formatted DOM texts.
+ * Lines are compared by content; added/removed/changed lines are prefixed
+ * with `+ `, `- `, or `~ ` (changed = same line index, different content).
+ *
+ * Strategy: snapshot formatted text (not AX state), keyed by content.
+ * - Lines present only in `curr` → `+`
+ * - Lines present only in `prev` → `-`
+ * - When equal number of lines match a key, nothing is emitted (no change).
+ *
+ * Returns `'No changes'` when `prev` and `curr` are identical.
+ */
+export function diffDomText(prev: string, curr: string): string {
+  if (prev === curr) return 'No changes'
+
+  const prevLines = prev.split('\n')
+  const currLines = curr.split('\n')
+
+  // Build frequency maps for line content
+  const prevCounts = new Map<string, number>()
+  for (const line of prevLines) {
+    prevCounts.set(line, (prevCounts.get(line) ?? 0) + 1)
+  }
+
+  const currCounts = new Map<string, number>()
+  for (const line of currLines) {
+    currCounts.set(line, (currCounts.get(line) ?? 0) + 1)
+  }
+
+  const changes: string[] = []
+
+  // Added lines (in curr but not (fully) in prev)
+  for (const [line, count] of currCounts) {
+    const prevCount = prevCounts.get(line) ?? 0
+    const added = count - prevCount
+    for (let i = 0; i < added; i++) {
+      changes.push(`+ ${line}`)
+    }
+  }
+
+  // Removed lines (in prev but not (fully) in curr)
+  for (const [line, count] of prevCounts) {
+    const currCount = currCounts.get(line) ?? 0
+    const removed = count - currCount
+    for (let i = 0; i < removed; i++) {
+      changes.push(`- ${line}`)
+    }
+  }
+
+  return changes.length > 0 ? changes.join('\n') : 'No changes'
+}
+
 export function formatAccessibilityTree(
   nodes: AXNode[],
   options: DOMSnapshotOptions = {},

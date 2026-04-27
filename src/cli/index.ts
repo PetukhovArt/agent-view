@@ -61,6 +61,7 @@ program
   .option('-f, --filter <text>', 'Filter by text/name')
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
   .option('--text', 'Fall back to DOM textContent search when AX tree returns no match')
+  .option('--diff', 'Show only changes since last dom call (first call returns full tree)')
   .action(async (options) => {
     const config = requireConfig()
     await runDom(config, options)
