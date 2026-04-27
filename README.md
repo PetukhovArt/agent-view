@@ -44,13 +44,15 @@ The agent writes code, then immediately checks what the user would see. If somet
 Two steps — both required:
 
 ```bash
-# 1. Install the plugin — adds the /agent-view:verify skill so Claude knows when and how to call agent-view
+# 1. Install the plugin — adds two skills: verify (run checks against a live app) and verify-recipe (author a verification plan)
 /plugin marketplace add PetukhovArt/agent-view
 /plugin install agent-view@agent-view
 
 # 2. Install the CLI — the skill calls these binaries; the plugin doesn't bundle them
 npm install -g @petukhovart/agent-view
 ```
+
+The plugin ships two skills. **`verify`** executes visual and runtime checks against a running app. **`verify-recipe`** generates a `.claude/verify-recipes/<slug>.md` file — a disciplined, cheapest-first command sequence for a feature or bugfix — that you or any AI agent can run later. Trigger it with phrases like "write a verify-recipe for the login fix" or "generate a verification plan for this feature".
 
 Verify:
 

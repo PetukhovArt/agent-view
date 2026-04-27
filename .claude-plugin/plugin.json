@@ -1,6 +1,6 @@
 {
   "name": "agent-view",
-  "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, and read WebGL scene graphs.",
+  "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Ships two skills: verify (run DOM, screenshot, eval, watch, console checks against a live app) and verify-recipe (author a disciplined verification plan as a .md file).",
   "version": "0.3.0",
   "keywords": [
     "cdp",
