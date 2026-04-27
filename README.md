@@ -194,6 +194,29 @@ Full surface in [Commands](#commands) below.
 
 A repeatable, token-efficient flow for "I shipped a feature/fix → confirm it actually works visually and at runtime". Two phases, each driven by a focused prompt.
 
+```mermaid
+flowchart TD
+    Dev["Developer<br/>in Claude Code"] -->|prompt| Agent["Main Claude agent<br/>(Opus / Sonnet)"]
+
+    Agent -->|"verify ad-hoc"| Verify["verify skill"]
+    Agent -->|"write recipe"| Recipe["verify-recipe skill"]
+
+    Recipe -->|interview| Dev
+    Recipe -->|writes| File[".claude/verify-recipes/&lt;slug&gt;.md"]
+    File -.->|read on next run| Verify
+
+    Verify -->|"agent-view dom / eval / click /<br/>screenshot / watch / console"| CLI["agent-view CLI"]
+    CLI -->|CDP| App["Live app<br/>(Electron / Tauri / Browser)"]
+    App -->|stdout / image paths| Verify
+
+    Verify -->|"pass / fail summary<br/>+ design conformance verdict"| Dev
+
+    classDef skill fill:#e8f0ff,stroke:#3060a0,color:#0a1f3d
+    classDef tool fill:#fff4d6,stroke:#a07020,color:#3d2a05
+    class Verify,Recipe skill
+    class CLI tool
+```
+
 ### Phase 1 — Author the verification plan (once)
 
 Generate the recipe **once**, from a PRD / plan file / Jira ticket / commit range. The recipe is reusable — re-run after every iteration on the same feature.
