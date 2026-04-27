@@ -619,18 +619,21 @@ export class AgentViewServer {
     return { ok: false, error: `Timeout: "${filter}" not found after ${timeout}s` }
   }
 
-  private async handleScreenshot(req: ServerRequest): Promise<ServerResponse> {
-    const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getPageSession(req, targetId)
-
-    const scale = argNum(req.args, 'scale')
+  private async captureScreenshotToFile(conn: PageSession, scale?: number): Promise<string> {
     const opts = scale !== undefined ? { scale } : undefined
     const buffer = await conn.captureScreenshot(opts)
     const ext = scale !== undefined && scale < 1 ? 'jpg' : 'png'
     const filename = `agent-view-screenshot-${Date.now()}.${ext}`
     const filepath = join(tmpdir(), filename)
     await writeFile(filepath, buffer)
+    return filepath
+  }
 
+  private async handleScreenshot(req: ServerRequest): Promise<ServerResponse> {
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const scale = argNum(req.args, 'scale')
+    const filepath = await this.captureScreenshotToFile(conn, scale)
     return { ok: true, data: filepath }
   }
 
@@ -680,6 +683,7 @@ export class AgentViewServer {
 
     const snapFilter = argStr(req.args, 'filter')
     const snapDepth = argNum(req.args, 'depth')
+    const snapScale = argNum(req.args, 'scale')
 
     const nodes = await conn.getAccessibilityTree()
     const { text: domText, refs, nextRef } = formatAccessibilityTree(nodes, {
@@ -699,6 +703,11 @@ export class AgentViewServer {
       if (!sceneText.startsWith('No ')) {
         sections.push(`=== Scene ===\n${sceneText}`)
       }
+    }
+
+    if (snapScale !== undefined) {
+      const filepath = await this.captureScreenshotToFile(conn, snapScale)
+      sections.push(`=== Screenshot ===\n${filepath}`)
     }
 
     return { ok: true, data: sections.join('\n\n') }

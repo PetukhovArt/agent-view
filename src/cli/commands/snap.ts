@@ -5,6 +5,7 @@ type SnapOptions = {
   window?: string
   filter?: string
   depth?: number
+  scale?: number
 }
 
 export async function runSnap(config: AgentViewConfig, options: SnapOptions): Promise<void> {
@@ -12,6 +13,7 @@ export async function runSnap(config: AgentViewConfig, options: SnapOptions): Pr
   if (options.window) args.window = options.window
   if (options.filter) args.filter = options.filter
   if (options.depth !== undefined) args.depth = options.depth
+  if (options.scale !== undefined) args.scale = options.scale
 
   const response = await sendCommand({
     command: 'snap',

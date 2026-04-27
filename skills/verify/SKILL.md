@@ -137,6 +137,7 @@ agent-view scene --filter "player"      # Filter by object name/type
 agent-view scene --verbose              # Extended props (scale, alpha, rotation)
 agent-view scene --diff                 # Changes since last call
 agent-view snap                         # DOM + Scene combined
+agent-view snap --scale 0.5             # DOM + Scene + Screenshot (path appended as === Screenshot === section)
 ```
 
 ## Picking the right tool
