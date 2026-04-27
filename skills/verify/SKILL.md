@@ -101,9 +101,13 @@ agent-view console                              # buffered messages from auto-at
 agent-view console --level error,warn           # filter
 agent-view console --target sync-worker         # one target
 agent-view console --follow --timeout 10        # stream window (use sparingly — 10s of waiting)
+agent-view console --follow --until "ready"     # exit as soon as a message contains "ready"
+agent-view console --follow --until "/error/i"  # exit on regex match (case-insensitive)
 agent-view console --clear                      # baseline before an interaction
 agent-view console --since "2026-04-26T10:00:00Z"
 ```
+
+`--until` requires `--follow`. Exits immediately when a message matches (substring or `/regex/flags`). On timeout without match exits non-zero.
 
 Standard pattern for "did this action error?":
 ```bash

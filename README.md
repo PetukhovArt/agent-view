@@ -309,11 +309,15 @@ Streams or dumps console output (`Runtime.consoleAPICalled` + `Log.entryAdded`) 
 ```bash
 agent-view console                              # buffered messages since attach
 agent-view console --follow --timeout 10        # stream for 10s
+agent-view console --follow --until "ready"     # exit as soon as a message contains "ready"
+agent-view console --follow --until "/error/i"  # exit on regex match (case-insensitive)
 agent-view console --target IJ56KL              # restrict to one target
 agent-view console --level error,warn           # level filter
 agent-view console --since "2026-04-26T10:00:00Z"
 agent-view console --clear                      # drop in-memory ring
 ```
+
+`--until <pattern>` requires `--follow`. Exits as soon as a message matches the pattern (substring or `/regex/flags`). On timeout without match exits non-zero with `Timeout: pattern not seen in <N>s`.
 
 Default attached target types: `page`, `shared_worker`, `service_worker`. Override with `consoleTargets` in config.
 
