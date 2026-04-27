@@ -167,6 +167,72 @@ describe('formatAccessibilityTree', () => {
     expect(result.refs[2]).toEqual({ ref: 3, backendDOMNodeId: 102 })
     expect(result.nextRef).toBe(4)
   })
+
+  describe('maxLines truncation', () => {
+    function threeNodeTree() {
+      return [
+        node('1', 'group', 'Root', ['2', '3'], 100),
+        node('2', 'button', 'A', undefined, 101),
+        node('3', 'button', 'B', undefined, 102),
+      ]
+    }
+
+    it('no truncation when lines <= maxLines', () => {
+      // 3 lines total, maxLines=3 → no tail
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 3 })
+      const lines = result.text.split('\n')
+      expect(lines).toHaveLength(3)
+      expect(result.text).not.toContain('more nodes')
+    })
+
+    it('no truncation when lines === maxLines (edge case)', () => {
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 3 })
+      expect(result.text).not.toContain('more nodes')
+    })
+
+    it('truncates when lines > maxLines and appends tail', () => {
+      // 3 lines total, maxLines=2 → keep 1 line + tail
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 2 })
+      const lines = result.text.split('\n')
+      expect(lines).toHaveLength(2)
+      expect(lines[0]).toContain('Root')
+      expect(lines[1]).toBe('… 2 more nodes')
+    })
+
+    it('tail count is correct: N lines visible + "… M more nodes" = total lines', () => {
+      // 3 lines total, maxLines=3 triggers no tail; maxLines=2 → 1 kept + 2 skipped
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 2 })
+      const lines = result.text.split('\n')
+      // We showed maxLines-1=1 lines before tail, skipped 3-(2-1)=2 nodes
+      expect(lines[1]).toBe('… 2 more nodes')
+    })
+
+    it('refs for ALL nodes are stored even when output is truncated', () => {
+      // All 3 nodes have backendDOMNodeIds
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 2 })
+      // Truncated output shows only 2 lines but refs for all 3 nodes are preserved
+      expect(result.refs).toHaveLength(3)
+      expect(result.refs.map(r => r.backendDOMNodeId)).toEqual([100, 101, 102])
+    })
+
+    it('nextRef continues past all nodes, not just visible ones', () => {
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 2 })
+      expect(result.nextRef).toBe(4) // same as without truncation
+    })
+
+    it('no truncation when maxLines is undefined', () => {
+      const result = formatAccessibilityTree(threeNodeTree())
+      expect(result.text.split('\n')).toHaveLength(3)
+      expect(result.text).not.toContain('more nodes')
+    })
+
+    it('maxLines=1: only tail line shown', () => {
+      const result = formatAccessibilityTree(threeNodeTree(), { maxLines: 1 })
+      const lines = result.text.split('\n')
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toBe('… 3 more nodes')
+    })
+  })
 })
 
 describe('formatAccessibilityTree --compact', () => {

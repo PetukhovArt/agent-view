@@ -63,6 +63,7 @@ program
   .option('--text', 'Fall back to DOM textContent search when AX tree returns no match')
   .option('--compact', 'Merge single-child chains onto one line to reduce token count')
   .option('--count', 'Return only the count of matching nodes (no tree output, no ref mutations)')
+  .option('--max-lines <n>', 'Hard line budget — truncates output with a "… N more nodes" tail; refs for hidden nodes are still stored', parseMaxLines)
   .action(async (options) => {
     const config = requireConfig()
     await runDom(config, options)
@@ -222,6 +223,15 @@ function parseDepth(value: string): number {
   const n = parseInt(value, 10)
   if (isNaN(n)) {
     console.error(`Invalid depth value: "${value}"`)
+    process.exit(1)
+  }
+  return n
+}
+
+function parseMaxLines(value: string): number {
+  const n = parseInt(value, 10)
+  if (isNaN(n) || n <= 0) {
+    console.error(`Invalid --max-lines value: "${value}" (must be a positive integer)`)
     process.exit(1)
   }
   return n

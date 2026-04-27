@@ -8,6 +8,7 @@ type DomOptions = {
   text?: boolean
   compact?: boolean
   count?: boolean
+  maxLines?: number
 }
 
 export async function runDom(config: AgentViewConfig, options: DomOptions): Promise<void> {
@@ -22,6 +23,7 @@ export async function runDom(config: AgentViewConfig, options: DomOptions): Prom
       text: options.text,
       compact: options.compact,
       count: options.count,
+      maxLines: options.maxLines,
     },
   })
 

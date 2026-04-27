@@ -34,6 +34,7 @@ rtk agent-view dom --depth 3                # Limit tree depth
 rtk agent-view dom --compact                # Merge single-child chains onto one line (~40-60% fewer tokens)
 agent-view dom --count                      # Count of all visible nodes (single integer line)
 agent-view dom --filter "row" --count       # Count matching nodes — e.g. "does this table have 5 rows?"
+rtk agent-view dom --max-lines 200          # Hard line budget; refs for truncated nodes still stored
 ```
 
 `--count` skips tree output and ref mutations — cheapest way to assert "element exists N times" without loading the full tree into context.

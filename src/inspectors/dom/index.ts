@@ -10,6 +10,7 @@ export type DOMSnapshotOptions = {
   depth?: number
   startRef?: number
   compact?: boolean
+  maxLines?: number
 }
 
 export type DOMSnapshotResult = {
@@ -143,7 +144,7 @@ export function formatAccessibilityTree(
   nodes: AXNode[],
   options: DOMSnapshotOptions = {},
 ): DOMSnapshotResult {
-  const { filter, depth: maxDepth, compact = false } = options
+  const { filter, depth: maxDepth, compact = false, maxLines } = options
   const refs: RefEntry[] = []
   let nextRef = options.startRef ?? 1
   const lines: string[] = []
@@ -182,8 +183,12 @@ export function formatAccessibilityTree(
     })
   }
 
+  const displayLines = maxLines !== undefined && lines.length > maxLines
+    ? [...lines.slice(0, maxLines - 1), `… ${lines.length - (maxLines - 1)} more nodes`]
+    : lines
+
   return {
-    text: lines.join('\n') || '(no matching elements)',
+    text: displayLines.join('\n') || '(no matching elements)',
     refs,
     nextRef,
   }
