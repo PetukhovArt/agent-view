@@ -31,7 +31,11 @@ rtk agent-view dom                          # DOM accessibility tree (default wi
 rtk agent-view dom --window <id|name>       # Specific window
 rtk agent-view dom --filter "button"        # Filter by text/role
 rtk agent-view dom --depth 3                # Limit tree depth
+agent-view dom --count                      # Count of all visible nodes (single integer line)
+agent-view dom --filter "row" --count       # Count matching nodes — e.g. "does this table have 5 rows?"
 ```
+
+`--count` skips tree output and ref mutations — cheapest way to assert "element exists N times" without loading the full tree into context.
 
 ### Interaction
 ```bash
@@ -146,6 +150,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | The question is about… | Use | Why |
 |---|---|---|
 | Element existence / text / role | `dom --filter` | Cheapest, structured, no vision tokens |
+| Count of matching elements | `dom --filter X --count` | Single integer, no tree output, no ref mutations |
 | App state, store contents, computed values | `eval "expr"` | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable |
 | State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
 | Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
@@ -204,6 +209,7 @@ Vision tokens dominate cost. One full-res screenshot ≈ 19k tokens (1920×1080,
 | Technique | Savings |
 |---|---|
 | `agent-view eval "expr"` for state checks | Returns one value (~50 tokens) instead of a DOM/screenshot |
+| `agent-view dom --filter "row" --count` | Single integer answer — zero tree tokens |
 | `rtk agent-view dom --filter X --depth 2` | Compresses text output via RTK |
 | `agent-view screenshot --scale 0.5` | ~3× fewer vision tokens (4 tiles) |
 | `agent-view screenshot --scale 0.25` | ~12× fewer vision tokens (1 tile, ~1.6k tokens) |

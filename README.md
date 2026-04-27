@@ -195,9 +195,13 @@ agent-view dom
 agent-view dom --filter "Submit"    # Filter by text/role
 agent-view dom --depth 3            # Limit tree depth
 agent-view dom --text               # Fall back to DOM textContent search when AX returns no match
+agent-view dom --count              # Return only the count of matching nodes (e.g. "5")
+agent-view dom --filter "row" --count  # Count how many rows match
 ```
 
 When `--filter` is set, depth defaults to unlimited so deep matches aren't truncated.
+
+`--count` skips tree formatting and ref-store mutations entirely — useful for assertions like "does this section have N rows?" without the token cost of a full tree dump.
 
 ### `click`
 
