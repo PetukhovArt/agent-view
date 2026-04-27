@@ -104,7 +104,7 @@ function makeMockConn(overrides: Partial<PageSession> = {}): PageSession {
     getAccessibilityTree: vi.fn().mockResolvedValue([]),
     getAccessibilityTreeMeta: vi.fn().mockResolvedValue({ nodes: [], fromCache: false }),
     queryAXTree: vi.fn().mockResolvedValue(null),
-    captureScreenshot: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+    captureScreenshot: vi.fn().mockResolvedValue({ buffer: Buffer.alloc(0), format: 'png' as const }),
     clickByNodeId: vi.fn().mockResolvedValue(undefined),
     clickAtPosition: vi.fn().mockResolvedValue(undefined),
     fillByNodeId: vi.fn().mockResolvedValue(undefined),

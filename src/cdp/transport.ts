@@ -287,6 +287,8 @@ export async function connectToPage(
 
   // null = not yet tested; true = available; false = unavailable (API not supported)
   let queryAXTreeAvailable: boolean | null = null
+  // null = not yet tested; true = webp supported; false = not supported (old Chrome/Electron)
+  let webpSupported: boolean | null = null
 
   Page.frameNavigated(async () => {
     cache.invalidate(cacheKey)
@@ -373,19 +375,31 @@ export async function connectToPage(
       }
     },
 
-    async captureScreenshot(opts?: ScreenshotOpts): Promise<Buffer> {
+    async captureScreenshot(opts?: ScreenshotOpts): Promise<{ buffer: Buffer; format: 'png' | 'jpeg' | 'webp' }> {
       const scale = opts?.scale ?? 1
       if (scale >= 1) {
         const { data } = await Page.captureScreenshot({ format: 'png' })
-        return Buffer.from(data, 'base64')
+        return { buffer: Buffer.from(data, 'base64'), format: 'png' }
       }
       const { cssLayoutViewport } = await Page.getLayoutMetrics()
-      const { data } = await Page.captureScreenshot({
-        format: 'jpeg',
-        quality: 80,
-        clip: { x: 0, y: 0, width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight, scale },
-      })
-      return Buffer.from(data, 'base64')
+      const clip = { x: 0, y: 0, width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight, scale }
+
+      if (webpSupported !== false) {
+        try {
+          const { data } = await Page.captureScreenshot({ format: 'webp', quality: 80, clip })
+          webpSupported = true
+          return { buffer: Buffer.from(data, 'base64'), format: 'webp' }
+        } catch {
+          if (webpSupported === null) {
+            // eslint-disable-next-line no-console
+            console.error('[agent-view] WebP not supported by this Chrome/Electron version, falling back to JPEG')
+            webpSupported = false
+          }
+        }
+      }
+
+      const { data } = await Page.captureScreenshot({ format: 'jpeg', quality: 80, clip })
+      return { buffer: Buffer.from(data, 'base64'), format: 'jpeg' }
     },
 
     async clickByNodeId(backendNodeId: number): Promise<void> {

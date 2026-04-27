@@ -22,8 +22,13 @@ export type TargetInfo = {
 }
 
 export type ScreenshotOpts = {
-  /** Scale factor (0 < scale ≤ 1). Values < 1 use JPEG at 80% quality to reduce token cost. */
+  /** Scale factor (0 < scale ≤ 1). Values < 1 use WebP at q=80 (JPEG fallback for old Chrome/Electron). */
   scale?: number
+}
+
+export type ScreenshotResult = {
+  buffer: Buffer
+  format: 'png' | 'jpeg' | 'webp'
 }
 
 export enum MouseButton {
@@ -95,7 +100,7 @@ export type PageSession = RuntimeSession & {
   getAccessibilityTreeMeta: () => Promise<{ nodes: AXNode[]; fromCache: boolean }>
   /** Returns matching nodes by accessible name/role. null = API unavailable; [] = no match. */
   queryAXTree: (params: { accessibleName?: string; role?: string }) => Promise<AXNode[] | null>
-  captureScreenshot: (opts?: ScreenshotOpts) => Promise<Buffer>
+  captureScreenshot: (opts?: ScreenshotOpts) => Promise<ScreenshotResult>
   clickByNodeId: (backendDOMNodeId: number) => Promise<void>
   clickAtPosition: (x: number, y: number) => Promise<void>
   fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>

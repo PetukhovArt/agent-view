@@ -239,15 +239,15 @@ for touch-style activation). `--button` accepts `left|right|middle`.
 
 ### `screenshot`
 
-Captures a screenshot, saves to temp dir, prints the file path. PNG by default; JPEG when `--scale` is set.
+Captures a screenshot, saves to temp dir, prints the file path. PNG by default; WebP (q=80) when `--scale` is set (JPEG fallback for older Chrome/Electron).
 
 ```bash
 agent-view screenshot
-agent-view screenshot --scale 0.5             # Half-res JPEG (~3× fewer vision tokens)
-agent-view screenshot --scale 0.25            # Quarter-res JPEG (~12× fewer, 1 tile)
+agent-view screenshot --scale 0.5             # Half-res WebP (~3× fewer vision tokens)
+agent-view screenshot --scale 0.25            # Quarter-res WebP (~12× fewer, 1 tile)
 ```
 
-`--scale` accepts a factor in `(0, 1]`. CDP-side clip + JPEG encode — recommended for agent loops where vision tokens dominate cost.
+`--scale` accepts a factor in `(0, 1]`. CDP-side clip + WebP encode — recommended for agent loops where vision tokens dominate cost.
 
 ### `scene`
 
