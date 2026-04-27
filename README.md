@@ -364,7 +364,9 @@ built specifically for this pattern.
 
 **AX tree cache (300ms TTL).** The single biggest win. When an agent calls `dom`, then immediately `click --filter`, the
 second fetch hits the in-process cache instead of making a CDP round-trip. Cache is invalidated aggressively — busted on
-every `click`, `fill`, or page navigation.
+every `click`, `fill`, or page navigation. When a `dom` response is served from the cache, the output is prefixed with
+`[cache]` so the agent (or human) can decide whether to trust the cached tree or force a fresh fetch by running an
+action first.
 
 **Parallel CDP calls in click.** Previously 5 serial round-trips; now 3 parallel batches. `DOM.resolveNode` and
 `DOM.getBoxModel` run concurrently, then mouse events fire back-to-back without waiting for each response (the same
