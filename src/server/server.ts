@@ -342,12 +342,14 @@ export class AgentViewServer {
 
     const filter = argStr(req.args, 'filter')
     const useText = argBool(req.args, 'text') ?? false
+    const compact = argBool(req.args, 'compact') ?? false
 
     const nodes = await conn.getAccessibilityTree()
     const { text, refs, nextRef } = formatAccessibilityTree(nodes, {
       filter,
       depth: resolveDepth(filter, argNum(req.args, 'depth')),
       startRef: this.refStore.getNextRef(),
+      compact,
     })
 
     this.refStore.store(refs, req.port, targetId, nextRef)
