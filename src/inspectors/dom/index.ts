@@ -23,6 +23,48 @@ export type DOMCountResult = {
   count: number
 }
 
+/**
+ * Compute a line-level diff between two formatted DOM texts.
+ * Lines present only in `curr` → `+`; only in `prev` → `-`. Returns
+ * `'No changes'` when identical.
+ */
+export function diffDomText(prev: string, curr: string): string {
+  if (prev === curr) return 'No changes'
+
+  const prevLines = prev.split('\n')
+  const currLines = curr.split('\n')
+
+  const prevCounts = new Map<string, number>()
+  for (const line of prevLines) {
+    prevCounts.set(line, (prevCounts.get(line) ?? 0) + 1)
+  }
+
+  const currCounts = new Map<string, number>()
+  for (const line of currLines) {
+    currCounts.set(line, (currCounts.get(line) ?? 0) + 1)
+  }
+
+  const changes: string[] = []
+
+  for (const [line, count] of currCounts) {
+    const prevCount = prevCounts.get(line) ?? 0
+    const added = count - prevCount
+    for (let i = 0; i < added; i++) {
+      changes.push(`+ ${line}`)
+    }
+  }
+
+  for (const [line, count] of prevCounts) {
+    const currCount = currCounts.get(line) ?? 0
+    const removed = count - currCount
+    for (let i = 0; i < removed; i++) {
+      changes.push(`- ${line}`)
+    }
+  }
+
+  return changes.length > 0 ? changes.join('\n') : 'No changes'
+}
+
 const ALWAYS_SKIP_ROLES = new Set(['InlineTextBox'])
 const SKIP_WHEN_EMPTY_ROLES = new Set(['none', 'generic', 'StaticText'])
 const HARD_MAX_DEPTH = 100

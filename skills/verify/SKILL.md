@@ -35,6 +35,7 @@ rtk agent-view dom --compact                # Merge single-child chains onto one
 agent-view dom --count                      # Count of all visible nodes (single integer line)
 agent-view dom --filter "row" --count       # Count matching nodes — e.g. "does this table have 5 rows?"
 rtk agent-view dom --max-lines 200          # Hard line budget; refs for truncated nodes still stored
+rtk agent-view dom --diff                   # Lines changed since last dom call (+ added / - removed)
 ```
 
 `--count` skips tree output and ref mutations — cheapest way to assert "element exists N times" without loading the full tree into context.
@@ -160,6 +161,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
 | Layout, spacing, visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
 | Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
+| What DOM nodes changed after an interaction | `dom --diff` | Returns only `+`/`-` lines; much cheaper than re-reading the full tree |
 
 When two tools could answer the same question, prefer the one higher up the table. A common mistake is screenshotting to check "is the count = 5?" when `eval "store.counter"` returns the number directly for ~50 tokens.
 
