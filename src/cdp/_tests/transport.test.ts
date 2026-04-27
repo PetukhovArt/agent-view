@@ -98,15 +98,16 @@ describe('captureScreenshot', () => {
     expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
   })
 
-  it('scale=0.5 fetches layout metrics and passes clip with scale', async () => {
+  it('scale=0.5 fetches layout metrics and requests webp format', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.captureScreenshot({ scale: 0.5 })
+    const result = await conn.captureScreenshot({ scale: 0.5 })
     expect(mockGetLayoutMetrics).toHaveBeenCalledOnce()
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({
-      format: 'jpeg',
+      format: 'webp',
       quality: 80,
       clip: { x: 0, y: 0, width: 1280, height: 720, scale: 0.5 },
     })
+    expect(result.format).toBe('webp')
   })
 
   it('scale=0.25 uses viewport dimensions from getLayoutMetrics', async () => {
@@ -122,6 +123,18 @@ describe('captureScreenshot', () => {
         clip: expect.objectContaining({ width: 1920, height: 1080, scale: 0.25 }),
       }),
     )
+  })
+
+  it('falls back to jpeg when webp throws', async () => {
+    mockCaptureScreenshot.mockRejectedValueOnce(new Error('Invalid format'))
+
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const result = await conn.captureScreenshot({ scale: 0.5 })
+
+    expect(result.format).toBe('jpeg')
+    expect(mockCaptureScreenshot).toHaveBeenCalledTimes(2)
+    expect(mockCaptureScreenshot).toHaveBeenNthCalledWith(1, expect.objectContaining({ format: 'webp' }))
+    expect(mockCaptureScreenshot).toHaveBeenNthCalledWith(2, expect.objectContaining({ format: 'jpeg' }))
   })
 })
 
