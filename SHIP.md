@@ -6,6 +6,16 @@ Planned features to research and ship, ordered by priority (highest first). Each
 
 ## Done
 
+### ✅ v0.5.0 token-savers + workflow polish (2026-04-27)
+- `dom --compact` / `--count` / `--max-lines <n>` / `--diff` (with ref-normalised comparison)
+- `scene --compact`
+- `screenshot --crop <filter>` + WebP for scaled screenshots
+- `snap --scale` passthrough
+- `console --follow --until <pattern>` (early exit on match)
+- `console --target <substring>` (fuzzy match, parity with `eval --target`)
+- `[cache]` annotation on `dom` output served from AX cache
+- New marketplace skill `verify-recipe` for authoring verification plans
+
 ### ✅ `agent-view watch <expr>` — reactive state debugger (Iteration 7, 2026-04-27)
 Polls a JS expression at fixed interval, streams JSON-patch (RFC 6902) diffs to stdout.
 Flags: `--interval`, `--duration`, `--max-changes`, `--until`, `--full`, `--json`, `--target`, `--window`.
@@ -34,63 +44,19 @@ Connects to Electron's Node inspector port (`--inspect=PORT`) and evaluates in t
 
 ## Medium priority
 
-### 6. `dom --compact`
-Strips indentation and merges single-child chains onto one line.
-**Payoff:** ~40–60% fewer output tokens on deep trees with no information loss. Direct savings on every `dom` call.
-
-### 7. `screenshot --crop <filter>`
-Crops the screenshot to the bounding box of a matched element.
-**Payoff:** capture one tile (~1.6k vision tokens) instead of twelve (~19k). Reuses the targeting pattern the rest of the CLI already uses.
-
-### 8. `dom --count`
-Returns only the element count for a filter, no tree.
-**Payoff:** "does this section have N rows?" answered with one number instead of a subtree. Pairs naturally with assertion-style verification.
-
-### 9. `console --follow --until <pattern>`
-Stream breaks early when a log matches the pattern.
-**Payoff:** today `--follow` always burns the full `--timeout`. With `--until`, common waits ("until app emits 'ready'") finish in milliseconds instead of seconds.
-
-### 10. State preset helpers — `eval --pinia` / `--redux` / `--zustand`
+### State preset helpers — `eval --pinia` / `--redux` / `--zustand`
 Bundled extract scripts in `scripts/state-readers/` that resolve the store root automatically.
 **Payoff:** removes per-project guesswork ("where is the Pinia root mounted?"). Tradeoff: framework-version coupling — scripts must stay thin.
-
-### 11. `dom --max-lines <n>`
-Hard output budget with a summary tail (`… 47 more nodes`).
-**Payoff:** predictable token ceiling per call. Prevents accidental huge dumps when a filter matches more than expected.
-
-### 12. `scene --compact`
-Same single-line / merged-children output mode as `dom --compact`, for the scene graph.
-**Payoff:** parity with `dom`. Same savings on canvas/WebGL apps.
 
 ---
 
 ## Low priority / research
 
-### 13. `console --target <substring>`
-Fuzzy target resolve, mirroring what `eval --target` already does.
-**Payoff:** consistency — today the asymmetry between `eval` and `console` target matching is a footgun.
-
-### 14. `dom --diff`
-Emits only nodes that changed since the last `dom` call (like `scene --diff`).
-**Payoff:** post-interaction "what changed?" without re-reading the whole tree. Requires snapshotting formatted output, not just AX state.
-
-### 15. WebP for scaled screenshots
-WebP at q=80 is ~30% smaller than JPEG.
-**Payoff:** faster server→CLI transfer and smaller temp files. Vision token count is unchanged (pixel-based), so this is I/O only — useful, not transformative.
-
-### 16. Cache-hit annotation
-Prepend `[cache]` to `dom` output served from the AX cache.
-**Payoff:** signal for the agent (or human) to decide between trusting the cached tree vs invalidating.
-
-### 17. `snap --scale` passthrough
-Forward `--scale` through to the screenshot half of `snap`.
-**Payoff:** consistency between `screenshot --scale` and `snap`.
-
-### 18. Plain browser mode
+### Plain browser mode
 Drop the launch step; attach to an existing Chromium tab.
 **Payoff:** one tool for desktop and web instead of two. Low differentiation — Chrome DevTools MCP already covers this — only worth doing if a real user asks.
 
-### 19. CesiumJS support
+### CesiumJS support
 Scene-graph reader for Cesium-based apps, parallel to the PixiJS reader.
 **Payoff:** unblocks Cesium-stack projects. Low priority until a project actually needs it.
 

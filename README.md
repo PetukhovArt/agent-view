@@ -10,14 +10,14 @@ Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but wor
 
 ## What it does
 
-- **DOM accessibility tree** with ref IDs — compact, LLM-friendly, with text/role filters
-- **Screenshots** — full-res PNG or scaled JPEG (~3–12× fewer vision tokens)
+- **DOM accessibility tree** with ref IDs — compact, LLM-friendly, with text/role filters; `--compact` merges single-child chains for 40–60% fewer tokens, `--count` returns just the match count, `--max-lines` caps output, `--diff` emits only what changed since the last call
+- **Screenshots** — full-res PNG, scaled WebP (~3–12× fewer vision tokens), or `--crop <filter>` to a single element bounding box
 - **Interaction** — click, fill, and drag by ref or coordinates; works with Vue/React/native frameworks
 - **JS state via `eval`** — read store contents, computed values, async results without scraping the DOM
 - **Reactive state via `watch`** — stream JSON-patch diffs of any expression (store, ref, computed) until a condition is met
-- **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters
-- **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages
-- **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable
+- **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters and `--follow --until <pattern>` for early exit on a matching log
+- **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages; fuzzy `--target` resolution everywhere (id → title → URL)
+- **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable; `--compact` mirrors the DOM mode
 
 ## Why CLI, not MCP?
 
@@ -57,7 +57,7 @@ The plugin ships two skills. **`verify`** executes visual and runtime checks aga
 Verify:
 
 ```bash
-agent-view --version   # 0.3.0+
+agent-view --version   # 0.5.0+
 ```
 
 ### Standalone CLI (any other agent, CI, or scripting)
