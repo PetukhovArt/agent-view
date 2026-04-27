@@ -7,6 +7,7 @@ type SceneOptions = {
   depth?: number
   verbose?: boolean
   diff?: boolean
+  compact?: boolean
 }
 
 export async function runScene(config: AgentViewConfig, options: SceneOptions): Promise<void> {
@@ -16,6 +17,7 @@ export async function runScene(config: AgentViewConfig, options: SceneOptions): 
   if (options.depth !== undefined) args.depth = options.depth
   if (options.verbose) args.verbose = true
   if (options.diff) args.diff = true
+  if (options.compact) args.compact = true
 
   const response = await sendCommand({
     command: 'scene',

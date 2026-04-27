@@ -256,6 +256,7 @@ agent-view scene                    # Full scene graph
 agent-view scene --diff             # Changes since last call
 agent-view scene --filter "player"  # Filter by name/type
 agent-view scene --verbose          # Extended props (alpha, scale, bounds)
+agent-view scene --compact          # Merge single-child chains onto one line
 ```
 
 ### `snap`

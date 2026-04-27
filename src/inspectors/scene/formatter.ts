@@ -9,30 +9,79 @@ export function formatNode(node: SceneNode, depth: number, lines: string[], opti
   const lowerFilter = options.filter?.toLowerCase()
   if (lowerFilter && !subtreeMatches(node, lowerFilter)) return
 
-  lines.push(formatLine(node, depth, options))
-
-  for (const child of node.children ?? []) {
-    formatNode(child, depth + 1, lines, options)
+  if (options.compact) {
+    formatNodeCompact(node, depth, lines, options)
+  } else {
+    lines.push(formatLine(node, depth, options))
+    for (const child of node.children ?? []) {
+      formatNode(child, depth + 1, lines, options)
+    }
   }
 }
 
-function formatLine(node: SceneNode, depth: number, options: SceneOptions): string {
+/**
+ * Compact mode: merge single-child chains onto one line separated by " > ".
+ * Multi-child nodes render normally (each child on its own line).
+ */
+function formatNodeCompact(node: SceneNode, depth: number, lines: string[], options: SceneOptions): void {
+  const chain = collectSingleChildChain(node, options)
+  const tail = chain[chain.length - 1]
+  const tailChildren = tail.children ?? []
+
+  const chainParts = chain.map(n => nodeLabel(n, options))
   const indent = '  '.repeat(depth)
+  lines.push(`${indent}${chainParts.join(' > ')}`)
+
+  for (const child of tailChildren) {
+    formatNodeCompact(child, depth + 1, lines, options)
+  }
+}
+
+/**
+ * Walk down while the current node has exactly one child (and that child
+ * passes the depth limit). Returns every node in the single-child chain,
+ * including the node that breaks the pattern (0 or 2+ children).
+ */
+function collectSingleChildChain(node: SceneNode, options: SceneOptions): SceneNode[] {
+  const chain: SceneNode[] = [node]
+  let current = node
+  while (true) {
+    const children = current.children ?? []
+    if (children.length !== 1) break
+    const next = children[0]
+    if (options.depth !== undefined) {
+      // depth limit: stop chaining if we'd exceed it
+      const nextDepth = chain.length // relative depth from start of chain
+      if (nextDepth > options.depth) break
+    }
+    chain.push(next)
+    current = next
+  }
+  return chain
+}
+
+/** Single-node label without indent — used inside compact chains. */
+function nodeLabel(node: SceneNode, options: SceneOptions): string {
   const vis = node.visible ? '' : ' [hidden]'
   const nameStr = node.name ? ` "${node.name}"` : ''
-  let line = `${indent}${node.type}${nameStr} (${node.x},${node.y})${vis}`
+  let label = `${node.type}${nameStr} (${node.x},${node.y})${vis}`
 
   if (node.extras) {
     for (const [key, value] of Object.entries(node.extras)) {
-      line += ` ${key}=${value}`
+      label += ` ${key}=${value}`
     }
   }
   if (options.verbose && node.verboseExtras) {
     for (const [key, value] of Object.entries(node.verboseExtras)) {
-      line += ` ${key}=${value}`
+      label += ` ${key}=${value}`
     }
   }
-  return line
+  return label
+}
+
+function formatLine(node: SceneNode, depth: number, options: SceneOptions): string {
+  const indent = '  '.repeat(depth)
+  return `${indent}${nodeLabel(node, options)}`
 }
 
 function subtreeMatches(node: SceneNode, lowerFilter: string): boolean {

@@ -643,6 +643,7 @@ export class AgentViewServer {
     const sceneFilter = argStr(req.args, 'filter')
     const sceneDepth = argNum(req.args, 'depth')
     const sceneVerbose = argBool(req.args, 'verbose')
+    const sceneCompact = argBool(req.args, 'compact')
 
     if (isDiff) {
       const curr = await getRawScene(conn, req.engine)
@@ -658,6 +659,7 @@ export class AgentViewServer {
           filter: sceneFilter,
           depth: sceneDepth,
           verbose: sceneVerbose,
+          compact: sceneCompact,
         })
         return { ok: true, data: text }
       }
@@ -669,6 +671,7 @@ export class AgentViewServer {
       filter: sceneFilter,
       depth: sceneDepth,
       verbose: sceneVerbose,
+      compact: sceneCompact,
     })
 
     return { ok: true, data: text }

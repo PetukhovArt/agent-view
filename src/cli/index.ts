@@ -132,6 +132,7 @@ program
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
   .option('-v, --verbose', 'Show extended properties')
   .option('--diff', 'Show only changes since last call')
+  .option('--compact', 'Merge single-child chains onto one line')
   .action(async (options) => {
     const config = requireConfig()
     await runScene(config, options)
