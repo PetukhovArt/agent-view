@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.8.0] - 2026-04-27
+
+Adds idempotent bringup so recipes can drive the app from any starting state — auth screen, fresh shell, mid-state, already-ready — without manual setup. Cuts Manual Preconditions to ~zero for most features and makes recipes safe to re-run.
+
+### Added — `## Bringup` section in recipes
+
+Three precondition phases now: `## Manual Preconditions` (only what `agent-view` physically can't do), `## Bringup` (idempotent setup the runner executes itself), `## Machine Preconditions` (pure state queries that confirm bringup landed).
+
+Each Bringup step has the form:
+```markdown
+### B<N>. <title>
+- if `<state-eval>` is `<falsy criterion>`:
+    <action command 1>
+    <action command 2>
+  wait for `<post-condition eval>` to be `<truthy criterion>`, timeout <Ns>
+```
+
+The runner always evaluates the IF first. If the system is already in the target state → skip the actions, advance. Otherwise → run actions in order, then poll the post-condition until truthy or timeout. Re-running a recipe when the app is ready costs ~3 seconds (only state-checks, zero actions).
+
+### Added — `verify-runner` Phase 1
+
+- Executes Bringup steps with separate budgets: `bringup_max_total_commands: 15`, `bringup_max_wall_time_seconds: 60`.
+- New abort statuses: `bringup_failed` (post-condition didn't land — bringup spec wrong), `bringup_timeout`, `bringup_budget_exhausted`.
+- Bringup snapshot screenshot (final unconditional `agent-view screenshot` step) is captured into the report so the user can see "where bringup left the app" if anything downstream fails.
+- `mode: dry_run` now covers Bringup + Machine Preconditions + first Evidence Command — full validation that a freshly authored recipe is healthy end-to-end.
+
+### Added — `verify-recipe` skill
+
+- Interview reorganized into three blocks: A (what's verified), B (bringup — auth, modes, setup with programmatic-API preference), C (assertions, design refs).
+- Bringup template auto-generated from interview answers. Skill prefers programmatic APIs over UI clicks and asks the developer for them explicitly.
+- Credentials use env-var references (`$AGENTVIEW_PASSWORD`) by default. Skill warns when it sees a literal password in a Bringup command and offers to convert to env-var.
+- Dry-run validation prompt now exercises the full bringup → preconditions → step-1 chain.
+
+### Changed — `verify` skill
+
+- Pre-flight no longer asks the user "is the app set up?" when Manual Preconditions is empty — bringup handles setup. Skill spawns runner immediately.
+- Recipes auto-detected by format (0.6 / 0.7 / 0.8). Older recipes still run with format-warning caveats; failures are reported with appropriate context.
+- New report status handling: `bringup_failed`, `bringup_budget_exhausted`, `bringup_timeout` map to recipe-author-error guidance ("re-author this Bringup step"), distinct from `precondition_failed` (bringup landed but state weird) and `cascading_failures` (Evidence stale).
+
+### Changed — README
+
+- New section: "Three-phase preconditions (0.8.0+)" explaining the Manual / Bringup / Machine split with the GIS recipe as worked example.
+- Recommended workflow Phase 1 prompt updated: skill now asks for programmatic APIs and env-var names, not for manual setup steps.
+
+### Migration
+
+0.7.0 recipes still execute. The runner detects missing `## Bringup` and proceeds to Machine Preconditions. To benefit from idempotent bringup, regenerate the recipe via `verify-recipe` — the skill will interview for the bringup-relevant info you didn't provide before.
+
 ## [0.7.0] - 2026-04-27
 
 Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a recipe step's command didn't match the expected output — burning tool calls to find missing UI elements. This release introduces hard budgets, a separation between manual and machine preconditions, and a dry-run mode so authoring can validate a recipe before a full run.

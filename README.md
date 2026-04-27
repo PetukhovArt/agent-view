@@ -262,15 +262,37 @@ I added a `saving` ref and bound it to :disabled. Verify it works:
 Claude will pick the right skill (usually `verify` ad-hoc mode), run a handful of `eval` / `dom --filter` / `console`
 calls, and only screenshot if the visual claim needs it.
 
-### Why recipes have two kinds of preconditions (0.7.0+)
+### Three-phase preconditions (0.8.0+)
 
-Recipes split setup into **Manual Preconditions** (human-readable steps a person or the parent agent does — drag a widget, navigate to a view, enter a search term) and **Machine Preconditions** (runnable `agent-view eval` / `dom --filter` checks that prove the manual setup actually took effect).
+Recipes split setup into three phases, each with a different runner:
 
-The runner executes Machine Preconditions FIRST. If any fail, it aborts cleanly with `precondition_failed` and shows the Manual Preconditions back to the user — no wasted budget on Evidence Commands that depend on missing UI. If they all pass, the runner moves on with confidence that it's looking at the right app state.
+| Phase | Who runs it | Purpose | Idempotent? |
+|---|---|---|---|
+| `## Manual Preconditions` | Human (or main agent) | Only what `agent-view` physically can't (USB token, hardware, multi-machine state). Usually empty. | n/a |
+| `## Bringup` | verify-runner | Conditional + idempotent setup: `if <state-check> is falsy → run actions → wait for state to settle`. Logins, mounting widgets, navigation, anything `agent-view` can drive deterministically. | YES per step |
+| `## Machine Preconditions` | verify-runner | Pure state queries that confirm Bringup actually landed. No actions here. | trivially |
 
-This pattern catches the most common failure mode: writing a recipe in a particular UI mode (e.g., map view) and later running it in a different mode (e.g., settings panel) where half the checked elements don't exist. Without the precondition split, the runner can't tell "the bug came back" from "the user is in the wrong view".
+Bringup steps look like:
 
-When authoring, the `verify-recipe` skill interviews you for a Machine Precondition counterpart for every Manual Precondition. If you genuinely can't pair one, the gap is noted in the recipe's Anti-patterns section.
+```markdown
+### B1. Login if on auth screen
+- if `agent-view eval "typeof window.__dev"` is not `"object"`:
+    agent-view fill --filter "Логин" "root"
+    agent-view fill --filter "Пароль" "$AGENTVIEW_PASSWORD"
+    agent-view click --filter "Войти"
+  wait for `agent-view eval "typeof window.__dev"` to be `"object"`, timeout 15s
+```
+
+The runner always evaluates the IF first (cheap). If the system is already in the target state → skip the actions, advance. Otherwise → run actions in order, then poll the post-condition until truthy or timeout. **Re-running a recipe when the app is ready costs ~3 seconds** (only state-checks, zero actions). Starting from auth screen costs ~15-25 seconds (one-time login + mount + navigate). Same recipe, both starting states, no manual intervention.
+
+Failure modes are distinct:
+- `bringup_failed` → bringup spec is wrong (the action commands ran but the post-condition didn't land — likely the programmatic API doesn't exist or the button text changed). Author error.
+- `precondition_failed` → bringup ran AND post-conditions landed, but Machine Preconditions still false. Real environment issue (degraded mode, wrong user role, missing data).
+- `cascading_failures` → bringup + preconditions OK, but Evidence Commands fail. Verified feature is broken or recipe is stale.
+
+Without the three-phase split, all three look like "step N failed" and you can't tell them apart.
+
+**Credentials in Bringup:** always use env-var references (`$AGENTVIEW_PASSWORD`), never inline a literal password. Recipes get committed to git. The `verify-recipe` skill warns when it sees a literal-looking password and offers to convert.
 
 ### Anti-patterns to avoid
 

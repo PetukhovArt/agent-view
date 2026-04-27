@@ -10,36 +10,43 @@ You help the developer author a disciplined, cheapest-first verification recipe 
 
 ## What this produces
 
-A file at `.claude/verify-recipes/<kebab-slug>.md` containing:
+A file at `.claude/verify-recipes/<kebab-slug>.md` with three precondition phases plus the verification body:
 
-- **MANUAL PRECONDITIONS** — human-readable setup steps (drag widget here, navigate to view X) that a person or the parent agent must do before any automated check
-- **MACHINE PRECONDITIONS** — runnable `agent-view` checks that prove the manual setup actually took effect; the verify-runner subagent runs these FIRST and aborts cleanly if any fail
-- **NARROWED SIGNAL** — the measurable indicator that proves success or failure
-- **EVIDENCE COMMANDS** — ordered `agent-view` calls, cheapest first, each annotated with what it proves
-- **POSITIVE-CASE ASSERTIONS** — what "pass" looks like for each command
-- **REGRESSION CHECKS** — adjacent paths that must not have broken
-- **DESIGN CONFORMANCE** (optional) — screenshot ↔ design reference pairs for the design-conformance-runner
+- **MANUAL PRECONDITIONS** — only what `agent-view` physically cannot do (rare; usually empty)
+- **BRINGUP** — idempotent setup steps the verify-runner executes itself: `if <state-check> is falsy → run actions → wait for state to settle`. Drives the app from auth screen / fresh shell / mid-state into the exact state the recipe needs. Re-runs cost almost nothing because each step skips when its condition is already met.
+- **MACHINE PRECONDITIONS** — pure state queries that confirm Bringup actually settled. No actions here. Any false → runner aborts.
+- **EVIDENCE COMMANDS** — ordered `agent-view` calls, cheapest first, each annotated with what it proves.
+- **POSITIVE-CASE ASSERTIONS** + **REGRESSION CHECKS** + optional **DESIGN CONFORMANCE**.
 
 Create the directory if missing: `mkdir -p .claude/verify-recipes`
 
-## Why two kinds of preconditions
+## Why three precondition phases
 
-The verify-runner subagent is intentionally tightly scoped — it executes commands and reports results, with hard budgets that prevent it from "looking around" when things don't match. That means **the recipe must clearly separate what a human does from what a machine verifies**.
+| Phase | Who runs it | What it does | Idempotent? |
+|---|---|---|---|
+| `## Manual Preconditions` | Human (or main agent) | Only what `agent-view` physically can't (USB token, hardware setup, multi-machine state) | n/a |
+| `## Bringup` | verify-runner | `if state-check is falsy → action → wait`. Logins, mounting widgets, navigation — anything `agent-view` can do deterministically | YES (per step) |
+| `## Machine Preconditions` | verify-runner | Pure `eval` / `dom --filter` state queries. NO actions. | trivially |
 
-If you write a precondition as prose ("the GIS widget is dragged into a workspace cell"), the runner can't check it. If the user forgot to do it, the runner blunders into Evidence Commands that depend on missing UI, and either burns its budget on a recipe-stale abort or — worse, in older formats — flails trying to find the missing element.
+**Why split Bringup from Machine Preconditions?** A failure tells you a different thing in each:
+- A failed Bringup post-condition → bringup spec is wrong (e.g., `selectLocationAndFly` doesn't exist; "Войти" button text changed). Author error.
+- A failed Machine Precondition after Bringup succeeded → bringup THINKS it set up the state but the state isn't there (e.g., login appeared to succeed but the user role is wrong, the app is in a degraded mode). Real environment issue.
+- A failed Evidence Command after both passed → real bug in the verified feature.
 
-The fix: every Manual Precondition gets a paired Machine Precondition that proves it took effect. Drag widget into cell → check `cesiumReadyFlag === true`. Navigate to map mode → check `document.querySelector('.cesium-widget')` exists. Now if the user skips a step, the runner aborts cleanly on Phase 1 with a clear "do this first" message instead of diagnosing phantom bugs.
+Without the split, all three look like "step N failed" and the developer can't tell which.
+
+**Why keep Manual at all?** Some things really can't be automated cheaply: physical USB-key auth, multi-machine setups, long-running data migrations. List them — but be honest, this section should usually be empty.
 
 ## Methodology
 
 Frame the recipe with **hard-debug** discipline. Apply this chain in authoring mode:
 
-1. Start from a **reproducible, machine-checkable** starting state — not "open the app and poke around"
-2. Convert vague expectations ("looks right") into measurable signals ("store.user.role === 'admin'")
-3. Prefer the cheapest tool that can answer the question — a value check costs ~50 tokens, a screenshot costs ~6 000
-4. Include at least one negative-case check (the old symptom must no longer appear)
-5. Include at least one regression check (an adjacent flow must still work)
-6. **Every Manual Precondition needs a Machine Precondition counterpart.** If you can't think of one — interview the developer further before writing the recipe (see Step 1 below).
+1. Start from the broadest possible starting state — recipe should run from auth screen, from logged-in shell, or from "already in the feature" without modification.
+2. Convert vague expectations ("looks right") into measurable signals ("`store.user.role === 'admin'`").
+3. Prefer the cheapest tool that can answer the question — a value check costs ~50 tokens, a screenshot costs ~6 000.
+4. Include at least one negative-case check (the old symptom must no longer appear).
+5. Include at least one regression check (an adjacent flow must still work).
+6. **Bringup steps must be conditional + idempotent.** Every action wrapped in `if <state-check> is falsy`. Every action followed by `wait for <post-condition> to be truthy`. Re-running the recipe must be a no-op when the app is already ready.
 
 ## Tool-cost decision tree
 
@@ -56,29 +63,46 @@ Pick the first row that can answer the question. Only go lower when the row abov
 | Canvas / WebGL scene state | `agent-view scene --diff` | DOM is empty for canvas apps |
 
 **Anti-patterns to reject:**
-- Mixing manual setup and machine checks under a single "Repro Steps" heading. Always split into Manual Preconditions + Machine Preconditions.
-- Manual Precondition without a Machine counterpart — the runner can't verify it, so the user can silently violate it.
-- Opening Evidence Commands with a screenshot to "see the state" — use `dom --filter` or `eval` first
-- Using `eval` when `dom --filter` answers the question
-- Assertions that depend on transient state without `watch --until` to stabilize first
-- "Check that it looks right" — every Evidence assertion must be a concrete pass/fail criterion. The single legitimate exception is the `## Design Conformance` section, which delegates visual judgment to the design-conformance-runner subagent against an explicit reference image.
-- Inventing design reference paths (`.figma-refs/...`, `assets/mockups/...`) when the developer did not provide them. No refs → no Design Conformance section.
+- Putting UI clicks (`click`, `fill`) in `## Machine Preconditions`. Actions go in `## Bringup`. Machine Preconditions are state queries only.
+- Bringup steps without an IF condition (unconditional actions). They break idempotency — re-running a "click Login" step when already logged in fails. Always wrap.
+- Bringup steps without a post-condition wait. Without it, the runner advances before the action settled, and the next step's IF check sees stale state.
+- Manual Preconditions for anything `agent-view` can do. Drag widget into cell? Often there's a programmatic API — interview the developer for it before defaulting to Manual.
+- Hardcoded credentials in Bringup commands. Use env-var references (`"$AGENTVIEW_PASSWORD"`) — never inline a password, even for dev/masterkey accounts. Recipes get committed to git.
+- Opening Evidence Commands with a screenshot to "see the state" — use `dom --filter` or `eval` first.
+- "Check that it looks right" — every Evidence assertion must be a concrete pass/fail criterion. The single legitimate exception is the `## Design Conformance` section.
+- Inventing design reference paths (`.figma-refs/...`) when the developer did not provide them. No refs → no Design Conformance section.
 
 ## Workflow
 
 ### Step 1 — gather context (interview the developer)
 
-When invoked, ask the developer in plain text (no tool calls yet). Wait for the response before continuing.
+When invoked, ask in plain text. Wait for response before continuing.
 
-1. **What was shipped or fixed?** (feature name or bug description)
-2. **What was the original symptom or expected behavior?**
-3. **Any known failure mode or edge case to cover?**
-4. **UI mode requirements**: Does this feature live behind a specific app mode/view that must be active before it appears (e.g., "map view, not settings panel"; "edit mode, not view mode"; "modal X must be open")? List every mode-toggle the user must have done.
-5. **Manual setup steps**: Beyond modes, what physical actions must the user do before checks can run (drag a widget into a cell, search for and select a map location, open a specific dialog, log in as a particular role)? Be precise — these become Manual Preconditions verbatim.
-6. **State assertions for each manual step**: For each item in (4) and (5), is there a JS expression or DOM selector that proves it happened? Examples: "after dragging the GIS widget — `pinia._s.get('gis-widget-root')?.cesiumReadyFlag` becomes true"; "after entering map mode — `document.querySelector('.cesium-widget')` exists; "after selecting a location — `selectedLocation` is truthy". If the developer doesn't know offhand, that's fine — ask them to point you at the store/composable/component where state lives and you can suggest expressions.
-7. **(Optional) Design references**: Local image paths to compare screenshots against (Figma exports, hand-off PNGs). **Only local files are supported.** If none — skip the Design Conformance section entirely.
+**Block A — what's being verified:**
 
-If the answers to (4)/(5) reveal something the developer can't pair with a machine check (6), say so explicitly: "I'll write `<step>` as a Manual Precondition with no Machine counterpart — that means if a user skips it, the runner won't catch it and may report misleading failures. Want to add a custom check?" Then either (a) get an expression from them, or (b) accept the gap and note it in the recipe's Anti-patterns section.
+1. What was shipped or fixed? (feature name or bug description)
+2. What was the original symptom or expected behavior?
+3. Any known failure mode or edge case to cover?
+
+**Block B — bringup: how the runner gets the app into a state where verification makes sense:**
+
+4. **Authentication** — does the app require login before the feature is reachable? If yes:
+   - What identifies "logged out" vs "logged in" in JS state? (e.g., `typeof window.__dev`, `!!store.user`)
+   - Login flow: which fields/buttons (`fill --filter "..."`, `click --filter "..."`) and what credentials? **Use an env-var, never inline.** Suggest a name like `AGENTVIEW_PASSWORD` and tell the user to `export` it in their shell or `.env.local`.
+5. **UI mode / view requirements** — does the feature live behind a specific app mode/view that must be active before it appears (e.g., "map view, not settings panel"; "edit mode, not view mode"; "modal X must be open")? For each:
+   - State check that proves this mode is active (e.g., `document.querySelector('.cesium-widget') !== null` for map mode).
+   - Action(s) to enter this mode if not active. Prefer programmatic API (e.g., `eval "store.setMode('map')"`) over UI clicks. If only UI works, list the click sequence.
+6. **Setup actions** — beyond modes, what other setup must happen (drag widget into cell, navigate camera to a location, open a dialog)? For each:
+   - Programmatic API if it exists (e.g., `gis-widget-root.selectLocationAndFly(uuid)`, `workspace.addWidget(...)`). Prefer this — much more reliable than UI automation.
+   - State check that proves the setup happened.
+   - Wait timing: how long does this take to settle? (camera animation, async data load).
+
+If the developer doesn't know whether a programmatic API exists, ask them to point you at the relevant store/composable/component file — you can read it and find one (or confirm none).
+
+**Block C — verification body and visual:**
+
+7. State assertions for the verified feature itself — JS expressions that prove it works (separate from bringup setup checks).
+8. **(Optional) Design references** — local image paths to compare screenshots against (Figma exports, hand-off PNGs). **Only local files are supported.** If none — skip the Design Conformance section.
 
 ### Step 2 — draft the recipe
 
@@ -91,20 +115,54 @@ Generated: <date>
 Scope: <one sentence describing what this covers>
 
 ## Manual Preconditions
-<!-- Done by a human or the parent agent BEFORE invoking verify-runner. The runner does NOT execute these. -->
-1. <Action 1 — exact, no ambiguity. e.g. "Open the GIS widget by dragging it from the 'Edit workspace' panel into the upper-left cell.">
-2. <Action 2 — e.g. "In the map header search box, type 'Склад_1' and click the matching dropdown entry to fly the camera to that sublocation.">
-3. <Action 3 — e.g. "Zoom in until building details are visible (camera height < 1000 m).">
+<!-- ONLY for things agent-view physically cannot do. Usually empty. -->
+<!-- The verify-runner does NOT execute these. -->
+(none — bringup handles everything)
+
+## Bringup
+<!-- The verify-runner executes these. Each step is conditional + idempotent: skipped if already in target state. -->
+<!-- Format per step: -->
+<!--   ### B<N>. <one-line title> -->
+<!--   - if `<eval>` is `<falsy criterion>`: -->
+<!--       <action command 1> -->
+<!--       <action command 2> -->
+<!--     wait for `<post-condition eval>` to be `<truthy criterion>`, timeout <Ns> -->
+
+### B1. Login if on auth screen
+- if `agent-view eval "typeof window.__dev"` is not `"object"`:
+    agent-view fill --window $W --filter "Логин" "root"
+    agent-view fill --window $W --filter "Пароль" "$AGENTVIEW_PASSWORD"
+    agent-view click --window $W --filter "Войти"
+  wait for `agent-view eval "typeof window.__dev"` to be `"object"`, timeout 15s
+
+### B2. Mount the GIS widget if not mounted
+- if `agent-view eval "!!window.__dev.pinia._s.get('gis-widget-root')?.cesiumReadyFlag"` is `false`:
+    agent-view eval "window.__dev.pinia._s.get('workspace').addWidget({type:'gis', cell:0})"
+  wait for `agent-view eval "!!window.__dev.pinia._s.get('gis-widget-root')?.cesiumReadyFlag"` to be `true`, timeout 10s
+
+### B3. Exit settings mode if active
+- if `agent-view eval "document.querySelector('.cesium-widget') !== null"` is `false`:
+    agent-view click --window $W --filter "Готово"
+  wait for `agent-view eval "document.querySelector('.cesium-widget') !== null"` to be `true`, timeout 5s
+
+### B4. Fly to first sublocation
+- if `agent-view eval "!!window.__dev.pinia._s.get('gis-widget-root')?.selectedLocation"` is `false`:
+    agent-view eval --await "window.__dev.pinia._s.get('gis-widget-root').selectLocationAndFly(window.__dev.mwStore.nvgn.sublocations.value[0].id)"
+  wait for `agent-view eval "(()=>{const w=document.querySelector('.cesium-widget'); const cw=Object.values(w).find(v=>v?.scene); return Math.round(window.Cesium.Cartographic.fromCartesian(cw.scene.camera.position).height);})()"` to be `< 5000`, timeout 30s
+
+### B5. Snapshot for the report (always runs)
+agent-view screenshot --window $W --scale 0.25
 
 ## Machine Preconditions
-<!-- The verify-runner runs these FIRST. If ANY fail, it aborts with `precondition_failed` and shows the Manual Preconditions block to the user. -->
-- `agent-view eval "window.__dev !== undefined"` → must be `true`
+<!-- Pure state checks. NO actions. The verify-runner aborts with `precondition_failed` if any return false. -->
+- `agent-view eval "typeof window.__dev"` → must be `"object"`
 - `agent-view eval "!!window.__dev.pinia._s.get('gis-widget-root')?.cesiumReadyFlag"` → must be `true`
-- `agent-view eval "!!window.__dev.pinia._s.get('gis-widget-root')?.selectedLocation"` → must be `true`
 - `agent-view eval "document.querySelector('.cesium-widget') !== null"` → must be `true`
+- `agent-view eval "!!window.__dev.pinia._s.get('gis-widget-root')?.selectedLocation"` → must be `true`
+- `agent-view eval "({locations:window.__dev.mwStore.nvgn.locations.value.length, sublocations:window.__dev.mwStore.nvgn.sublocations.value.length, zones:window.__dev.mwStore.nvgn.zones.value.length, objects:window.__dev.mwStore.nvgn.objects.value.length})"` → all four counts must be `> 0`
 
 ## Narrowed Signal
-<!-- The one measurable thing that proves it works -->
+<!-- The one measurable thing that proves the verified feature works -->
 `<agent-view command>` must return `<expected value>`.
 
 ## Evidence Commands
@@ -126,114 +184,75 @@ Cost: ~<N> tokens
 - [ ] <adjacent flow> — `agent-view <command>` → `<expected>`
 
 ## Design Conformance
-<!-- INCLUDE THIS SECTION ONLY IF the developer provided design refs in question 7. -->
-<!-- Each row pairs a screenshot command with the expected reference image path. -->
-<!-- The design-conformance-runner subagent reads this section, runs the screenshot commands, and visually compares against the expected refs. -->
-<!-- Do NOT invent design ref paths. Use exactly what the developer provided. -->
+<!-- Include ONLY if the developer provided design refs in question 8. -->
 
 | Step Label | Screenshot Command | Expected Reference |
 |---|---|---|
 | <area name e.g. "filter panel collapsed"> | `agent-view screenshot --crop "<area>" --scale 0.5` | `<absolute path to expected PNG/JPEG>` |
-| <area name> | `agent-view screenshot --window $W --scale 0.5` | `<absolute path>` |
 
-Tolerance: `normal` (default — flag deviations a designer would notice in code review). Use `loose` only if the developer says exact pixel parity is not required.
+Tolerance: `normal` (default).
 
 ## Anti-patterns avoided
-- <note any recipe-specific traps, e.g. "manual step 3 (zoom) has no machine counterpart — runner cannot detect insufficient zoom; mitigated by Evidence Step N which checks camera height">
+- <note any recipe-specific traps, e.g. "B4 relies on `selectLocationAndFly` from gis-widget-root — verified to exist as of <date>; if it's removed, B4 falls back to Manual Precondition">
 ````
 
 ### Step 3 — save the file
 
-Determine a kebab-slug from the feature/fix name (e.g. `login-redirect-fix`, `cart-total-display`).
+Determine a kebab-slug from the feature/fix name. Save to `.claude/verify-recipes/<slug>.md`. Create the directory first if it doesn't exist. Confirm the path to the developer.
 
-Save to `.claude/verify-recipes/<slug>.md`. Create the directory first if it doesn't exist.
+### Step 4 — credentials warning (if Bringup contains login)
 
-Confirm the path to the developer.
+If Bringup includes a login step:
 
-### Step 4 — offer dry-run validation
+> Recipe uses `$AGENTVIEW_PASSWORD` for login. Make sure that env var is set in your shell or `.env.local` before running verify (`export AGENTVIEW_PASSWORD=<value>`). The recipe never contains the literal password.
 
-After saving, ask the developer:
+If the developer insisted on inlining a literal password earlier, warn:
 
-> The recipe is saved at `<path>`. Is the app running? If yes, I can spawn `verify-runner` in `dry_run` mode — it'll execute only the Machine Preconditions and the first Evidence Command (~5 commands total). That validates the recipe isn't broken before you commit a full run. Want me to run the dry-run? (yes/no)
+> ⚠️ Recipe contains a literal password on line N. This will be committed to git. Consider replacing with `$AGENTVIEW_PASSWORD` (env-var). Want me to convert it now? (yes/no)
+
+### Step 5 — offer dry-run validation
+
+After saving, ask:
+
+> The recipe is saved at `<path>`. Is the app running? If yes, I can spawn `verify-runner` in `dry_run` mode — it'll execute Bringup + Machine Preconditions + the first Evidence Command (~10-20 commands total). That validates the recipe isn't broken before you commit a full run. Want me to run the dry-run? (yes/no)
 
 If yes:
 1. Get the window id with `agent-view discover`.
 2. Spawn `verify-runner` via the Agent tool with `mode: dry_run`, the recipe path, and the window id.
 3. Read the JSON report.
-4. If `status: completed` and dry-run preconditions+step 1 passed → tell the developer the recipe is healthy and ready for a full run.
-5. If `precondition_failed` → relay the `failed_precondition` and `manual_preconditions_to_check` so the developer knows what setup step to do (or what Machine Precondition to fix).
-6. If the first Evidence Command failed → flag it: the recipe likely has a stale ref/selector or assumes UI state that doesn't exist; offer to revise.
+4. **`status: bringup_failed`** → relay `failed_bringup_step` and the post-condition's actual value. Suggest revising the bringup step (most often: action commands wrong, programmatic API doesn't exist, or post-condition criterion mistuned).
+5. **`status: precondition_failed`** → bringup ran but state isn't there. Either bringup is incomplete, or a state check is overly strict. Show both bringup outcome and the failing precondition.
+6. **`status: completed` and dry-run passed** → recipe is healthy. Confirm and stop.
 
-If no — confirm the path and stop.
+If no — confirm path and stop.
 
-## Worked example: "fixed login redirect bug"
+## Worked example: GIS feature with full bringup automation
 
 **Developer input:**
-> Fixed a bug where after login, the redirect went to `/home` instead of `/dashboard`. Store mutation `SET_REDIRECT_PATH` was missing. No visual change — purely a routing issue. No special UI mode — just the login page. Manual setup is "be on the /login route".
+> Verifying selective filter changes (commits 0c5f1b1ee, 4d0c89467, 4c99c1591) in the GIS widget. App requires login (root/masterkey via middleware). GIS widget mounts via `workspace.addWidget({type:'gis', cell:0})`. Camera flies via `gis-widget-root.selectLocationAndFly(id)`. Map view is the default after widget mount.
 
 **Recipe produced:**
 
-````markdown
-# Verify: Login Redirect Fix
+(see the template above — it's already the worked example for this scenario)
 
-Generated: 2026-04-27
-Scope: Confirms that a successful login routes to /dashboard, not /home, and that the store mutation fires correctly.
+**Saved to:** `.claude/verify-recipes/nvgn-gis-improvements.md`
 
-## Manual Preconditions
-1. App running, user logged out, browser at the `/login` route.
-
-## Machine Preconditions
-- `agent-view eval "router.currentRoute.path"` → must be `"/login"`
-- `agent-view eval "!!store.state.auth.user"` → must be `false` (logged out)
-
-## Narrowed Signal
-`agent-view eval "router.currentRoute.path"` must return `"/dashboard"` after sign-in.
-
-## Evidence Commands
-
-### 0. Setup — baseline console
-```bash
-agent-view console --clear
+**Dry-run output (first run after auth screen):**
 ```
-Expected: `Console buffer cleared`
-Cost: ~10 tokens
-
-### 1. Confirm redirect target
-```bash
-agent-view dom --filter "Email" --depth 2
-agent-view fill <email-ref> "admin@example.com"
-agent-view fill <password-ref> "password"
-agent-view click <signin-ref>
-agent-view watch "router.currentRoute.path" --until "router.currentRoute.path === '/dashboard'"
+status: completed
+mode: dry_run
+bringup: 5 steps, 12 commands, 18s — B1 (login) + B2 (mount) + B4 (fly) all triggered; B3 skipped (already map mode); B5 screenshot saved
+machine_preconditions: 5/5 passed
+steps: 1/1 passed
 ```
-Expected: `replace /  "/login" → "/dashboard"` in watch output
-Cost: ~150 tokens
 
-### 2. Confirm mutation fired
-```bash
-agent-view eval "store.state.auth.redirectPath"
+**Dry-run output (second run, app already in target state):**
 ```
-Expected: `"/dashboard"` (not `"/home"`, not `null`)
-Cost: ~50 tokens
-
-### 3. No errors during login flow
-```bash
-agent-view console --level error,warn
+status: completed
+mode: dry_run
+bringup: 5 steps, 5 commands (4 IF-checks + 1 screenshot), 3s — all 4 conditional steps skipped_already_ready
+machine_preconditions: 5/5 passed
+steps: 1/1 passed
 ```
-Expected: `(no console messages)`
-Cost: ~30 tokens
 
-## Positive-Case Assertions
-- [ ] `router.currentRoute.path` === `/dashboard` after login
-- [ ] `store.state.auth.redirectPath` === `/dashboard`
-- [ ] No console errors during the flow
-
-## Regression Checks
-- [ ] Logout → `/login` still works (`agent-view click <logout-ref>` then `agent-view eval "router.currentRoute.path"` → `"/login"`)
-
-## Anti-patterns avoided
-- Not using screenshot to confirm route (route is a string — eval is 120× cheaper)
-- watch used before eval so the route change is confirmed to have settled, not just sampled mid-transition
-````
-
-**Saved to:** `.claude/verify-recipes/login-redirect-fix.md`
+This is what idempotent bringup buys you: 5x speedup on re-runs, zero manual intervention either way.

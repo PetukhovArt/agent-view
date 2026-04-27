@@ -187,8 +187,13 @@ Why: recipe execution is mechanical (run commands, compare to `Expected:`, repor
 **Pre-flight check (do this BEFORE spawning the runner):**
 
 1. `Read` the recipe.
-2. Confirm it has a `## Machine Preconditions` section. If missing → it's older 0.6.x format. Tell the user once: "this recipe doesn't have Machine Preconditions, so the runner can't distinguish setup failures from real bugs. Run anyway, or update the recipe first?" Default to running but flag failures with this caveat in the final summary.
-3. Read the `## Manual Preconditions` block out loud to the user (one tight sentence each) and ask: "is the app set up this way right now?" Wait for confirmation. If they say no — stop, don't waste a runner spawn.
+2. Determine the recipe format:
+   - Has `## Bringup` section → 0.8.0+ format. Bringup runs automatically; no user setup needed unless `## Manual Preconditions` is non-empty.
+   - Has `## Machine Preconditions` but no `## Bringup` → 0.7.0 format. The user must do all setup manually before this call.
+   - Neither → 0.6.x format. Tell the user once: "this recipe predates the precondition contract — failures may not be diagnostic. Run anyway, or regenerate the recipe via `verify-recipe`?"
+3. **Manual Preconditions handling:**
+   - 0.8.0 + Manual section empty → skip user confirmation, go straight to spawn.
+   - Manual section non-empty → read each item to the user (tight one-liners) and ask: "are these set up right now?" Wait for confirmation. If no — stop, don't waste a runner spawn.
 4. Resolve the window id once: `agent-view discover` → pick the main window's id.
 
 **Spawn:**
@@ -197,16 +202,18 @@ Why: recipe execution is mechanical (run commands, compare to `Expected:`, repor
    - Absolute `recipe_path`
    - Resolved `window_id`
    - `mode: full` (or `dry_run` if the user asked to validate the recipe first)
-   - Any extra context (e.g. "user is already logged in", "GIS widget already mounted")
+   - Any extra context the user provided
 6. Wait for the JSON report.
 
 **Handle the report:**
 
-7. **If `status: precondition_failed`** → relay `failed_precondition` and `manual_preconditions_to_check` to the user verbatim. Do NOT spawn the runner again. Do NOT try to "fix" the missing setup yourself by clicking around — the user knows their app, ask them to do the manual setup and re-run.
-8. **If `status: cascading_failures` or `budget_exhausted`** → the recipe is likely stale (selectors/refs changed, UI restructured) or describes a flow that no longer matches the app. Show the first 1-2 failed steps to the user and ask whether to update the recipe (delegate back to `verify-recipe`) or investigate manually.
-9. **If `design_conformance_section: true`** in the report: also spawn `design-conformance-runner` in parallel, passing the `design_conformance_pairs` array. Merge both reports before answering the user.
-10. **If `requires_visual_review` steps** have no design ref attached: open each screenshot yourself with `Read` and decide pass/fail.
-11. **If individual `failed` steps** in an otherwise-completed run: re-run that specific failing command yourself for richer evidence to diagnose. Do not re-execute the whole recipe.
+7. **If `status: bringup_failed`** → the bringup spec is wrong: an action command failed to land its post-condition (e.g., `selectLocationAndFly` doesn't exist, login button text changed, programmatic API renamed). Surface `failed_bringup_step` and the post-condition's actual value. Suggest re-authoring the broken Bringup step via `verify-recipe`. Do NOT click around manually trying to make it work.
+8. **If `status: bringup_budget_exhausted` or `bringup_timeout`** → bringup is taking too long. Either an animation is slower than the recipe expects (extend `timeout` on the offending step), or bringup is fighting an unexpected app state. Show the bringup transcript and ask the user.
+9. **If `status: precondition_failed`** → bringup completed but state still wrong. Could be: (a) bringup is incomplete (missing a step), (b) a Machine Precondition is overly strict, (c) real environment issue. Relay both the `bringup` block (showing what bringup did) and the `failed_precondition` so the user sees the full picture.
+10. **If `status: cascading_failures` or `budget_exhausted`** → the recipe Evidence is likely stale (selectors/refs changed, UI restructured). Show the first 1-2 failed Evidence steps and ask whether to update the recipe via `verify-recipe` or investigate manually.
+11. **If `design_conformance_section: true`** → also spawn `design-conformance-runner` in parallel with the `design_conformance_pairs` array. Merge both reports.
+12. **If `requires_visual_review` steps** have no design ref attached → open each screenshot yourself with `Read` and decide pass/fail.
+13. **If individual `failed` steps** in an otherwise-completed run → re-run that specific failing command yourself for richer evidence. Do not re-execute the whole recipe.
 
 Output to the user: a tight summary — what passed, what failed, what needs visual review, and (if any) which design conformance issues to fix. Do not paste the raw JSON unless asked.
 
