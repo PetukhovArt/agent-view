@@ -184,17 +184,29 @@ If the developer points you at a `.claude/verify-recipes/<slug>.md` file, OR you
 
 Why: recipe execution is mechanical (run commands, compare to `Expected:`, report). It does not need Opus-level reasoning, but the raw output (DOM dumps, screenshots, eval results) easily exceeds 30k tokens of context noise. Delegating to a Haiku subagent keeps your context clean and cuts cost ~10×.
 
-How to delegate:
+**Pre-flight check (do this BEFORE spawning the runner):**
 
-1. Resolve the window id once: `agent-view discover` → pick the main window's id.
-2. Spawn `verify-runner` via the Agent tool with a prompt containing:
+1. `Read` the recipe.
+2. Confirm it has a `## Machine Preconditions` section. If missing → it's older 0.6.x format. Tell the user once: "this recipe doesn't have Machine Preconditions, so the runner can't distinguish setup failures from real bugs. Run anyway, or update the recipe first?" Default to running but flag failures with this caveat in the final summary.
+3. Read the `## Manual Preconditions` block out loud to the user (one tight sentence each) and ask: "is the app set up this way right now?" Wait for confirmation. If they say no — stop, don't waste a runner spawn.
+4. Resolve the window id once: `agent-view discover` → pick the main window's id.
+
+**Spawn:**
+
+5. Spawn `verify-runner` via the Agent tool with a prompt containing:
    - Absolute `recipe_path`
    - Resolved `window_id`
+   - `mode: full` (or `dry_run` if the user asked to validate the recipe first)
    - Any extra context (e.g. "user is already logged in", "GIS widget already mounted")
-3. Wait for the JSON report. Read `summary`, `blocking_issues`, and any `failed` step diagnoses.
-4. **If `design_conformance_section: true`** in the report: also spawn `design-conformance-runner` in parallel, passing the `design_conformance_pairs` array. Merge both reports before answering the user.
-5. For `requires_visual_review` steps that have no design ref attached: open the screenshot yourself with `Read` and decide pass/fail.
-6. For `failed` steps: re-run the specific failing command yourself if you need richer evidence to diagnose. Do not re-execute the whole recipe.
+6. Wait for the JSON report.
+
+**Handle the report:**
+
+7. **If `status: precondition_failed`** → relay `failed_precondition` and `manual_preconditions_to_check` to the user verbatim. Do NOT spawn the runner again. Do NOT try to "fix" the missing setup yourself by clicking around — the user knows their app, ask them to do the manual setup and re-run.
+8. **If `status: cascading_failures` or `budget_exhausted`** → the recipe is likely stale (selectors/refs changed, UI restructured) or describes a flow that no longer matches the app. Show the first 1-2 failed steps to the user and ask whether to update the recipe (delegate back to `verify-recipe`) or investigate manually.
+9. **If `design_conformance_section: true`** in the report: also spawn `design-conformance-runner` in parallel, passing the `design_conformance_pairs` array. Merge both reports before answering the user.
+10. **If `requires_visual_review` steps** have no design ref attached: open each screenshot yourself with `Read` and decide pass/fail.
+11. **If individual `failed` steps** in an otherwise-completed run: re-run that specific failing command yourself for richer evidence to diagnose. Do not re-execute the whole recipe.
 
 Output to the user: a tight summary — what passed, what failed, what needs visual review, and (if any) which design conformance issues to fix. Do not paste the raw JSON unless asked.
 

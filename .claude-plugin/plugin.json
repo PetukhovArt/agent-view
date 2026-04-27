@@ -1,7 +1,7 @@
 {
   "name": "agent-view",
   "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Ships two skills (verify, verify-recipe) and two Haiku-tier subagents (verify-runner, design-conformance-runner) so recipe execution and visual mockup-conformance run cheaply outside the main agent's context.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "keywords": [
     "cdp",
     "electron",

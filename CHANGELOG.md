@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.0] - 2026-04-27
+
+Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a recipe step's command didn't match the expected output — burning tool calls to find missing UI elements. This release introduces hard budgets, a separation between manual and machine preconditions, and a dry-run mode so authoring can validate a recipe before a full run.
+
+### Added — `verify-runner`
+
+- **Hard budgets**: `max_tool_calls_per_step: 2`, `max_tool_calls_total: 30`, `max_consecutive_failures: 3`. Prevents runaway exploration when a recipe is stale or preconditions weren't met.
+- **`no_exploration` rule**: the runner is now explicitly forbidden from running any Bash command not literally written in the recipe. If a step's output doesn't match `Expected:`, mark `failed` with the actual output and continue — investigation is the parent agent's job.
+- **Two-phase execution**: Phase 1 runs `## Machine Preconditions` first; if any fail, the runner aborts with `precondition_failed`, echoes the `## Manual Preconditions` block back to the user, and skips the entire Evidence section. Phase 2 runs Evidence Commands only if Phase 1 passed.
+- **`mode: dry_run`**: executes only Machine Preconditions + the first Evidence Command. Used by `verify-recipe` to validate a freshly authored recipe before committing to a full run.
+- **Structured abort reasons** in the report: `cascading_failures`, `budget_exhausted`, `precondition_failed`, `malformed_recipe`.
+
+### Added — `design-conformance-runner`
+
+- Same budget/no-exploration discipline: `max_tool_calls_per_pair: 3`, `max_tool_calls_total: 20`. Prevents the same flailing failure mode for visual checks.
+
+### Changed — `verify-recipe` skill
+
+- **Recipe template now splits Repro Steps into `## Manual Preconditions` (human-readable, not executed) and `## Machine Preconditions` (runnable `agent-view` checks).** Every Manual Precondition should have a paired Machine Precondition that proves it took effect; gaps are surfaced during the interview.
+- **Interview expanded** with two new questions: "UI mode requirements" (what view/mode must be active) and "State assertions for each manual step" (what JS expression proves the setup happened). Catches the common "I forgot to mention we need to be in map mode, not settings" failure mode at authoring time, not at runtime.
+- **Dry-run validation step**: after saving the recipe, the skill offers to spawn `verify-runner` in `dry_run` mode against the live app to validate that preconditions are reachable and the first Evidence Command runs. Catches a stale recipe before it ships.
+
+### Changed — `verify` skill
+
+- **Pre-flight check**: before spawning the runner, the skill now reads the recipe, surfaces the Manual Preconditions to the user, and asks for confirmation that the app is set up that way. Refuses to spawn if the user says no.
+- **Better failure handling**: `precondition_failed` reports are relayed verbatim with the Manual Preconditions block; `cascading_failures` / `budget_exhausted` are flagged as "recipe likely stale, update before retrying".
+- Older 0.6.x recipes without a `## Machine Preconditions` section still run, but failures are flagged with a recipe-format caveat in the summary.
+
 ## [0.6.0] - 2026-04-27
 
 ### Added — bundled subagents

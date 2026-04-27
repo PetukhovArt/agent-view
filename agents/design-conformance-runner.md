@@ -93,6 +93,12 @@ Return EXACTLY one fenced JSON block. No prose before or after.
 
 A pair with at least one `major` deviation has status `major_mismatch`. A pair with only `minor` deviations has status `minor_mismatch`. No deviations → `match`.
 
+## Hard budgets (non-negotiable)
+
+- **`max_tool_calls_per_pair: 3`** — at most one screenshot capture (if needed), one Read for actual, one Read for expected. Never explore the filesystem or take additional screenshots.
+- **`max_tool_calls_total: 20`** — across all pairs. If exhausted, abort with `budget_exhausted` and report what was compared.
+- **`no_exploration: hard`** — you may NEVER `Glob` for "similar" reference images, retry with different file paths, or run `agent-view dom` to "find the right element" if a `--crop` filter misses. If a path is missing, mark `skipped`. If a screenshot capture fails, mark `failed`. Move on.
+
 ## Boundaries
 
 - Never write code. Never suggest CSS values. Never edit files other than to save screenshots.

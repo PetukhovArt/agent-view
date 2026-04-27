@@ -262,6 +262,16 @@ I added a `saving` ref and bound it to :disabled. Verify it works:
 Claude will pick the right skill (usually `verify` ad-hoc mode), run a handful of `eval` / `dom --filter` / `console`
 calls, and only screenshot if the visual claim needs it.
 
+### Why recipes have two kinds of preconditions (0.7.0+)
+
+Recipes split setup into **Manual Preconditions** (human-readable steps a person or the parent agent does — drag a widget, navigate to a view, enter a search term) and **Machine Preconditions** (runnable `agent-view eval` / `dom --filter` checks that prove the manual setup actually took effect).
+
+The runner executes Machine Preconditions FIRST. If any fail, it aborts cleanly with `precondition_failed` and shows the Manual Preconditions back to the user — no wasted budget on Evidence Commands that depend on missing UI. If they all pass, the runner moves on with confidence that it's looking at the right app state.
+
+This pattern catches the most common failure mode: writing a recipe in a particular UI mode (e.g., map view) and later running it in a different mode (e.g., settings panel) where half the checked elements don't exist. Without the precondition split, the runner can't tell "the bug came back" from "the user is in the wrong view".
+
+When authoring, the `verify-recipe` skill interviews you for a Machine Precondition counterpart for every Manual Precondition. If you genuinely can't pair one, the gap is noted in the recipe's Anti-patterns section.
+
 ### Anti-patterns to avoid
 
 - "Just verify the feature" with no plan or symptom — the recipe author can't pick the cheapest signal without knowing
@@ -272,6 +282,8 @@ calls, and only screenshot if the visual claim needs it.
   Prefer Phase 2's prompt.
 - Stuffing 50 assertions into one recipe — split per-feature. A recipe should run in <2 minutes and produce a report you
   can read in 30 seconds.
+- Manual Preconditions without Machine Precondition counterparts — the runner can't catch the user skipping setup. The
+  skill warns during authoring; either add a check or accept the gap explicitly in the recipe.
 
 ## How it works
 
