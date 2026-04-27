@@ -183,6 +183,7 @@ program
   .option('-t, --target <id>', 'Restrict to one target')
   .option('-f, --follow', 'Stream new messages until --timeout elapses')
   .option('--timeout <seconds>', 'Follow window in seconds (default 10)', parseDepth)
+  .option('--until <pattern>', 'Exit as soon as a message matches (substring or /regex/); requires --follow')
   .option('-l, --level <levels>', 'Comma-separated level filter (log,info,warn,error,debug)')
   .option('--since <iso>', 'Only messages newer than ISO timestamp')
   .option('--clear', 'Drop the in-memory ring buffer')

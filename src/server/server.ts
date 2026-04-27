@@ -986,6 +986,12 @@ export class AgentViewServer {
     const since = argNum(req.args, 'since')
 
     const follow = argBool(req.args, 'follow') ?? false
+    const untilPattern = argStr(req.args, 'until')
+
+    if (untilPattern && !follow) {
+      return { ok: false, error: '--until requires --follow' }
+    }
+
     if (follow) {
       const timeoutSec = argNum(req.args, 'timeout') ?? 10
       const collected: StampedConsoleMessage[] = this.consoleStream.drain({
@@ -994,19 +1000,39 @@ export class AgentViewServer {
         targetId: explicitTarget,
       })
       const seenAt = collected.length > 0 ? collected[collected.length - 1].ts : (since ?? Date.now())
-      await new Promise<void>((resolveFollow) => {
+
+      const matcher = untilPattern ? buildMatcher(untilPattern) : null
+
+      // Check if pattern already matched in buffered messages
+      const earlyMatch = matcher ? collected.findIndex(m => matcher(m.text)) : -1
+
+      if (earlyMatch !== -1) {
+        return { ok: true, data: formatConsoleMessages(collected.slice(0, earlyMatch + 1)) }
+      }
+
+      const timedOut = await new Promise<boolean>((resolveFollow) => {
         const dispose = this.consoleStream.subscribe((msg) => {
           if (explicitTarget && msg.targetId !== explicitTarget) return
           if (levelFilter && !levelFilter.has(msg.level)) return
           if (msg.ts <= seenAt) return
           collected.push(msg)
+          if (matcher && matcher(msg.text)) {
+            clearTimeout(timer)
+            dispose()
+            resolveFollow(false)
+          }
         })
         const timer = setTimeout(() => {
           dispose()
-          resolveFollow()
+          resolveFollow(true)
         }, timeoutSec * 1000)
         timer.unref?.()
       })
+
+      if (timedOut && matcher) {
+        return { ok: false, error: `Timeout: pattern not seen in ${timeoutSec}s` }
+      }
+
       return { ok: true, data: formatConsoleMessages(collected) }
     }
 
@@ -1057,6 +1083,15 @@ function parseLevelFilter(levels: string[] | undefined): ReadonlySet<ConsoleLeve
     if (valid.includes(l)) set.add(l as ConsoleLevel)
   }
   return set.size > 0 ? set : undefined
+}
+
+function buildMatcher(pattern: string): (text: string) => boolean {
+  const regexMatch = /^\/(.+)\/([gimsuy]*)$/.exec(pattern)
+  if (regexMatch) {
+    const re = new RegExp(regexMatch[1], regexMatch[2])
+    return (text) => re.test(text)
+  }
+  return (text) => text.includes(pattern)
 }
 
 function formatConsoleMessages(msgs: StampedConsoleMessage[]): string {

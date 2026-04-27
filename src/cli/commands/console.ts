@@ -5,6 +5,7 @@ export type ConsoleOptions = {
   target?: string
   follow?: boolean
   timeout?: number
+  until?: string
   level?: string
   since?: string
   clear?: boolean
@@ -29,6 +30,7 @@ export async function runConsole(config: AgentViewConfig, options: ConsoleOption
       target: options.target,
       follow: options.follow,
       timeout: options.timeout,
+      until: options.until,
       levels,
       since,
       clear: options.clear,
