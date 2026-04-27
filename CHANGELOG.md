@@ -1,8 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [0.8.1] - 2026-04-27
 
-Architectural rollback. Removes the `verify-runner` and `design-conformance-runner` Haiku subagents introduced in 0.6.0 and the Bringup DSL added in 0.8.0. Recipe execution returns to inline (main-agent driven) with the original `Repro Steps` / `Evidence Commands` / `Regression Checks` structure. The `verify-recipe` skill is decoupled from `verify`: it authors recipe files only — no dry-run, no integration with execution. Design conformance is preserved as a recipe section and an inline workflow in the `verify` skill.
+Architectural rollback (plugin/docs only — no CLI changes). Removes the `verify-runner` and `design-conformance-runner` Haiku subagents introduced in 0.6.0 and the Bringup DSL added in 0.8.0. Recipe execution returns to inline (main-agent driven) with the original `Repro Steps` / `Evidence Commands` / `Regression Checks` structure. The `verify-recipe` skill is decoupled from `verify`: it authors recipe files only — no dry-run, no integration with execution. Design conformance is preserved as a recipe section and an inline workflow in the `verify` skill.
 
 ### Why
 Each release between 0.6.0 and 0.8.0 fenced in problems introduced by the previous one (subagent flailing → hard budgets → bringup phase to handle setup). In practice the runner aborted on selector ambiguity and the parent agent re-investigated anyway, doubling work and adding subagent latency. The 0.5.0 token-savers (`--count`, `--compact`, `--diff`, `--crop`, `eval`, `watch`) already mitigate the original context-bloat problem the subagent was created to solve.
