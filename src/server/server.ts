@@ -624,14 +624,28 @@ export class AgentViewServer {
     const conn = await this.getPageSession(req, targetId)
 
     const scale = argNum(req.args, 'scale')
-    const opts = scale !== undefined ? { scale } : undefined
-    const buffer = await conn.captureScreenshot(opts)
+    const cropFilter = argStr(req.args, 'crop')
+
+    let warning: string | undefined
+    let clip: { x: number; y: number; width: number; height: number } | undefined
+
+    if (cropFilter !== undefined) {
+      const found = await this.findByFilter(conn, cropFilter, req, targetId)
+      if (!found) {
+        warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
+      } else {
+        clip = await conn.getBoxRect(found.backendDOMNodeId, { scrollIntoView: true })
+      }
+    }
+
     const ext = scale !== undefined && scale < 1 ? 'jpg' : 'png'
+
+    const buffer = await conn.captureScreenshot({ scale, clip })
     const filename = `agent-view-screenshot-${Date.now()}.${ext}`
     const filepath = join(tmpdir(), filename)
     await writeFile(filepath, buffer)
 
-    return { ok: true, data: filepath }
+    return { ok: true, data: filepath, warning }
   }
 
   private async handleScene(req: ServerRequest): Promise<ServerResponse> {

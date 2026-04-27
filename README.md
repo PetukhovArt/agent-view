@@ -243,9 +243,13 @@ Captures a screenshot, saves to temp dir, prints the file path. PNG by default; 
 agent-view screenshot
 agent-view screenshot --scale 0.5             # Half-res JPEG (~3× fewer vision tokens)
 agent-view screenshot --scale 0.25            # Quarter-res JPEG (~12× fewer, 1 tile)
+agent-view screenshot --crop "Sidebar"        # Crop to element bounding box (~12× fewer in best case)
+agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
 ```
 
 `--scale` accepts a factor in `(0, 1]`. CDP-side clip + JPEG encode — recommended for agent loops where vision tokens dominate cost.
+
+`--crop <filter>` resolves a DOM element by the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box before encoding. One tile (~1.6k vision tokens) instead of twelve (~19k) in the best case. If the filter matches nothing a warning is emitted to stderr and the full window is captured instead. Combines naturally with `--scale`.
 
 ### `scene`
 
