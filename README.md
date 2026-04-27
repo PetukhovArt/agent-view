@@ -194,10 +194,13 @@ Dumps the accessibility tree in compact text format. Each element gets a session
 agent-view dom
 agent-view dom --filter "Submit"    # Filter by text/role
 agent-view dom --depth 3            # Limit tree depth
+agent-view dom --max-lines 200      # Hard line budget (refs for hidden nodes still stored)
 agent-view dom --text               # Fall back to DOM textContent search when AX returns no match
 ```
 
 When `--filter` is set, depth defaults to unlimited so deep matches aren't truncated.
+
+`--max-lines <n>` caps the number of output lines. When the tree exceeds the budget, output is truncated after `n-1` lines and a summary tail `… M more nodes` is appended. Refs for all nodes — including those past the cutoff — are still registered in the ref store, so a follow-up `dom --filter` or `click <ref>` works without re-running.
 
 ### `click`
 

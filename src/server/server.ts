@@ -348,6 +348,7 @@ export class AgentViewServer {
       filter,
       depth: resolveDepth(filter, argNum(req.args, 'depth')),
       startRef: this.refStore.getNextRef(),
+      maxLines: argNum(req.args, 'maxLines'),
     })
 
     this.refStore.store(refs, req.port, targetId, nextRef)

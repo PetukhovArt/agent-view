@@ -31,6 +31,7 @@ rtk agent-view dom                          # DOM accessibility tree (default wi
 rtk agent-view dom --window <id|name>       # Specific window
 rtk agent-view dom --filter "button"        # Filter by text/role
 rtk agent-view dom --depth 3                # Limit tree depth
+rtk agent-view dom --max-lines 200          # Hard line budget; refs for truncated nodes still stored
 ```
 
 ### Interaction
