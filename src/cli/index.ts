@@ -148,6 +148,7 @@ program
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-f, --filter <text>', 'Filter by text/name')
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
+  .option('--scale <factor>', 'Capture a screenshot at this scale (0,1] and append to output', parseFloat)
   .action(async (options) => {
     const config = requireConfig()
     await runSnap(config, options)

@@ -274,10 +274,11 @@ agent-view scene --compact          # Merge single-child chains onto one line
 
 ### `snap`
 
-Combined DOM + scene graph in one call. Shows DOM always; scene section appears when a WebGL engine is detected.
+Combined DOM + scene graph in one call. Shows DOM always; scene section appears when a WebGL engine is detected. Pass `--scale` to also capture a screenshot and append it as a third section.
 
 ```bash
 agent-view snap
+agent-view snap --scale 0.5   # DOM + Scene + Screenshot (path written to tmp)
 ```
 
 ### `wait`
