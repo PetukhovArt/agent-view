@@ -1,7 +1,7 @@
 ---
 name: verify
 description: "Visual + runtime verification of desktop apps via Chrome DevTools Protocol. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application — DOM, screenshots, scene graph, runtime state in pages and SharedWorkers/ServiceWorkers, console errors, or reactive-state diffs over time. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM, check store/state, watch state changes, what changed after click, wait until state, read worker, console errors, runtime check, eval in page."
-allowed-tools: Bash(agent-view *)
+allowed-tools: Bash(agent-view *), Read
 ---
 
 # Visual Verification with agent-view
@@ -178,44 +178,18 @@ When two tools could answer the same question, prefer the one higher up the tabl
 
 ## Verification Workflow
 
-### Recipe Execution Mode (preferred when a recipe exists)
+### Recipe Execution Mode (when a recipe file exists)
 
-If the developer points you at a `.claude/verify-recipes/<slug>.md` file, OR you discover one matching the current task via `ls .claude/verify-recipes/`, **delegate execution to the `verify-runner` subagent** instead of running commands yourself.
-
-Why: recipe execution is mechanical (run commands, compare to `Expected:`, report). It does not need Opus-level reasoning, but the raw output (DOM dumps, screenshots, eval results) easily exceeds 30k tokens of context noise. Delegating to a Haiku subagent keeps your context clean and cuts cost ~10×.
-
-**Pre-flight check (do this BEFORE spawning the runner):**
+If the developer points you at a `.claude/verify-recipes/<slug>.md` file, or one is discoverable via `ls .claude/verify-recipes/`, execute it inline yourself — **no subagent**.
 
 1. `Read` the recipe.
-2. Determine the recipe format:
-   - Has `## Bringup` section → 0.8.0+ format. Bringup runs automatically; no user setup needed unless `## Manual Preconditions` is non-empty.
-   - Has `## Machine Preconditions` but no `## Bringup` → 0.7.0 format. The user must do all setup manually before this call.
-   - Neither → 0.6.x format. Tell the user once: "this recipe predates the precondition contract — failures may not be diagnostic. Run anyway, or regenerate the recipe via `verify-recipe`?"
-3. **Manual Preconditions handling:**
-   - 0.8.0 + Manual section empty → skip user confirmation, go straight to spawn.
-   - Manual section non-empty → read each item to the user (tight one-liners) and ask: "are these set up right now?" Wait for confirmation. If no — stop, don't waste a runner spawn.
-4. Resolve the window id once: `agent-view discover` → pick the main window's id.
-
-**Spawn:**
-
-5. Spawn `verify-runner` via the Agent tool with a prompt containing:
-   - Absolute `recipe_path`
-   - Resolved `window_id`
-   - `mode: full` (or `dry_run` if the user asked to validate the recipe first)
-   - Any extra context the user provided
-6. Wait for the JSON report.
-
-**Handle the report:**
-
-7. **If `status: bringup_failed`** → the bringup spec is wrong: an action command failed to land its post-condition (e.g., `selectLocationAndFly` doesn't exist, login button text changed, programmatic API renamed). Surface `failed_bringup_step` and the post-condition's actual value. Suggest re-authoring the broken Bringup step via `verify-recipe`. Do NOT click around manually trying to make it work.
-8. **If `status: bringup_budget_exhausted` or `bringup_timeout`** → bringup is taking too long. Either an animation is slower than the recipe expects (extend `timeout` on the offending step), or bringup is fighting an unexpected app state. Show the bringup transcript and ask the user.
-9. **If `status: precondition_failed`** → bringup completed but state still wrong. Could be: (a) bringup is incomplete (missing a step), (b) a Machine Precondition is overly strict, (c) real environment issue. Relay both the `bringup` block (showing what bringup did) and the `failed_precondition` so the user sees the full picture.
-10. **If `status: cascading_failures` or `budget_exhausted`** → the recipe Evidence is likely stale (selectors/refs changed, UI restructured). Show the first 1-2 failed Evidence steps and ask whether to update the recipe via `verify-recipe` or investigate manually.
-11. **If `design_conformance_section: true`** → also spawn `design-conformance-runner` in parallel with the `design_conformance_pairs` array. Merge both reports.
-12. **If `requires_visual_review` steps** have no design ref attached → open each screenshot yourself with `Read` and decide pass/fail.
-13. **If individual `failed` steps** in an otherwise-completed run → re-run that specific failing command yourself for richer evidence. Do not re-execute the whole recipe.
-
-Output to the user: a tight summary — what passed, what failed, what needs visual review, and (if any) which design conformance issues to fix. Do not paste the raw JSON unless asked.
+2. If it has a `## Repro Steps` section, follow them — log in, navigate, set up data — using `agent-view` commands. Modern recipes (0.6+) may instead have `## Manual Preconditions` / `## Bringup` / `## Machine Preconditions` sections; treat those as documentation describing the expected state and execute the actions inline. There is no formal DSL — read what the section says and do it.
+3. Resolve the window id once with `agent-view discover` if you need `--window`.
+4. Run each `## Evidence Commands` subsection in order. Compare output to its `Expected:` line. Mark each as `pass` / `fail` / `requires_visual_review`.
+5. After 2–3 consecutive failures, stop and flag the recipe as likely stale rather than continuing to burn tool calls.
+6. Run `## Regression Checks` last.
+7. If a `## Design Conformance` section is present, run the inline workflow below.
+8. Report a tight summary to the user: passed / failed / visual-review counts plus one-liner per failure. Don't paste raw stdout unless asked.
 
 ### Ad-hoc Mode (standalone)
 
@@ -241,6 +215,18 @@ When UI scenarios are pre-generated (e.g., from a plan file with `## UI Scenario
 5. **Report per-scenario**: PASS / FAIL with reason and evidence
 
 This mode works with any workflow that generates plan files with UI scenarios.
+
+### Design Conformance (inline)
+
+When a recipe contains a `## Design Conformance` table — `(label, screenshot command, expected reference path)` rows — execute it yourself, no subagent.
+
+For each row:
+1. Run the screenshot command (capture the saved file path from stdout).
+2. `Read` both the captured image and the `expected_path`. If `expected_path` doesn't exist or is unreadable, mark the pair `skipped (expected_missing)` and move on.
+3. Compare visually for: layout (relative position, alignment), sizing, color (dominant color family), typography (weight/size broadly), content presence (anything missing or extra), decorations (borders, shadows, dashed/solid lines, icons).
+4. Report each pair as `match` / `minor_mismatch` / `major_mismatch` with a one-sentence deviation. Major = missing/wrong component, broken layout, wrong color family, wrong text content. Minor = <10px spacing drift, slight color shade, small decoration difference.
+
+Tolerance default: a designer's code-review level — flag what they'd notice, ignore anti-aliasing noise. Don't speculate about CSS causes — describe what looks different and let the parent / user decide.
 
 ## Resilience
 

@@ -29,8 +29,7 @@ Each step links to the full explanation below.
 - **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages; fuzzy `--target` resolution everywhere (id → title → URL)
 - **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable; `--compact` mirrors the DOM mode
 - **Design-conformance verification** — pair screenshot commands with local design references (Figma export, hand-off
-  PNGs, any image on disk) inside a verify-recipe; the `design-conformance-runner` subagent reports visual deviations
-  against the mockup
+  PNGs, any image on disk) inside a verify-recipe; the `verify` skill compares screenshots against the references inline
 
 ## Why CLI, not MCP?
 
@@ -57,8 +56,7 @@ npm install -g @petukhovart/agent-view
 
 The plugin ships two skills. **`verify`** executes visual and runtime checks against a running app. **`verify-recipe`** generates a `.claude/verify-recipes/<slug>.md` file — a disciplined, cheapest-first command sequence for a feature or bugfix — that you or any AI agent can run later. Trigger it with phrases like "write a verify-recipe for the login fix" or "generate a verification plan for this feature".
 
-For Haiku-cost recipe execution and visual conformance against design mockups,
-see [Recommended workflow with Claude Code](#recommended-workflow-with-claude-code) below.
+For the canonical author-once / re-run flow, see [Recommended workflow with Claude Code](#recommended-workflow-with-claude-code) below.
 
 Verify:
 
@@ -194,13 +192,11 @@ Full surface in [Commands](#commands) below.
 
 ## Recommended workflow with Claude Code
 
-A repeatable, token-efficient flow for "I shipped a feature/fix → confirm it actually works visually and at runtime".
-Three phases, each driven by a focused prompt.
+A repeatable, token-efficient flow for "I shipped a feature/fix → confirm it actually works visually and at runtime". Two phases, each driven by a focused prompt.
 
-### Phase 1 — Author the verification plan (Opus / Sonnet)
+### Phase 1 — Author the verification plan (once)
 
-Generate the recipe **once**, from a PRD / plan file / Jira ticket / commit range. The recipe is reusable — re-run after
-every iteration on the same feature.
+Generate the recipe **once**, from a PRD / plan file / Jira ticket / commit range. The recipe is reusable — re-run after every iteration on the same feature.
 
 ```text
 Generate a verify-recipe for the changes in commits <hash1>..<hash2>.
@@ -212,40 +208,23 @@ Design references (if any):
 - /abs/path/figma-exports/error-state.png      → label "invalid creds error"
 ```
 
-What this triggers: the `verify-recipe` skill interviews you (if more context needed), then writes a
-`.claude/verify-recipes/<slug>.md` with `Repro Steps`, `Evidence Commands` (cheapest-first: `eval` / `dom --filter`
-before `screenshot`), `Regression Checks`, and — if you provided design refs — a `Design Conformance` table mapping
-screenshot commands to expected reference images.
+What this triggers: the `verify-recipe` skill interviews you (if more context needed), then writes a `.claude/verify-recipes/<slug>.md` with `Repro Steps`, `Evidence Commands` (cheapest-first: `eval` / `dom --filter` before `screenshot`), `Regression Checks`, and — if you provided design refs — a `Design Conformance` table mapping screenshot commands to expected reference images.
 
-**Tip:** if you implemented from a Figma file via the `figma-implement-design` skill, it likely already saved exports
-somewhere on disk — pass those paths. agent-view does NOT fetch from Figma URLs; provide local files only.
+**Tip:** if you implemented from a Figma file via the `figma-implement-design` skill, it likely already saved exports somewhere on disk — pass those paths. agent-view does NOT fetch from Figma URLs; provide local files only.
 
-### Phase 2 — Run the recipe (delegated to Haiku)
+### Phase 2 — Run the recipe
 
 ```text
 Run the verify-recipe at .claude/verify-recipes/<slug>.md.
 ```
 
-What this triggers: the `verify` skill resolves the window via `agent-view discover`, then spawns the `verify-runner`
-subagent (Haiku) to execute every step and return a compact JSON report. If the recipe has a `Design Conformance`
-section, `design-conformance-runner` (also Haiku) runs in parallel and visually compares screenshots against the
-references.
+What this triggers: the `verify` skill reads the recipe, performs the `Repro Steps` setup, runs each `Evidence Command` against the live app, compares output to the recipe's `Expected:` lines, and reports pass/fail per step. If the recipe has a `Design Conformance` section, the same skill captures the screenshots, opens both actual and expected images, and reports `match` / `minor_mismatch` / `major_mismatch` per pair — all inline, in the same conversation.
 
-**Effect on cost:** raw output (DOM dumps, screenshots, eval values) stays in the subagent. The main agent only sees the
-merged JSON report — typically <2k tokens vs ~50k if Opus ran the recipe directly.
-
-### Phase 3 — Iterate on failures (Opus / Sonnet)
-
-The merged report lists `failed`, `requires_visual_review`, and `major_mismatch` items with one-sentence diagnoses. Hand
-any subset back to the main agent:
+When something fails, ask the main agent to fix and re-run only the affected steps:
 
 ```text
-Three steps failed in the verify run. Fix step 4 (zone filter not mutating store)
-and step 7 (selective filter heading missing). Re-run only those two steps after the fix.
+Step 4 failed (zone filter not mutating store). Fix and re-run that step plus step 7.
 ```
-
-The main agent re-runs only the failing commands itself for richer evidence, makes the fix, and re-spawns
-`verify-runner` for the targeted re-check — not the whole recipe.
 
 ### One-shot prompt (when there's no plan to convert)
 
@@ -259,53 +238,13 @@ I added a `saving` ref and bound it to :disabled. Verify it works:
 - visual: button greys out (compare to /abs/path/saving-state.png if one is provided)
 ```
 
-Claude will pick the right skill (usually `verify` ad-hoc mode), run a handful of `eval` / `dom --filter` / `console`
-calls, and only screenshot if the visual claim needs it.
-
-### Three-phase preconditions (0.8.0+)
-
-Recipes split setup into three phases, each with a different runner:
-
-| Phase | Who runs it | Purpose | Idempotent? |
-|---|---|---|---|
-| `## Manual Preconditions` | Human (or main agent) | Only what `agent-view` physically can't (USB token, hardware, multi-machine state). Usually empty. | n/a |
-| `## Bringup` | verify-runner | Conditional + idempotent setup: `if <state-check> is falsy → run actions → wait for state to settle`. Logins, mounting widgets, navigation, anything `agent-view` can drive deterministically. | YES per step |
-| `## Machine Preconditions` | verify-runner | Pure state queries that confirm Bringup actually landed. No actions here. | trivially |
-
-Bringup steps look like:
-
-```markdown
-### B1. Login if on auth screen
-- if `agent-view eval "typeof window.__dev"` is not `"object"`:
-    agent-view fill --filter "Логин" "root"
-    agent-view fill --filter "Пароль" "$AGENTVIEW_PASSWORD"
-    agent-view click --filter "Войти"
-  wait for `agent-view eval "typeof window.__dev"` to be `"object"`, timeout 15s
-```
-
-The runner always evaluates the IF first (cheap). If the system is already in the target state → skip the actions, advance. Otherwise → run actions in order, then poll the post-condition until truthy or timeout. **Re-running a recipe when the app is ready costs ~3 seconds** (only state-checks, zero actions). Starting from auth screen costs ~15-25 seconds (one-time login + mount + navigate). Same recipe, both starting states, no manual intervention.
-
-Failure modes are distinct:
-- `bringup_failed` → bringup spec is wrong (the action commands ran but the post-condition didn't land — likely the programmatic API doesn't exist or the button text changed). Author error.
-- `precondition_failed` → bringup ran AND post-conditions landed, but Machine Preconditions still false. Real environment issue (degraded mode, wrong user role, missing data).
-- `cascading_failures` → bringup + preconditions OK, but Evidence Commands fail. Verified feature is broken or recipe is stale.
-
-Without the three-phase split, all three look like "step N failed" and you can't tell them apart.
-
-**Credentials in Bringup:** always use env-var references (`$AGENTVIEW_PASSWORD`), never inline a literal password. Recipes get committed to git. The `verify-recipe` skill warns when it sees a literal-looking password and offers to convert.
+Claude will pick the right skill (usually `verify` ad-hoc mode), run a handful of `eval` / `dom --filter` / `console` calls, and only screenshot if the visual claim needs it.
 
 ### Anti-patterns to avoid
 
-- "Just verify the feature" with no plan or symptom — the recipe author can't pick the cheapest signal without knowing
-  what "works" means. Give it the symptom that motivated the fix.
-- Pasting Figma URLs and expecting agent-view to download them — it won't. Export the frames you care about to PNG
-  first.
-- Running the recipe directly with Opus when a recipe file exists — that's exactly the case `verify-runner` is for.
-  Prefer Phase 2's prompt.
-- Stuffing 50 assertions into one recipe — split per-feature. A recipe should run in <2 minutes and produce a report you
-  can read in 30 seconds.
-- Manual Preconditions without Machine Precondition counterparts — the runner can't catch the user skipping setup. The
-  skill warns during authoring; either add a check or accept the gap explicitly in the recipe.
+- "Just verify the feature" with no plan or symptom — the recipe author can't pick the cheapest signal without knowing what "works" means. Give it the symptom that motivated the fix.
+- Pasting Figma URLs and expecting agent-view to download them — it won't. Export the frames you care about to PNG first.
+- Stuffing 50 assertions into one recipe — split per-feature. A recipe should run in <2 minutes and produce a report you can read in 30 seconds.
 
 ## How it works
 
