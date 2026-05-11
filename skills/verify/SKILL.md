@@ -20,10 +20,12 @@ If config is missing, run `agent-view init` first.
 
 ### Discovery & Launch
 ```bash
-agent-view launch                      # Start app from config, wait for CDP readiness
+agent-view launch                      # Start app from config, wait for CDP readiness (Electron/Browser)
 agent-view discover                    # List windows (JSON) — get window IDs
 agent-view stop                        # Stop the lazy server
 ```
+
+**Tauri**: `agent-view launch` is **disabled** for `runtime: tauri` — cargo builds are slow and the dev-server port frequently collides with a parallel browser-dev. Start the Tauri app manually (`npm run dev`, or `cd src-tauri && cargo run` to skip `beforeDevCommand` if a webpack/vite dev-server is already running on the configured `devUrl` port), then call `agent-view discover` to confirm windows are visible. The skill should not attempt to kill foreign dev-server processes to free ports — ask the user instead.
 
 ### DOM Inspection
 ```bash
@@ -232,7 +234,7 @@ Tolerance default: a designer's code-review level — flag what they'd notice, i
 
 - **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
 - **Element not found:** Wait 2s, retry once (render delay after HMR). If still missing — report FAIL
-- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch`
+- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (Electron/Browser) or ask the user to start the Tauri app manually
 - **Max retries per command:** 2. After that — SKIP scenario step with warning
 
 ## Important Notes

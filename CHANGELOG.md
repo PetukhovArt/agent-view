@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.2] - 2026-05-11
+
+Tauri launch resilience and an async-error guard so polling no longer kills the server.
+
+### Fixed
+- `listTargets` could leak `ECONNRESET` from a closing keep-alive socket as an `uncaughtException`, crashing the lazy server mid-`launch`. The server now installs a process-level guard that swallows `ECONNRESET`/`ECONNREFUSED`/`EPIPE` from CDP probes and re-throws everything else.
+- `isRunning` now catches all errors from `listTargets` and returns `false` instead of rejecting.
+
+### Changed
+- `agent-view launch` is now refused for `runtime: tauri`. Auto-spawning a Tauri dev command from agent-view's polling loop has caused orphan webpack processes, `EADDRINUSE` collisions with parallel browser-dev sessions, and 60s timeouts on cold cargo builds. Tauri apps must be started manually (`npm run dev`, or `cd src-tauri && cargo run` when a dev-server is already running on the configured `devUrl`).
+- Poll interval raised from 1s to 2s.
+- `verify` skill: added explicit Tauri note in Discovery & Launch and Resilience sections.
+
 ## [0.8.1] - 2026-04-27
 
 Architectural rollback (plugin/docs only — no CLI changes). Removes the `verify-runner` and `design-conformance-runner` Haiku subagents introduced in 0.6.0 and the Bringup DSL added in 0.8.0. Recipe execution returns to inline (main-agent driven) with the original `Repro Steps` / `Evidence Commands` / `Regression Checks` structure. The `verify-recipe` skill is decoupled from `verify`: it authors recipe files only — no dry-run, no integration with execution. Design conformance is preserved as a recipe section and an inline workflow in the `verify` skill.

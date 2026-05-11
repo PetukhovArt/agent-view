@@ -8,7 +8,7 @@ import { getAdapter } from '../adapters/registry.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
 import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
-import { launch, isRunning } from './launcher.js'
+import { launch, isRunning, installCDPErrorGuard } from './launcher.js'
 import { readConfig } from '../config/manager.js'
 import { RuntimeType, WebGLEngine, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
 import {
@@ -165,6 +165,7 @@ export class AgentViewServer {
   private readonly validCommands: ReadonlySet<string> = new Set([...Object.keys(this.handlers), ...this.streamingCommands])
 
   async start(): Promise<void> {
+    installCDPErrorGuard()
     mkdirSync(TOKEN_DIR, { recursive: true })
     this.token = randomBytes(32).toString('hex')
     await writeFile(TOKEN_PATH, this.token, { mode: 0o600 })
@@ -333,7 +334,7 @@ export class AgentViewServer {
       return { ok: true, data: 'Application already running' }
     }
 
-    await launch(launchCmd, req.port, cwd)
+    await launch(launchCmd, req.port, cwd, req.runtime)
     return { ok: true, data: 'Application launched and ready' }
   }
 
