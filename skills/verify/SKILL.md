@@ -20,12 +20,14 @@ If config is missing, run `agent-view init` first.
 
 ### Discovery & Launch
 ```bash
-agent-view launch                      # Start app from config, wait for CDP readiness (Electron/Browser)
+agent-view launch                      # Start app from config, wait for CDP readiness (all runtimes incl. Tauri)
 agent-view discover                    # List windows (JSON) — get window IDs
 agent-view stop                        # Stop the lazy server
 ```
 
-**Tauri**: `agent-view launch` is **disabled** for `runtime: tauri` — cargo builds are slow and the dev-server port frequently collides with a parallel browser-dev. Start the Tauri app manually (`npm run dev`, or `cd src-tauri && cargo run` to skip `beforeDevCommand` if a webpack/vite dev-server is already running on the configured `devUrl` port), then call `agent-view discover` to confirm windows are visible. The skill should not attempt to kill foreign dev-server processes to free ports — ask the user instead.
+**Port conflict**: if the configured port is held by a non-CDP process (e.g. a stray webpack-dev on the same port), `agent-view launch` exits non-zero with `code: PORT_CONFLICT` and reports the owning PID/process name. Ask the user to either close that process or start the app manually — do not kill foreign processes from the skill.
+
+**Tauri**: launch works the same as Electron, but the wait timeout is 10 min (cargo builds are slow). If you see a port conflict on the Tauri devUrl port, it's almost always a parallel browser-dev — surface the PID and ask the user.
 
 ### DOM Inspection
 ```bash
@@ -234,7 +236,7 @@ Tolerance default: a designer's code-review level — flag what they'd notice, i
 
 - **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
 - **Element not found:** Wait 2s, retry once (render delay after HMR). If still missing — report FAIL
-- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (Electron/Browser) or ask the user to start the Tauri app manually
+- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (auto-starts Electron/Browser/Tauri). On `PORT_CONFLICT` — surface PID/process and ask user.
 - **Max retries per command:** 2. After that — SKIP scenario step with warning
 
 ## Important Notes

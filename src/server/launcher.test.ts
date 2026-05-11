@@ -1,6 +1,6 @@
+import { createServer, type Server } from 'node:net'
 import { describe, it, expect } from 'vitest'
-import { parseCommand, launch } from './launcher.js'
-import { RuntimeType } from '../types.js'
+import { parseCommand, launch, PortConflictError, detectPortConflict } from './launcher.js'
 
 describe('parseCommand', () => {
   it('splits simple command', () => {
@@ -45,11 +45,46 @@ describe('parseCommand', () => {
   })
 })
 
+function listenOnPort(port: number): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    // Reply with HTTP 404 so chrome-remote-interface's GET /json/list fails fast
+    // instead of hanging — we're simulating "port held by non-CDP process".
+    const srv = createServer((sock) => {
+      sock.once('data', () => {
+        sock.end('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+      })
+    })
+    srv.once('error', reject)
+    srv.listen(port, '127.0.0.1', () => resolve(srv))
+  })
+}
+
+describe('detectPortConflict', () => {
+  it('returns null when nothing is listening on the port', async () => {
+    expect(await detectPortConflict(47998)).toBeNull()
+  })
+
+  it('reports a conflict when a non-CDP process holds the port', async () => {
+    const port = 47997
+    const srv = await listenOnPort(port)
+    try {
+      const conflict = await detectPortConflict(port)
+      expect(conflict).not.toBeNull()
+      expect(conflict?.port).toBe(port)
+    } finally {
+      await new Promise<void>(r => srv.close(() => r()))
+    }
+  })
+})
+
 describe('launch', () => {
-  it('refuses to auto-spawn Tauri apps', async () => {
-    // Port that should have nothing listening so isRunning() returns false.
-    const port = 47999
-    await expect(launch('npm run dev', port, process.cwd(), RuntimeType.Tauri))
-      .rejects.toThrow(/Tauri apps must be started manually/)
+  it('throws PortConflictError when port is held by non-CDP process', async () => {
+    const port = 47996
+    const srv = await listenOnPort(port)
+    try {
+      await expect(launch('node noop.js', port)).rejects.toBeInstanceOf(PortConflictError)
+    } finally {
+      await new Promise<void>(r => srv.close(() => r()))
+    }
   })
 })

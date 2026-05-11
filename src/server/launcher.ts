@@ -1,14 +1,34 @@
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
+import { createConnection } from 'node:net'
+import { promisify } from 'node:util'
 import { listTargets } from '../cdp/transport.js'
-import { RuntimeType } from '../types.js'
+import { RuntimeType, type PortConflictData } from '../types.js'
 
 const DEFAULT_LAUNCH_TIMEOUT_MS = 60_000
 const TAURI_LAUNCH_TIMEOUT_MS = 10 * 60_000
 const POLL_INTERVAL_MS = 2_000
+const PORT_PROBE_TIMEOUT_MS = 500
 
-// Commands that are .cmd scripts on Windows and need explicit extension
-// when spawned without shell
+const execFileAsync = promisify(execFile)
+
 const WIN_CMD_EXECUTABLES = new Set(['npm', 'npx', 'pnpm', 'yarn', 'ng', 'vite', 'tsc'])
+
+export class PortConflictError extends Error {
+  readonly conflict: PortConflictData
+  constructor(conflict: PortConflictData) {
+    const who = conflict.processName && conflict.pid
+      ? `${conflict.processName} (PID ${conflict.pid})`
+      : conflict.pid
+        ? `PID ${conflict.pid}`
+        : 'an unknown process'
+    super(
+      `Port ${conflict.port} is occupied by ${who}, but it does not expose CDP. `
+      + `Either stop that process to let agent-view auto-launch the app, or start the app manually so it listens on port ${conflict.port}.`,
+    )
+    this.name = 'PortConflictError'
+    this.conflict = conflict
+  }
+}
 
 export function parseCommand(cmd: string): [string, string[]] {
   const parts = cmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
@@ -25,10 +45,54 @@ export async function isRunning(port: number): Promise<boolean> {
     const targets = await listTargets(port)
     return targets.length > 0
   } catch {
-    // listTargets has its own try/catch per host, but socket-level errors
-    // (ECONNRESET on a closing keep-alive socket) can leak through.
     return false
   }
+}
+
+function probePortOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port })
+    const done = (open: boolean): void => {
+      socket.destroy()
+      resolve(open)
+    }
+    socket.setTimeout(PORT_PROBE_TIMEOUT_MS)
+    socket.once('connect', () => done(true))
+    socket.once('error', () => done(false))
+    socket.once('timeout', () => done(false))
+  })
+}
+
+async function resolvePortOwner(port: number): Promise<{ pid?: number, processName?: string }> {
+  try {
+    if (process.platform === 'win32') {
+      const ps = `$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; \"$($c.OwningProcess)|$($p.ProcessName)\" }`
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: 3000 })
+      const line = stdout.trim()
+      if (!line) return {}
+      const [pidStr, name] = line.split('|')
+      const pid = Number(pidStr)
+      return { pid: Number.isFinite(pid) ? pid : undefined, processName: name || undefined }
+    }
+    const { stdout } = await execFileAsync('lsof', ['-iTCP:' + port, '-sTCP:LISTEN', '-Fpc', '-n', '-P'], { timeout: 3000 })
+    let pid: number | undefined
+    let processName: string | undefined
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('p')) pid = Number(line.slice(1))
+      else if (line.startsWith('c')) processName = line.slice(1)
+    }
+    return { pid, processName }
+  } catch {
+    return {}
+  }
+}
+
+export async function detectPortConflict(port: number): Promise<PortConflictData | null> {
+  if (await isRunning(port)) return null
+  const open = await probePortOpen(port)
+  if (!open) return null
+  const owner = await resolvePortOwner(port)
+  return { port, ...owner }
 }
 
 export async function launch(
@@ -37,21 +101,12 @@ export async function launch(
   cwd?: string,
   runtime?: RuntimeType,
 ): Promise<void> {
-  if (await isRunning(port)) {
-    return
-  }
+  if (await isRunning(port)) return
 
-  // Tauri apps require a slow `cargo build`, frequently share the dev-server port
-  // with a parallel browser-dev, and routinely orphan child processes on crash.
-  // Auto-spawning them from agent-view's polling loop has caused EADDRINUSE and
-  // killed dev sessions. Require manual start instead.
-  if (runtime === RuntimeType.Tauri) {
-    throw new Error(
-      'Tauri apps must be started manually. Run your dev command in a separate terminal '
-      + '(e.g. `npm run dev` or `cd src-tauri && cargo run`), then re-run agent-view. '
-      + 'Auto-launch is disabled for Tauri because cargo builds are slow and dev-servers '
-      + 'frequently conflict with parallel browser-dev on the same port.',
-    )
+  const open = await probePortOpen(port)
+  if (open) {
+    const owner = await resolvePortOwner(port)
+    throw new PortConflictError({ port, ...owner })
   }
 
   const [exe, args] = parseCommand(command)
@@ -64,13 +119,11 @@ export async function launch(
   })
   child.unref()
 
-  const timeout = DEFAULT_LAUNCH_TIMEOUT_MS
+  const timeout = runtime === RuntimeType.Tauri ? TAURI_LAUNCH_TIMEOUT_MS : DEFAULT_LAUNCH_TIMEOUT_MS
   const start = Date.now()
   while (Date.now() - start < timeout) {
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
-    if (await isRunning(port)) {
-      return
-    }
+    if (await isRunning(port)) return
   }
 
   throw new Error(`Application did not start within ${timeout / 1000}s. Check your config.launch command.`)

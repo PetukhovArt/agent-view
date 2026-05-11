@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1] - 2026-05-11
+
+Restore auto-launch for Tauri and add structured port-conflict detection.
+
+### Changed
+- `agent-view launch` now auto-spawns Tauri apps too (using the 10-minute timeout that already existed for slow cargo builds). The blanket refusal added in 0.8.2 is reverted — instead, the launcher detects when the port is held by a non-CDP process and surfaces the actual conflict.
+
+### Added
+- `PortConflictError` in the launcher: before spawning, the port is TCP-probed and the owning PID/process name is resolved (PowerShell `Get-NetTCPConnection` on Windows, `lsof` elsewhere).
+- `ServerErrorCode.PortConflict` (`PORT_CONFLICT`) — `agent-view launch` returns a structured `{code, data:{port,pid,processName}}` response instead of a generic error.
+- `agent-view launch` CLI: in a TTY it prints the conflict (PID + process name) and offers a retry prompt — user closes the conflicting process or starts the app manually, then presses Enter. Non-interactive callers (agents/CI) get the structured error and a non-zero exit.
+
 ## [0.8.2] - 2026-05-11
 
 Tauri launch resilience and an async-error guard so polling no longer kills the server.

@@ -8,9 +8,9 @@ import { getAdapter } from '../adapters/registry.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
 import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
-import { launch, isRunning, installCDPErrorGuard } from './launcher.js'
+import { launch, isRunning, installCDPErrorGuard, PortConflictError } from './launcher.js'
 import { readConfig } from '../config/manager.js'
-import { RuntimeType, WebGLEngine, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
+import { RuntimeType, WebGLEngine, ServerErrorCode, type ServerRequest, type ServerResponse, type WindowInfo } from '../types.js'
 import {
   TargetType,
   ConsoleLevel,
@@ -334,7 +334,19 @@ export class AgentViewServer {
       return { ok: true, data: 'Application already running' }
     }
 
-    await launch(launchCmd, req.port, cwd, req.runtime)
+    try {
+      await launch(launchCmd, req.port, cwd, req.runtime)
+    } catch (err) {
+      if (err instanceof PortConflictError) {
+        return {
+          ok: false,
+          error: err.message,
+          code: ServerErrorCode.PortConflict,
+          data: err.conflict,
+        }
+      }
+      throw err
+    }
     return { ok: true, data: 'Application launched and ready' }
   }
 

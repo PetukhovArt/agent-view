@@ -31,10 +31,21 @@ export type ServerRequest = {
   token?: string
 }
 
+export enum ServerErrorCode {
+  PortConflict = 'PORT_CONFLICT',
+}
+
+export type PortConflictData = {
+  port: number
+  pid?: number
+  processName?: string
+}
+
 export type ServerResponse = {
   ok: boolean
   data?: unknown
   error?: string
+  code?: ServerErrorCode
   /** Non-fatal warning — emit to stderr on the CLI side, still print data. */
   warning?: string
 }
