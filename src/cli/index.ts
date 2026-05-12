@@ -29,7 +29,7 @@ import type { AgentViewConfig } from '../config/types.js'
 const program = new Command()
   .name('agent-view')
   .description('Visual verification CLI for desktop apps')
-  .version('0.5.1')
+  .version('0.8.2')
 
 program
   .command('init')
