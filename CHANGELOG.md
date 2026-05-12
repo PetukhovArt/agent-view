@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.2] - 2026-05-12
+
+Tauri launch resilience, structured port-conflict detection, and verify-skill rigor edition.
+
+### Fixed
+- `listTargets` could leak `ECONNRESET` from a closing keep-alive socket as an `uncaughtException`, crashing the lazy server mid-`launch`. The server now installs a process-level guard that swallows `ECONNRESET`/`ECONNREFUSED`/`EPIPE` from CDP probes and re-throws everything else.
+- `isRunning` now catches all errors from `listTargets` and returns `false` instead of rejecting.
+
+### Added
+- `PortConflictError` in the launcher: before spawning, the port is TCP-probed and the owning PID/process name is resolved (PowerShell `Get-NetTCPConnection` on Windows, `lsof` elsewhere).
+- `ServerErrorCode.PortConflict` (`PORT_CONFLICT`) — `agent-view launch` returns a structured `{code, data:{port,pid,processName}}` response instead of a generic error.
+- `agent-view launch` CLI: in a TTY it prints the conflict (PID + process name) and offers a retry prompt — user closes the conflicting process or starts the app manually, then presses Enter. Non-interactive callers (agents/CI) get the structured error and a non-zero exit.
+- `verify-recipe` skill: rigor edition. New required sections — `## Bug-class invariants` (Classes A UI≡Model, B Round-trip, C Reversibility/identity, D No phantom state, E Config conformance) and `## Discipline rules` (7 rules: FAIL is FAIL, UI-vs-model is the bug, defensive eval reads, no hardcoded IDs, mandatory reload checkpoint, invariants run first, no pre-baked `requires_visual_review`). Step 1 questions expanded from 4 to 7 (persistence, views, configured constraints). Worked example replaced with scene-editor group component.
+- `verify` skill: new "Execution discipline" section — 6 numbered rules the executor must apply on every run. Recipe Execution Mode gains explicit invariants-first step, distinction between "recipe stale" and "feature broken", and a round-trip checkpoint step.
+- RFC draft `docs/rfcs/2026-05-12-unforgeable-evidence.md` — design doc for future session-manifest support so an external reader can mechanically verify that evidence in `07-{k}-verification.md` came from a live CDP session. Not implemented in this release.
+
+### Changed
+- `agent-view launch` now auto-spawns Tauri apps using the 10-minute timeout that already existed for slow cargo builds. An earlier internal iteration of 0.8.2 refused Tauri launch entirely — that approach is replaced by the port-conflict path above, which fails fast with a structured error when the port is held, rather than refusing wholesale.
+- Poll interval raised from 1s to 2s.
+- `verify` skill: added explicit Tauri note in Discovery & Launch and Resilience sections.
+
 ## [0.8.1] - 2026-04-27
 
 Architectural rollback (plugin/docs only — no CLI changes). Removes the `verify-runner` and `design-conformance-runner` Haiku subagents introduced in 0.6.0 and the Bringup DSL added in 0.8.0. Recipe execution returns to inline (main-agent driven) with the original `Repro Steps` / `Evidence Commands` / `Regression Checks` structure. The `verify-recipe` skill is decoupled from `verify`: it authors recipe files only — no dry-run, no integration with execution. Design conformance is preserved as a recipe section and an inline workflow in the `verify` skill.

@@ -20,10 +20,14 @@ If config is missing, run `agent-view init` first.
 
 ### Discovery & Launch
 ```bash
-agent-view launch                      # Start app from config, wait for CDP readiness
+agent-view launch                      # Start app from config, wait for CDP readiness (all runtimes incl. Tauri)
 agent-view discover                    # List windows (JSON) — get window IDs
 agent-view stop                        # Stop the lazy server
 ```
+
+**Port conflict**: if the configured port is held by a non-CDP process (e.g. a stray webpack-dev on the same port), `agent-view launch` exits non-zero with `code: PORT_CONFLICT` and reports the owning PID/process name. Ask the user to either close that process or start the app manually — do not kill foreign processes from the skill.
+
+**Tauri**: launch works the same as Electron, but the wait timeout is 10 min (cargo builds are slow). If you see a port conflict on the Tauri devUrl port, it's almost always a parallel browser-dev — surface the PID and ask the user.
 
 ### DOM Inspection
 ```bash
@@ -178,18 +182,41 @@ When two tools could answer the same question, prefer the one higher up the tabl
 
 ## Verification Workflow
 
+### Execution discipline (read first, every run)
+
+A run can produce one of three outcomes per step: **pass**, **fail**, **requires_visual_review**. There is no fourth bucket called "actually fine, here's why". A failed `Expected:` line is FAIL.
+
+These heuristics catch real bugs. Skipping them is how recipes silently pass while bugs sit in plain sight in the same data:
+
+1. **A failed `Expected:` is FAIL.** If output disagrees with the expected line, mark `fail` and continue. Do not edit the expected line. Do not invent prose explanations inline ("label reuse", "convention", "recipe arithmetic off"). Justifications belong in the bug report after the run, never in the per-step log.
+
+2. **UI-vs-model mismatch is the bug, not noise.** When a count or hierarchy check returns `match: false`:
+   - Default hypothesis: the UI renderer is wrong.
+   - Before considering "the filter matched something extra in some side panel", query bounding boxes and ancestor chains of the matched elements. Two matches at the same x-coordinate in adjacent y rows = sibling rows in one list = renderer bug.
+   - Do not dismiss DOM/model divergence with "scene-graph is the source of truth". The model is one representation; the bug may live in the gap between model and UI.
+
+3. **Defensive eval reads.** Every `node.field` read (e.g. `transform.x`, `transform.width`) must be sentinel-checked before being used in arithmetic. A renamed field silently returns `NaN`/`null`, which fail-passes downstream comparisons. Add `isFinite(value)` / `value !== undefined` guards inline.
+
+4. **No hardcoded literal IDs.** If a recipe contains hardcoded node-ID prefixes that don't match the current scene, the entire recipe degrades to no-op without errors. Verify at least one expected ID exists; if not, derive IDs by role at runtime and proceed with the corrected lookup. Flag the recipe as needing an ID-refresh fix.
+
+5. **Reload checkpoint is not optional.** If the recipe has a `## Round-Trip Checkpoint` or `## Invariants` section mentioning reload/save/persistence — run it. If it does not, but the feature mutated persisted structure — run one anyway: `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift is a real bug, not a "fixed-up on save".
+
+6. **Recipe-stated invariants run first or fail closed.** If the recipe has an `## Invariants` section, execute those steps before the action-specific evidence commands. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep running the remaining steps, tag them as "trust-impaired until invariant restored".
+
 ### Recipe Execution Mode (when a recipe file exists)
 
 If the developer points you at a `.claude/verify-recipes/<slug>.md` file, or one is discoverable via `ls .claude/verify-recipes/`, execute it inline yourself — **no subagent**.
 
 1. `Read` the recipe.
-2. If it has a `## Repro Steps` section, follow them — log in, navigate, set up data — using `agent-view` commands. Modern recipes (0.6+) may instead have `## Manual Preconditions` / `## Bringup` / `## Machine Preconditions` sections; treat those as documentation describing the expected state and execute the actions inline. There is no formal DSL — read what the section says and do it.
+2. If it has a `## Repro Steps` section, follow them — log in, navigate, set up data — using `agent-view` commands. Modern recipes (0.6+) may have `## Manual Preconditions` / `## Bringup` / `## Machine Preconditions` instead; treat those as documentation describing the expected state and execute the actions inline. There is no formal DSL — read what the section says and do it.
 3. Resolve the window id once with `agent-view discover` if you need `--window`.
-4. Run each `## Evidence Commands` subsection in order. Compare output to its `Expected:` line. Mark each as `pass` / `fail` / `requires_visual_review`.
-5. After 2–3 consecutive failures, stop and flag the recipe as likely stale rather than continuing to burn tool calls.
-6. Run `## Regression Checks` last.
-7. If a `## Design Conformance` section is present, run the inline workflow below.
-8. Report a tight summary to the user: passed / failed / visual-review counts plus one-liner per failure. Don't paste raw stdout unless asked.
+4. **If the recipe has an `## Invariants` section, run those steps first.** A failed invariant is FAIL — record it, then continue to evidence commands but tag subsequent results as "trust-impaired" until the invariant is restored.
+5. Run each `## Evidence Commands` subsection in order. Compare output to its `Expected:` line. Mark each as `pass` / `fail` / `requires_visual_review`. **Follow the Execution discipline above** — particularly rules 1 and 2.
+6. After 2–3 consecutive failures, stop and flag the recipe as likely stale. Distinguish "recipe stale" (hardcoded IDs no longer match) from "feature broken" (invariants violated on a current scene).
+7. Run `## Regression Checks`.
+8. **Run the round-trip checkpoint** (discipline rule 5) — either the recipe's section or, if absent and the feature is persistent, an ad-hoc reload check.
+9. If a `## Design Conformance` section is present, run the inline workflow below.
+10. Report a tight summary: passed / failed / visual-review counts plus one-liner per failure, and **any invariant violations called out separately**. Don't paste raw stdout unless asked.
 
 ### Ad-hoc Mode (standalone)
 
@@ -232,7 +259,7 @@ Tolerance default: a designer's code-review level — flag what they'd notice, i
 
 - **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
 - **Element not found:** Wait 2s, retry once (render delay after HMR). If still missing — report FAIL
-- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch`
+- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (auto-starts Electron/Browser/Tauri). On `PORT_CONFLICT` — surface PID/process and ask user.
 - **Max retries per command:** 2. After that — SKIP scenario step with warning
 
 ## Important Notes
