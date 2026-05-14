@@ -5,6 +5,7 @@ type ClickOptions = {
   pos?: string
   filter?: string
   window?: string
+  double?: boolean
 }
 
 export async function runClick(config: AgentViewConfig, refArg: string | undefined, options: ClickOptions): Promise<void> {
@@ -34,6 +35,7 @@ export async function runClick(config: AgentViewConfig, refArg: string | undefin
   }
 
   if (options.window) args.window = options.window
+  if (options.double) args.double = true
 
   const response = await sendCommand({
     command: 'click',

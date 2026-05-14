@@ -363,6 +363,7 @@ Clicks a DOM element by ref ID or coordinates.
 ```bash
 agent-view click 5                  # By ref from dom output
 agent-view click --pos 100,200      # By coordinates (for canvas)
+agent-view click 5 --double         # Double-click (fires dblclick handlers)
 ```
 
 ### `fill`
@@ -464,6 +465,13 @@ agent-view eval --json "({ buttons: document.querySelectorAll('button').length }
 ```
 
 Output is capped at 64 KB. Thrown exceptions and syntax errors propagate as non-zero exit with the CDP error message.
+
+> **Note — execution context.** `agent-view eval` runs in the page's **main world** via `Runtime.evaluate`. Only values reachable from the main-world `window` are visible. To expose your API for `eval` (and `watch`), attach it to `window`:
+> - Vanilla / browser: `window.myApi = { ... }`
+> - Electron preload with `contextIsolation: true`: `contextBridge.exposeInMainWorld('myApi', { ... })`
+> - Tauri / WebView2: same — assign to `window` from your bootstrap script
+>
+> Anything kept inside an isolated-world preload without `contextBridge` will be invisible to `eval` — `eval "typeof window.myApi"` will return `"undefined"` even though the value exists in the preload context.
 
 ### `console`
 

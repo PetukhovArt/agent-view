@@ -48,6 +48,7 @@ agent-view dom --diff                   # Lines changed since last dom call (+ a
 ```bash
 agent-view click <ref>                  # Click element by ref from dom output
 agent-view click --pos 100,200          # Click by coordinates (for canvas)
+agent-view click <ref> --double         # Double-click (fires dblclick handlers); works with --filter / --pos too
 agent-view fill <ref> "text"            # Type into input field
 agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
 agent-view drag --from-pos 50,80 --to-pos 200,300  # Drag by coordinates (for canvas / Pixi)
@@ -88,6 +89,7 @@ When to reach for `eval` instead of `dom`:
 - The truth lives in JS state, not the DOM (Pinia/Vuex/Redux/Zustand store, Vue refs, computed values, app singletons).
 - The target is a worker (`shared_worker`, `service_worker`, `worker`) — DOM doesn't exist there.
 - You need a precise number/string answer, not a tree to scan.
+- Verifying a `window.*` API or globally-exposed object exists. `eval` runs in the page's **main world**, so anything set on `window` directly or exposed via `contextBridge.exposeInMainWorld` is reachable. APIs placed only in an isolated-world preload (without `contextBridge`) will NOT be visible — that is not an agent bug, that is the host app's wiring.
 
 ### Reactive State (`watch`)
 
@@ -170,6 +172,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Element existence / text / role | `dom --filter` | Cheapest, structured, no vision tokens |
 | Count of matching elements | `dom --filter X --count` | Single integer, no tree output, no ref mutations |
 | App state, store contents, computed values | `eval "expr"` | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable |
+| Does `window.X` / a globally-exposed API exist? | `eval "typeof window.X"` | DOM doesn't show JS globals; only authoritative check |
 | State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
 | Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
@@ -202,6 +205,8 @@ These heuristics catch real bugs. Skipping them is how recipes silently pass whi
 5. **Reload checkpoint is not optional.** If the recipe has a `## Round-Trip Checkpoint` or `## Invariants` section mentioning reload/save/persistence — run it. If it does not, but the feature mutated persisted structure — run one anyway: `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift is a real bug, not a "fixed-up on save".
 
 6. **Recipe-stated invariants run first or fail closed.** If the recipe has an `## Invariants` section, execute those steps before the action-specific evidence commands. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep running the remaining steps, tag them as "trust-impaired until invariant restored".
+
+7. **Never claim a `window.*` API is missing without `eval`.** Before reporting "API not exposed" / "global X doesn't exist" / "the host doesn't expose Y", you MUST run `agent-view eval "typeof window.X"` and report the literal result (`"undefined"` / `"object"` / `"function"`). DOM scraping cannot answer this question — globals are not in the AX tree. If `eval` returns `"undefined"`, the API really is absent from the main world; if it returns anything else, the API is reachable and your earlier conclusion was wrong. No exceptions, no "I checked the source code instead".
 
 ### Recipe Execution Mode (when a recipe file exists)
 

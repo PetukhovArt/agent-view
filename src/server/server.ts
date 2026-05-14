@@ -507,13 +507,17 @@ export class AgentViewServer {
     const conn = await this.getPageSession(req, targetId)
     const cacheKey = `${req.port}:${targetId}`
 
+    const clicks = argBool(req.args, 'double') ? 2 : 1
+    const clickOpts = clicks > 1 ? { clicks } : undefined
+    const verb = clicks > 1 ? 'Double-clicked' : 'Clicked'
+
     if (req.args.pos && typeof req.args.pos === 'object') {
       const pos = req.args.pos as Record<string, unknown>
       const x = typeof pos.x === 'number' ? pos.x : 0
       const y = typeof pos.y === 'number' ? pos.y : 0
-      await conn.clickAtPosition(x, y)
+      await conn.clickAtPosition(x, y, clickOpts)
       this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `Clicked at (${x}, ${y})` }
+      return { ok: true, data: `${verb} at (${x}, ${y})` }
     }
 
     const clickFilter = argStr(req.args, 'filter')
@@ -524,9 +528,9 @@ export class AgentViewServer {
       if (!found) {
         return { ok: false, error: `No element found matching "${filter}"` }
       }
-      await conn.clickByNodeId(found.backendDOMNodeId)
+      await conn.clickByNodeId(found.backendDOMNodeId, clickOpts)
       this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `Clicked "${found.name}"` }
+      return { ok: true, data: `${verb} "${found.name}"` }
     }
 
     const ref = argNum(req.args, 'ref')
@@ -538,9 +542,9 @@ export class AgentViewServer {
       return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
     }
 
-    await conn.clickByNodeId(entry.backendDOMNodeId)
+    await conn.clickByNodeId(entry.backendDOMNodeId, clickOpts)
     this.axTreeCache.invalidate(cacheKey)
-    return { ok: true, data: `Clicked ref ${ref}` }
+    return { ok: true, data: `${verb} ref ${ref}` }
   }
 
   private async handleDrag(req: ServerRequest): Promise<ServerResponse> {

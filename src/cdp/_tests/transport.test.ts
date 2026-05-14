@@ -208,6 +208,28 @@ describe('clickByNodeId', () => {
       expect.objectContaining({ objectId: 'obj-42' }),
     )
   })
+
+  it('clicks: 2 dispatches press/release with clickCount sequence 1,1,2,2', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.clickByNodeId(42, { clicks: 2 })
+
+    const mouseEvents = mockDispatchMouse.mock.calls.map((c) => ({ type: c[0].type, clickCount: c[0].clickCount }))
+    expect(mouseEvents).toEqual([
+      { type: 'mousePressed', clickCount: 1 },
+      { type: 'mouseReleased', clickCount: 1 },
+      { type: 'mousePressed', clickCount: 2 },
+      { type: 'mouseReleased', clickCount: 2 },
+    ])
+  })
+
+  it('clickAtPosition with clicks: 2 also produces 4 events', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.clickAtPosition(50, 60, { clicks: 2 })
+
+    expect(mockDispatchMouse).toHaveBeenCalledTimes(4)
+    const allAtSamePos = mockDispatchMouse.mock.calls.every((c) => c[0].x === 50 && c[0].y === 60)
+    expect(allAtSamePos).toBe(true)
+  })
 })
 
 describe('dragBetweenPositions', () => {

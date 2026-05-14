@@ -29,7 +29,7 @@ import type { AgentViewConfig } from '../config/types.js'
 const program = new Command()
   .name('agent-view')
   .description('Visual verification CLI for desktop apps')
-  .version('0.8.2')
+  .version('0.9.0')
 
 program
   .command('init')
@@ -76,6 +76,7 @@ program
   .option('-f, --filter <text>', 'Find element by text and click')
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
   .option('-w, --window <id>', 'Target window ID or name')
+  .option('--double', 'Double-click (fires dblclick handlers)')
   .action(async (ref, options) => {
     const config = requireConfig()
     await runClick(config, ref, options)

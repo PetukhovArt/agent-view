@@ -46,6 +46,11 @@ export enum MouseButton {
   Middle = 'middle',
 }
 
+export type ClickOpts = {
+  /** Number of clicks at the same position (1 = single, 2 = double-click). Default 1. */
+  clicks?: number
+}
+
 export type DragOpts = {
   /** Number of intermediate `mouseMoved` events between press and release. Default 10. */
   steps?: number
@@ -110,8 +115,8 @@ export type PageSession = RuntimeSession & {
   /** Returns matching nodes by accessible name/role. null = API unavailable; [] = no match. */
   queryAXTree: (params: { accessibleName?: string; role?: string }) => Promise<AXNode[] | null>
   captureScreenshot: (opts?: ScreenshotOpts) => Promise<ScreenshotResult>
-  clickByNodeId: (backendDOMNodeId: number) => Promise<void>
-  clickAtPosition: (x: number, y: number) => Promise<void>
+  clickByNodeId: (backendDOMNodeId: number, opts?: ClickOpts) => Promise<void>
+  clickAtPosition: (x: number, y: number, opts?: ClickOpts) => Promise<void>
   fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>
   /** Resolve box-model center for an element. `scrollIntoView` defaults to true. */
   getBoxCenter: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<Point>

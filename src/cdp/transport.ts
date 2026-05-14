@@ -16,6 +16,7 @@ import {
   type ConsoleMessage,
   type EvaluateOpts,
   type DragOpts,
+  type ClickOpts,
   type Point,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
@@ -299,10 +300,18 @@ export async function connectToPage(
     } catch { /* ignore refresh errors — next queryAXTree call will fall back */ }
   })
 
-  async function dispatchClick(x: number, y: number): Promise<void> {
-    const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
-    const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
-    await Promise.all([pressed, released])
+  async function dispatchClick(x: number, y: number, opts?: ClickOpts): Promise<void> {
+    const clicks = Math.max(1, opts?.clicks ?? 1)
+    if (clicks === 1) {
+      const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+      const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+      await Promise.all([pressed, released])
+      return
+    }
+    for (let i = 1; i <= clicks; i++) {
+      await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: i })
+      await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: i })
+    }
   }
 
   async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<void> {
@@ -427,13 +436,13 @@ export async function connectToPage(
       return { buffer: Buffer.from(data, 'base64'), format: 'jpeg' }
     },
 
-    async clickByNodeId(backendNodeId: number): Promise<void> {
+    async clickByNodeId(backendNodeId: number, opts?: ClickOpts): Promise<void> {
       const { x, y } = await resolveBoxCenter(backendNodeId, true)
-      await dispatchClick(x, y)
+      await dispatchClick(x, y, opts)
     },
 
-    async clickAtPosition(x: number, y: number): Promise<void> {
-      await dispatchClick(x, y)
+    async clickAtPosition(x: number, y: number, opts?: ClickOpts): Promise<void> {
+      await dispatchClick(x, y, opts)
     },
 
     async getBoxCenter(backendNodeId: number, opts?: { scrollIntoView?: boolean }): Promise<Point> {

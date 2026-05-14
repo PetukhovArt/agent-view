@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.0] - 2026-05-14
+
+Double-click support and main-world `eval` semantics documented to close a recurring false-negative "API not exposed" pattern.
+
+### Added
+- `agent-view click --double` — double-click via CDP `clickCount` 1,1,2,2 sequence (no artificial delay; same code path for `<ref>`, `--filter`, and `--pos`). Fires DOM `dblclick` handlers.
+
+### Documentation
+- `verify` skill: hard rule (Execution discipline #7) — agents MUST run `agent-view eval "typeof window.X"` before claiming a `window.*` API is missing. Companion bullet in the `eval` section explaining main-world / `contextBridge` semantics, plus a row in the "Picking the right tool" table.
+- README: new note in the `eval` section spelling out that `Runtime.evaluate` runs in the page's main world and showing the three ways to expose an API (vanilla `window.x = ...`, Electron `contextBridge.exposeInMainWorld`, Tauri/WebView2 bootstrap). Closes a class of false-negative "API not exposed" reports.
+
 ## [0.8.2] - 2026-05-12
 
 Tauri launch resilience, structured port-conflict detection, and verify-skill rigor edition.
