@@ -5,9 +5,9 @@
 </div>
 
 <p align="center">
-    <a href="https://npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/v/@petukhovart/agent-view?color=yellow" alt="npm version" /></a>
-    <a href="https://npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/dt/@petukhovart/agent-view?color=blue" alt="npm downloads" /></a>
-    <a href="https://npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/unpacked-size/@petukhovart/agent-view?color=purple&label=size" alt="package size" /></a>
+    <a href="https://www.npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/v/@petukhovart/agent-view?color=yellow" alt="npm version" /></a>
+    <a href="https://www.npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/dt/@petukhovart/agent-view?color=blue" alt="npm downloads" /></a>
+    <a href="https://www.npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/unpacked-size/@petukhovart/agent-view?color=purple&label=size" alt="package size" /></a>
     <a href="https://github.com/PetukhovArt/agent-view/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@petukhovart/agent-view?color=green" alt="license" /></a>
     <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/@petukhovart/agent-view" alt="node" /></a>
     <a href="https://github.com/PetukhovArt/agent-view/stargazers"><img src="https://img.shields.io/github/stars/PetukhovArt/agent-view?style=flat&color=orange" alt="github stars" /></a>
@@ -321,15 +321,15 @@ Full form with all optional fields:
 }
 ```
 
-| Field               | Required | Description                                                                                               |
-|---------------------|----------|-----------------------------------------------------------------------------------------------------------|
-| `runtime`           | yes      | `"electron"`, `"tauri"`, or `"browser"`                                                                   |
-| `port`              | yes      | CDP debugging port                                                                                        |
-| `launch`            | no       | Command to start the app                                                                                  |
-| `webgl.engine`      | no       | `"pixi"` (scene extractor architecture supports adding more engines)                                      |
-| `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default; opt-in for arbitrary JS execution         |
-| `consoleBufferSize` | no       | Per-target console ring capacity. Default `500`                                                           |
-| `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to. Default `["page", "shared_worker", "service_worker"]` |
+| Field               | Required | Description                                                                                                                                           |
+|---------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `runtime`           | yes      | `"electron"`, `"tauri"`, or `"browser"`                                                                                                               |
+| `port`              | yes      | CDP debugging port. Integer in range `1`–`65535`                                                                                                      |
+| `launch`            | yes      | Shell command used by `agent-view launch` to start the app (e.g. `"npm run dev"`). Pass an empty string if you always start the app yourself          |
+| `webgl.engine`      | no       | Scene-graph engine. Currently `"pixi"` ships an adapter; the architecture is pluggable for adding more engines                                        |
+| `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default; opt-in for arbitrary JS execution                                                     |
+| `consoleBufferSize` | no       | Per-target console ring capacity. Positive integer. Default `500`                                                                                     |
+| `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to on first call. Any subset of `["page", "iframe", "shared_worker", "service_worker", "worker"]`. Default `["page", "shared_worker", "service_worker"]` |
 
 ---
 

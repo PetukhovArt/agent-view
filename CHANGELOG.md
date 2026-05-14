@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.2] - 2026-05-14
+
+Follow-up to 0.9.1. Documentation-only.
+
+### Documentation
+- Config table: corrected `launch` to required (the type and validator both require it) and documented the range/valid-value constraints for `port`, `consoleBufferSize`, and `consoleTargets` (the latter accepts any subset of `page` / `iframe` / `shared_worker` / `service_worker` / `worker`).
+- README header badges: switched the three npm-page links from `npmjs.com` to `www.npmjs.com` (canonical host; some Markdown renderers don't follow the 308 redirect for scoped packages).
+
 ## [0.9.1] - 2026-05-14
 
 Documentation-only release. Major README restructure. No code or CLI changes.
