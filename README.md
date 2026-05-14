@@ -1,89 +1,246 @@
-# agent-view
+<div align="center">
+    <img src="assets/logo.svg" alt="agent-view logo" width="160" height="160">
+    <h1>agent-view</h1>
+    <p><b>DevTools-level access for AI agents. Electron, Tauri, Chromium.</b></p>
+</div>
 
-**Give your AI agent eyes and hands for complex desktop apps verification**
+<p align="center">
+    <a href="https://npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/v/@petukhovart/agent-view?color=yellow" alt="npm version" /></a>
+    <a href="https://npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/dt/@petukhovart/agent-view?color=blue" alt="npm downloads" /></a>
+    <a href="https://npmjs.com/package/@petukhovart/agent-view"><img src="https://img.shields.io/npm/unpacked-size/@petukhovart/agent-view?color=purple&label=size" alt="package size" /></a>
+    <a href="https://github.com/PetukhovArt/agent-view/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@petukhovart/agent-view?color=green" alt="license" /></a>
+    <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/@petukhovart/agent-view" alt="node" /></a>
+    <a href="https://github.com/PetukhovArt/agent-view/stargazers"><img src="https://img.shields.io/github/stars/PetukhovArt/agent-view?style=flat&color=orange" alt="github stars" /></a>
+</p>
 
-AI coding agents can write code, run tests, and read logs — but they can't *see* what the app actually looks like. Without visual verification, an agent is essentially **coding blind** — builds pass, tests are green, but the login form is broken, the button is off-screen, or the modal never appears.
+<p align="center">
+    <a href="#quickstart-claude-code">Quickstart</a> ·
+    <a href="#features">Features</a> ·
+    <a href="#commands">Commands</a> ·
+    <a href="#workflow-with-claude-code">Workflow</a> ·
+    <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-agent-view bridges that gap: it connects to any Chromium-based desktop app via Chrome DevTools Protocol and lets the agent inspect, interact, and verify.
+> Agents can read your code and your tests. What they can't see: whether the button is actually disabled, whether the modal opened, whether the store mutated. **agent-view** is one CLI that talks to your Electron, Tauri, or Chromium app over Chrome DevTools Protocol so the agent can answer those questions itself.
 
-Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but works with any AI agent or automation pipeline that can call CLI commands.
+Works with any agent that can run shell commands. There's a Claude Code plugin if you want the smoothest path.
 
-## 5-minute quickstart
+---
 
-1. **[Install](#install--update)** — `npm i -g @petukhovart/agent-view` plus the Claude Code plugin.
-2. **[Enable CDP](#enabling-cdp) in your app** — one line in your Electron `main.ts`, gated to dev builds.
-3. **`agent-view init`** in your project — then add `"allowEval": true` to the generated `agent-view.config.json`.
-4. **`agent-view launch`** — starts your app and waits for CDP readiness.
-5. **In Claude Code:** describe what you want verified — see [example prompts](#recommended-workflow-with-claude-code).
+## Why agent-view
 
-Each step links to the full explanation below.
+- Reads state inside `SharedWorker`, `ServiceWorker`, and dedicated workers. Half of a modern app's state lives there, and most browser-automation tools don't follow it.
+- Every command takes `--window <id>`. Settings, tray, and detached windows in Electron and Tauri apps work the same as the main window.
+- Electron, Tauri (WebView2 and WebKit), and plain Chromium. One CLI, same commands.
+- `click`, `fill`, and `drag` fire real CDP input events. Vue `v-model`, React controlled inputs, and native fields actually accept the value; synthetic DOM events fail silently there.
+- `watch` emits RFC-6902 JSON-patches of any JS expression between two events. Answers "what mutated after the click?" without parsing screenshots.
+- `dom` returns the accessibility tree with `[ref=N]` handles. `--compact` cuts deep trees by 40–60%; `--diff`, `--count`, and `--max-lines` keep output bounded. `screenshot --crop` and WebP scaling do the same for vision tokens.
+- Lazy CDP daemon, one persistent socket, 300 ms AX-tree cache. `dom → click → dom` in about 17 ms.
 
-## What it does
+---
 
-- **DOM accessibility tree** with ref IDs — compact, LLM-friendly, with text/role filters; `--compact` merges single-child chains for 40–60% fewer tokens, `--count` returns just the match count, `--max-lines` caps output, `--diff` emits only what changed since the last call
-- **Screenshots** — full-res PNG, scaled WebP (~3–12× fewer vision tokens), or `--crop <filter>` to a single element bounding box
-- **Interaction** — click, fill, and drag by ref or coordinates; works with Vue/React/native frameworks
-- **JS state via `eval`** — read store contents, computed values, async results without scraping the DOM
-- **Reactive state via `watch`** — stream JSON-patch diffs of any expression (store, ref, computed) until a condition is met
-- **Console capture** — `console.log/warn/error` per page and per worker, with level/since filters and `--follow --until <pattern>` for early exit on a matching log
-- **Worker access** — SharedWorker, ServiceWorker, dedicated Worker visible alongside pages; fuzzy `--target` resolution everywhere (id → title → URL)
-- **Canvas / WebGL scene graph** — PixiJS today, engine-pluggable; `--compact` mirrors the DOM mode
-- **Design-conformance verification** — pair screenshot commands with local design references (Figma export, hand-off
-  PNGs, any image on disk) inside a verify-recipe; the `verify` skill compares screenshots against the references inline
+## Quickstart (Claude Code)
 
-## Why CLI, not MCP?
+> Using Cursor / Aider / Cline / CI? Jump to [Other agents](#using-agent-view-with-other-agents-cursor-aider-cline-copilot-ci).
 
-Most alternatives in this space are MCP servers with 30+ tool definitions loaded into context on every session. That burns tokens before the agent even starts working.
-
-agent-view is a CLI. One Bash call, compact text output, zero schema overhead. The accessibility tree comes back as plain text — not wrapped in JSON-RPC with metadata. For an agent that runs dozens of verification steps, the token savings add up fast.
-
-And CLI works everywhere — Claude Code, Copilot, Codex, custom pipelines, CI. No MCP client required.
-
-## Install & Update
-
-### Claude Code (recommended)
-
-Two steps — both required:
+**1. Install the CLI and create a config:**
 
 ```bash
-# 1. Install the plugin — adds two skills: verify (run checks against a live app) and verify-recipe (author a verification plan)
+npm install -g @petukhovart/agent-view   # one-time, global
+cd your-project
+agent-view init                          # writes agent-view.config.json (runtime, port, launch script)
+```
+
+`init` auto-detects most projects. Review the generated `launch` field if your dev command is non-standard, and set `"allowEval": true` if you want recipes to use `eval`/`watch`. Prefer to write the config by hand? See [Config](#config) for the field list.
+
+**2. Install the Claude Code plugin** (adds the `verify` and `verify-recipe` skills):
+
+```text
 /plugin marketplace add PetukhovArt/agent-view
 /plugin install agent-view@agent-view
-
-# 2. Install the CLI — the skill calls these binaries; the plugin doesn't bundle them
-npm install -g @petukhovart/agent-view
 ```
 
-The plugin ships two skills. **`verify`** executes visual and runtime checks against a running app. **`verify-recipe`** generates a `.claude/verify-recipes/<slug>.md` file — a disciplined, cheapest-first command sequence for a feature or bugfix — that you or any AI agent can run later. Trigger it with phrases like "write a verify-recipe for the login fix" or "generate a verification plan for this feature".
+**3. Open a CDP debug port** in your app, matching the `port` in your config. Pick your runtime:
 
-For the canonical author-once / re-run flow, see [Recommended workflow with Claude Code](#recommended-workflow-with-claude-code) below.
+<details open>
+<summary><b>Electron</b> — top of <code>main.ts</code>, before <code>app.whenReady()</code></summary>
 
-Verify:
+```js
+import { app } from 'electron';
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9876');
+}
+```
+</details>
+
+<details>
+<summary><b>Tauri 2</b> (WebView2 / Windows) — env var passed to <code>tauri dev</code></summary>
+
+In `package.json`, wrap the dev script with [`cross-env`](https://www.npmjs.com/package/cross-env) so it works on Windows, macOS and Linux shells:
+
+```json
+{
+  "scripts": {
+    "dev": "cross-env WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9876 tauri dev"
+  }
+}
+```
+
+Then `npm run dev` as usual. Devtools must be enabled in `tauri.conf.json` (default in `tauri dev`; for release builds, enable the `devtools` Cargo feature). macOS/Linux WebKit use different env vars; see [Enabling CDP](#enabling-cdp).
+</details>
+
+<details>
+<summary><b>Plain Chromium app</b> — launch flag</summary>
 
 ```bash
-agent-view --version   # 0.5.0+
+chromium --remote-debugging-port=9876
+```
+</details>
+
+**4. In Claude Code, describe what you want verified:**
+
+```text
+Verify: after clicking Save, the button must be disabled until network completes.
+No console errors.
 ```
 
-### Standalone CLI (any other agent, CI, or scripting)
+The `verify` skill starts your app via `agent-view launch`, runs the cheapest checks first (`eval` before `dom` before `screenshot`), and reports pass/fail. For repeatable checks, ask it to author a recipe first; see [Workflow with Claude Code](#workflow-with-claude-code).
+
+---
+
+## Manual CLI usage
+
+When you want to drive the CLI yourself (other agents, CI, or just to poke around):
 
 ```bash
-npm install -g @petukhovart/agent-view
+agent-view init                      # writes agent-view.config.json; auto-detects runtime/port/launch
+agent-view launch                    # starts the app, waits for CDP, idempotent
+agent-view dom --filter "Submit"     # AX tree, with [ref=N] handles
+agent-view click 12                  # use a ref from the dom output
+agent-view eval "store.state.user"   # requires allowEval
 ```
 
-Everything works from this alone — `agent-view dom`, `screenshot`, `eval`, etc. Skip the plugin step.
+Full command surface in [Commands](#commands). For non-Claude-Code agents, see also [Other agents](#using-agent-view-with-other-agents-cursor-aider-cline-copilot-ci).
 
-### Update
+---
+
+## How it works
+
+```
+┌──────────────┐    JSON over TCP        ┌─────────────────┐                 ┌──────────────┐
+│  agent-view  │  (token-auth, local)    │  Lazy daemon    │      CDP        │   Your app   │
+│     CLI      │ ──────────────────────▶ │  127.0.0.1:47922│ ──────────────▶ │  (Electron / │
+│              │                         │                 │   WebSocket     │   Tauri /    │
+│  one shot    │ ◀────────────────────── │  cache + reuse  │ ◀────────────── │   Chromium)  │
+└──────────────┘    compact text         └─────────────────┘                 └──────────────┘
+                                           ▲   spawned on first call
+                                           │   shuts down after 5 min idle
+                                           │   reuses one CDP socket across commands
+```
+
+The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CDP socket, a 300ms AX-tree cache, parallel CDP calls inside `click`. CLI commands themselves are stateless. Each one is a single shell call you can drop into a script or a recipe.
+
+---
+
+## Features
+
+| Command       | What it gives the agent                                                                |
+|---------------|-----------------------------------------------------------------------------------------|
+| `dom`         | Accessibility tree with `[ref=N]` handles. Flags: `--filter`, `--compact`, `--count`, `--max-lines`, `--diff`. |
+| `screenshot`  | PNG, or scaled WebP, or `--crop <element>` for one element only. Cuts vision tokens.    |
+| `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native and HTML5/pointer DnD. |
+| `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
+| `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
+| `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
+| `wait`        | Block until an element appears (default 10s).                                            |
+| `scene`       | WebGL scene graph (PixiJS today, engine-pluggable). `--compact` and `--diff` mirror `dom`. |
+| `snap`        | DOM + scene + optional screenshot in one call.                                           |
+| `targets`     | Enumerate pages, iframes, shared/service/dedicated workers.                              |
+| `discover` / `launch` / `init` / `stop` | Lifecycle and setup.                                          |
+
+Full flag reference in [Commands](#commands).
+
+---
+
+## Workflow with Claude Code
+
+The plugin adds two skills built around an author-once / re-run loop:
+
+- `verify-recipe` interviews you about a feature or fix, then writes `.claude/verify-recipes/<slug>.md` with Repro Steps, Evidence Commands (cheapest first: `eval` before `dom` before `screenshot`), and an optional Design Conformance table mapping screenshots to local reference images.
+- `verify` reads a recipe (or runs ad-hoc), executes the commands against the live app, and reports pass/fail.
+
+```mermaid
+flowchart LR
+    subgraph Author["Phase 1 — author once"]
+      direction TB
+      Dev1["Developer"] -->|prompt + plan/commits| Recipe["verify-recipe<br/>skill"]
+      Recipe -->|writes| File[".claude/verify-recipes/<br/>&lt;slug&gt;.md"]
+    end
+
+    subgraph Run["Phase 2 — run after every iteration"]
+      direction TB
+      Dev2["Developer"] -->|"run the recipe"| Verify["verify skill"]
+      File -.->|read| Verify
+      Verify -->|"dom / eval / click /<br/>screenshot / watch"| CLI["agent-view CLI"]
+      CLI -->|CDP| App["Live app"]
+      App -->|results| Verify
+      Verify -->|pass/fail + design verdict| Dev2
+    end
+```
+
+### Phase 1: author
+
+```text
+Generate a verify-recipe for commits <hash1>..<hash2>.
+Source plan: .claude/plans/2026-04-27-login-redirect.md
+Symptom: after login, redirect went to /home instead of /dashboard.
+
+Design references (optional):
+- /abs/path/figma-exports/post-login.png   → "post-login dashboard"
+```
+
+### Phase 2: run
+
+```text
+Run the verify-recipe at .claude/verify-recipes/login-redirect.md.
+```
+
+When something fails:
+
+```text
+Step 4 failed (zone filter not mutating store). Fix and re-run that step plus step 7.
+```
+
+### One-shot (no plan, no persistent recipe)
+
+```text
+Verify: after clicking Save, the button must be disabled until network completes. No console errors.
+```
+
+### Anti-patterns
+
+- "Just verify the feature" with no symptom. The recipe author can't pick the cheapest signal without knowing what "works" means.
+- Pasting Figma URLs. agent-view doesn't fetch from Figma; export to PNG and pass the local path.
+- 50 assertions in one recipe. Split per-feature; a recipe should run in under 2 minutes.
+
+---
+
+## Using agent-view with other agents (Cursor, Aider, Cline, Copilot, CI)
+
+The CLI is the whole product. Any agent that can run shell commands can use it:
 
 ```bash
-# Update the CLI to the latest version
-npm update -g @petukhovart/agent-view
-
-# Update the Claude Code plugin (refreshes skills from the marketplace)
-/plugin marketplace update agent-view
-/plugin install agent-view@agent-view   # re-run to pick up new skill versions
+agent-view discover                  # JSON: window IDs, titles, URLs
+agent-view dom --filter "Submit"     # AX tree, with refs
+agent-view fill 3 "hello@example.com"
+agent-view click 7
+agent-view eval "store.state.user.role"
+agent-view screenshot --crop "Sidebar" --scale 0.5
 ```
 
-The two are independent — bump the CLI when a new release ships features (see `CHANGELOG.md`), bump the plugin when skill instructions change.
+For agents that benefit from a system-prompt shim, copy the gist of [`skills/verify/SKILL.md`](skills/verify/SKILL.md) into your agent's instructions. The DOM-first workflow and tool-selection table are framework-agnostic.
+
+---
 
 ## Enabling CDP
 
@@ -91,7 +248,7 @@ agent-view talks to your app over Chrome DevTools Protocol. Your app must be lau
 
 ### Recommended: in code (reliable, works with any build tool)
 
-Add to your Electron main process, **before `app.whenReady()`** (top of `main.ts`/`main.js`, right after the `electron` import — switches set after the app is ready are ignored):
+Add to your Electron main process, **before `app.whenReady()`** (top of `main.ts`/`main.js`, right after the `electron` import; switches set after the app is ready are ignored):
 
 ```js
 import { app } from 'electron';
@@ -99,8 +256,7 @@ import { app } from 'electron';
 app.commandLine.appendSwitch('remote-debugging-port', '9876');
 ```
 
-> Any free port works — `9876` is just an example. Avoid `9222` (Chrome's own default remote-debugging port) to prevent
-> collisions when Chrome is open.
+> Any free port works; `9876` is just an example. Avoid `9222` (Chrome's own default remote-debugging port) to prevent collisions when Chrome is open.
 
 **Production safety:** an open CDP port in a signed/notarized build is a remote-code-execution surface. Gate it on `!app.isPackaged` so it only opens in dev:
 
@@ -133,149 +289,9 @@ npx electron-vite dev -- --remote-debugging-port=9876
 curl -s http://localhost:9876/json/version
 ```
 
-If you see a JSON response with process info — you're good.
+A JSON response with process info means CDP is reachable.
 
-## Quick start with Claude Code (Prompting)
-
-Assumes the plugin and CLI are installed (see [Install & Update](#install--update)) and CDP is enabled in your app (
-see [Enabling CDP](#enabling-cdp)).
-
-**1. Generate config once:**
-
-```bash
-cd your-electron-project
-agent-view init   # writes agent-view.config.json — auto-detects runtime, port, launch script, webgl engine
-```
-
-Then open `agent-view.config.json` and add `"allowEval": true` if you want recipes to use `eval` / `watch` (most do —
-store/state assertions are 100× cheaper than DOM scraping). Off by default for security; see [Config](#config) for the
-full field list.
-
-**2. Start your app:**
-
-```bash
-agent-view launch   # uses the `launch` command from config, waits for CDP readiness, idempotent
-```
-
-(Or start it yourself with `npm run dev` etc. — `launch` is just a convenience.)
-
-**3. From Claude Code, ask for a verification:**
-
-```text
-The "Save" button on the Settings dialog stayed enabled while a save was in flight.
-I added a `saving` ref bound to :disabled. Verify it works:
-- after click, button must be disabled until network completes
-- no console errors in the flow
-```
-
-Claude picks the `verify` skill, runs a handful of `eval` / `dom --filter` / `console` calls against your live app,
-reports what passed and what failed. No CLI commands typed by you.
-
-For a repeatable, multi-step verification (PRD/plan-driven, with optional design-mockup conformance),
-see [Recommended workflow with Claude Code](#recommended-workflow-with-claude-code) — it's the canonical 3-phase prompt
-flow this package is built around.
-
-### Without Claude Code (manual CLI / CI / other agents)
-
-If you're scripting from CI or another agent, the CLI works standalone:
-
-```bash
-agent-view discover                  # List all windows (JSON)
-agent-view dom --filter "Submit"     # Accessibility tree, filtered, with ref IDs
-agent-view fill 3 "hello@example.com"
-agent-view click 7
-agent-view eval "store.state.user.role"
-agent-view screenshot --crop "Sidebar" --scale 0.5
-```
-
-Full surface in [Commands](#commands) below.
-
-## Recommended workflow with Claude Code
-
-A repeatable, token-efficient flow for "I shipped a feature/fix → confirm it actually works visually and at runtime". Two phases, each driven by a focused prompt.
-
-```mermaid
-flowchart TD
-    Dev["Developer<br/>in Claude Code"] -->|prompt| Agent["Main Claude agent<br/>(Opus / Sonnet)"]
-
-    Agent -->|"verify ad-hoc"| Verify["verify skill"]
-    Agent -->|"write recipe"| Recipe["verify-recipe skill"]
-
-    Recipe -->|interview| Dev
-    Recipe -->|writes| File[".claude/verify-recipes/&lt;slug&gt;.md"]
-    File -.->|read on next run| Verify
-
-    Verify -->|"agent-view dom / eval / click /<br/>screenshot / watch / console"| CLI["agent-view CLI"]
-    CLI -->|CDP| App["Live app<br/>(Electron / Tauri / Browser)"]
-    App -->|stdout / image paths| Verify
-
-    Verify -->|"pass / fail summary<br/>+ design conformance verdict"| Dev
-
-    classDef skill fill:#e8f0ff,stroke:#3060a0,color:#0a1f3d
-    classDef tool fill:#fff4d6,stroke:#a07020,color:#3d2a05
-    class Verify,Recipe skill
-    class CLI tool
-```
-
-### Phase 1 — Author the verification plan (once)
-
-Generate the recipe **once**, from a PRD / plan file / Jira ticket / commit range. The recipe is reusable — re-run after every iteration on the same feature.
-
-```text
-Generate a verify-recipe for the changes in commits <hash1>..<hash2>.
-Source plan: .claude/plans/2026-04-27-login-redirect.md
-Original symptom: after login, redirect went to /home instead of /dashboard.
-
-Design references (if any):
-- /abs/path/figma-exports/login-success.png    → label "post-login dashboard"
-- /abs/path/figma-exports/error-state.png      → label "invalid creds error"
-```
-
-What this triggers: the `verify-recipe` skill interviews you (if more context needed), then writes a `.claude/verify-recipes/<slug>.md` with `Repro Steps`, `Evidence Commands` (cheapest-first: `eval` / `dom --filter` before `screenshot`), `Regression Checks`, and — if you provided design refs — a `Design Conformance` table mapping screenshot commands to expected reference images.
-
-**Tip:** if you implemented from a Figma file via the `figma-implement-design` skill, it likely already saved exports somewhere on disk — pass those paths. agent-view does NOT fetch from Figma URLs; provide local files only.
-
-### Phase 2 — Run the recipe
-
-```text
-Run the verify-recipe at .claude/verify-recipes/<slug>.md.
-```
-
-What this triggers: the `verify` skill reads the recipe, performs the `Repro Steps` setup, runs each `Evidence Command` against the live app, compares output to the recipe's `Expected:` lines, and reports pass/fail per step. If the recipe has a `Design Conformance` section, the same skill captures the screenshots, opens both actual and expected images, and reports `match` / `minor_mismatch` / `major_mismatch` per pair — all inline, in the same conversation.
-
-When something fails, ask the main agent to fix and re-run only the affected steps:
-
-```text
-Step 4 failed (zone filter not mutating store). Fix and re-run that step plus step 7.
-```
-
-### One-shot prompt (when there's no plan to convert)
-
-For small fixes where you don't want a persistent recipe file:
-
-```text
-The "Save" button on the Settings dialog wasn't disabling while a save was in flight.
-I added a `saving` ref and bound it to :disabled. Verify it works:
-- after click, button must be disabled until network completes
-- no console errors
-- visual: button greys out (compare to /abs/path/saving-state.png if one is provided)
-```
-
-Claude will pick the right skill (usually `verify` ad-hoc mode), run a handful of `eval` / `dom --filter` / `console` calls, and only screenshot if the visual claim needs it.
-
-### Anti-patterns to avoid
-
-- "Just verify the feature" with no plan or symptom — the recipe author can't pick the cheapest signal without knowing what "works" means. Give it the symptom that motivated the fix.
-- Pasting Figma URLs and expecting agent-view to download them — it won't. Export the frames you care about to PNG first.
-- Stuffing 50 assertions into one recipe — split per-feature. A recipe should run in <2 minutes and produce a report you can read in 30 seconds.
-
-## How it works
-
-```
-CLI → TCP → Lazy Server → CDP → Your App
-```
-
-A background server connects to your app's CDP port, caches sessions, and auto-shuts down after 5 minutes of inactivity. No manual `connect` step — the server starts on first CLI call and handles connection lifecycle automatically.
+---
 
 ## Config
 
@@ -311,14 +327,15 @@ Full form with all optional fields:
 | `port`              | yes      | CDP debugging port                                                                                        |
 | `launch`            | no       | Command to start the app                                                                                  |
 | `webgl.engine`      | no       | `"pixi"` (scene extractor architecture supports adding more engines)                                      |
-| `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default — opt-in for arbitrary JS execution        |
+| `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default; opt-in for arbitrary JS execution         |
 | `consoleBufferSize` | no       | Per-target console ring capacity. Default `500`                                                           |
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to. Default `["page", "shared_worker", "service_worker"]` |
 
+---
+
 ## Commands
 
-Every command targeting a window accepts `--window <id|title-substring>` (IDs come from `discover`). Examples below omit
-it for brevity.
+Every command targeting a window accepts `--window <id|title-substring>` (IDs come from `discover`). Examples below omit it for brevity.
 
 ### `init`
 
@@ -326,7 +343,7 @@ Auto-generates config by reading `package.json`.
 
 ### `discover`
 
-Lists running app windows as JSON — window IDs, titles, URLs.
+Lists running app windows as JSON: window IDs, titles, URLs.
 
 ```bash
 agent-view discover
@@ -350,9 +367,9 @@ agent-view dom --diff               # Show only lines that changed since last ca
 
 When `--filter` is set, depth defaults to unlimited so deep matches aren't truncated.
 
-`--count` skips tree formatting and ref-store mutations entirely — useful for assertions like "does this section have N rows?" without the token cost of a full tree dump.
+`--count` skips tree formatting and ref-store mutations entirely; useful for assertions like "does this section have N rows?" without the token cost of a full tree dump.
 
-`--max-lines <n>` caps the number of output lines. When the tree exceeds the budget, output is truncated after `n-1` lines and a summary tail `… M more nodes` is appended. Refs for all nodes — including those past the cutoff — are still registered in the ref store, so a follow-up `dom --filter` or `click <ref>` works without re-running.
+`--max-lines <n>` caps the number of output lines. When the tree exceeds the budget, output is truncated after `n-1` lines and a summary tail `… M more nodes` is appended. Refs for all nodes, including those past the cutoff, are still registered in the ref store, so a follow-up `dom --filter` or `click <ref>` works without re-running.
 
 `--diff` computes a line-level diff against the previous `dom` call for the same target. The first call always returns the full tree (no prior snapshot). Subsequent calls emit only added (`+ `) and removed (`- `) lines. Returns `No changes` when the tree is identical.
 
@@ -376,10 +393,7 @@ agent-view fill 3 "hello@example.com"
 
 ### `drag`
 
-HTML5 / pointer-driven drag-and-drop via CDP `Input.dispatchMouseEvent`
-(`mousePressed` → N × `mouseMoved` → `mouseReleased`). Real mouse events, not
-synthesized JS events — works with `vue-draggable-resizable`, `react-grid-layout`,
-gridstack, kanban boards, file drop zones, map pin drags, resize handles.
+HTML5 / pointer-driven drag-and-drop via CDP `Input.dispatchMouseEvent` (`mousePressed` → N × `mouseMoved` → `mouseReleased`). Real mouse events, not synthesized JS events; works with `vue-draggable-resizable`, `react-grid-layout`, gridstack, kanban boards, file drop zones, map pin drags, resize handles.
 
 ```bash
 agent-view drag --from 42 --to 88                   # ref → ref
@@ -388,10 +402,7 @@ agent-view drag --from 42 --to-pos 640,200          # mixed
 agent-view drag --from 5 --to 9 --steps 20 --hold-ms 150
 ```
 
-`--steps` (default 10) controls intermediate `mouseMoved` events so libraries
-that throttle on movement deltas still see continuous motion. `--hold-ms`
-inserts a pause between press and the first move (some libs require >100ms
-for touch-style activation). `--button` accepts `left|right|middle`.
+`--steps` (default 10) controls intermediate `mouseMoved` events so libraries that throttle on movement deltas still see continuous motion. `--hold-ms` inserts a pause between press and the first move (some libs require >100ms for touch-style activation). `--button` accepts `left|right|middle`.
 
 ### `screenshot`
 
@@ -405,7 +416,7 @@ agent-view screenshot --crop "Sidebar"        # Crop to element bounding box (~1
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
 ```
 
-`--scale` accepts a factor in `(0, 1]`. CDP-side clip + WebP encode — recommended for agent loops where vision tokens dominate cost.
+`--scale` accepts a factor in `(0, 1]`. CDP-side clip + WebP encode; recommended for agent loops where vision tokens dominate cost.
 
 `--crop <filter>` resolves a DOM element by the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box before encoding. One tile (~1.6k vision tokens) instead of twelve (~19k) in the best case. If the filter matches nothing a warning is emitted to stderr and the full window is captured instead. Combines naturally with `--scale`.
 
@@ -441,11 +452,11 @@ agent-view wait --filter "Dashboard" --timeout 30 # Custom timeout in seconds
 
 ### `launch`
 
-Starts the app using the `launch` command from config. Polls CDP until ready (60s timeout). Idempotent — skips if already running.
+Starts the app using the `launch` command from config. Polls CDP until ready (60s timeout). Idempotent; skips if already running.
 
 ### `targets`
 
-Lists every CDP target — pages, iframes, shared/service/dedicated workers. Use this when you need access to non-page targets (e.g. an Electron app with a `SharedWorker`).
+Lists every CDP target: pages, iframes, shared/service/dedicated workers. Use this when you need access to non-page targets (e.g. an Electron app with a `SharedWorker`).
 
 ```bash
 agent-view targets                                       # all supported types
@@ -455,7 +466,7 @@ agent-view targets --json                                # machine-readable
 
 ### `eval`
 
-Runs `Runtime.evaluate` in any connectable target. **Requires `"allowEval": true` in `agent-view.config.json`** — the local socket is shared and this is the project-owner opt-in.
+Runs `Runtime.evaluate` in any connectable target. **Requires `"allowEval": true` in `agent-view.config.json`**; the local socket is shared and this is the project-owner opt-in.
 
 ```bash
 agent-view eval "document.title"
@@ -466,12 +477,12 @@ agent-view eval --json "({ buttons: document.querySelectorAll('button').length }
 
 Output is capped at 64 KB. Thrown exceptions and syntax errors propagate as non-zero exit with the CDP error message.
 
-> **Note — execution context.** `agent-view eval` runs in the page's **main world** via `Runtime.evaluate`. Only values reachable from the main-world `window` are visible. To expose your API for `eval` (and `watch`), attach it to `window`:
+> **Note on execution context.** `agent-view eval` runs in the page's **main world** via `Runtime.evaluate`. Only values reachable from the main-world `window` are visible. To expose your API for `eval` (and `watch`), attach it to `window`:
 > - Vanilla / browser: `window.myApi = { ... }`
 > - Electron preload with `contextIsolation: true`: `contextBridge.exposeInMainWorld('myApi', { ... })`
-> - Tauri / WebView2: same — assign to `window` from your bootstrap script
+> - Tauri / WebView2: same; assign to `window` from your bootstrap script
 >
-> Anything kept inside an isolated-world preload without `contextBridge` will be invisible to `eval` — `eval "typeof window.myApi"` will return `"undefined"` even though the value exists in the preload context.
+> Anything kept inside an isolated-world preload without `contextBridge` will be invisible to `eval`; `eval "typeof window.myApi"` will return `"undefined"` even though the value exists in the preload context.
 
 ### `console`
 
@@ -507,11 +518,13 @@ agent-view watch "appState" --max-changes 1                  # snapshot first ch
 agent-view watch "appState" --json                           # NDJSON, one frame per line
 ```
 
-Output frames: `init` (baseline value), `diff` (RFC 6902 ops since last frame), `error`, `stop`. SIGINT exits cleanly. Snapshot size cap 256 KB — narrow the expression (e.g. `store.cart.items.length`) when watching large objects.
+Output frames: `init` (baseline value), `diff` (RFC 6902 ops since last frame), `error`, `stop`. SIGINT exits cleanly. Snapshot size cap 256 KB; narrow the expression (e.g. `store.cart.items.length`) when watching large objects.
 
 ### `stop`
 
 Stops the background lazy server.
+
+---
 
 ## Performance
 
@@ -523,9 +536,9 @@ Built for tight `dom → click → dom` loops. Typical Electron app, ~200 AX nod
 | `dom` warm (cache hit)         | 1ms        | ~30–80ms              |
 | Full cycle `dom → click → dom` | 17ms       | ~75ms                 |
 
-What makes it fast: 300ms AX-tree cache (invalidated on `click`/`fill`/navigation; cached responses prefixed with
-`[cache]`), parallel CDP calls in `click`, `Accessibility.queryAXTree` for filter lookups, and a single persistent CDP
-WebSocket reused across commands (no relay).
+What makes it fast: 300ms AX-tree cache (invalidated on `click`/`fill`/navigation; cached responses prefixed with `[cache]`), parallel CDP calls in `click`, `Accessibility.queryAXTree` for filter lookups, and a single persistent CDP WebSocket reused across commands (no relay).
+
+---
 
 ## Troubleshooting
 
@@ -533,7 +546,7 @@ WebSocket reused across commands (no relay).
 
 1. Check the port is listening: `curl -s http://localhost:9876/json/version`
 2. For electron-vite: make sure you use `--` before the flag: `npx electron-vite dev -- --remote-debugging-port=9876`
-3. Restart the app — HMR doesn't restart the main process
+3. Restart the app; HMR doesn't restart the main process
 
 ### Stale refs after HMR
 
@@ -543,6 +556,8 @@ After hot reload, refs from previous `dom` calls become invalid. Run `agent-view
 
 Complex Electron apps may take >60s on cold start. If `agent-view launch` times out, start the app manually and use `agent-view discover` to verify.
 
+---
+
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

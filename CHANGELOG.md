@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.1] - 2026-05-14
+
+Documentation-only release. Major README restructure. No code or CLI changes.
+
+### Documentation
+- New centered header with logo (`assets/logo.svg`, Lucide `scan-eye`, MIT), badge row (npm version, downloads, package size, license, node, GitHub stars), and an in-page nav strip.
+- New "Why agent-view" section above Quickstart: seven concrete claims (worker introspection, multi-window targeting, multi-runtime support, real CDP input events, `watch` JSON-patch diffs, token-saver flags on `dom` / `screenshot`, daemon-cache performance).
+- Restructured top half: the old "5-minute quickstart", "What it does", "Why CLI, not MCP?", and "Install & Update" sections folded into a single "Quickstart (Claude Code)" with collapsible per-runtime CDP setup.
+- New mid-document layout: "Manual CLI usage", a "Features" command-summary table, and "Using agent-view with other agents".
+- Reference material moved to the end as an appendix: `Enabling CDP`, `Config`, `Commands` (full flag reference for every CLI command), `Performance`, `Troubleshooting`, `License`.
+- Removed the duplicate "Not just a CDP wrapper" subsection (its content is now covered by "Why agent-view").
+- CHANGELOG: replaced two stale references to the removed `CONTEXT.md` with the current `.claude/self/GLOSSARY.md` path.
+
 ## [0.9.0] - 2026-05-14
 
 Double-click support and main-world `eval` semantics documented to close a recurring false-negative "API not exposed" pattern.
@@ -44,7 +57,7 @@ Each release between 0.6.0 and 0.8.0 fenced in problems introduced by the previo
 - "Recipe Execution Mode" delegation logic from the `verify` skill
 - `## Bringup`, `## Manual Preconditions`, `## Machine Preconditions`, the IF/wait DSL, env-var credentials section, and dry-run validation step from the `verify-recipe` skill
 - "Three-phase preconditions" table and "Phase 2 (delegated to Haiku)" section from README
-- Subagent entries from `CONTEXT.md` and the `.claude-plugin/plugin.json` description
+- Subagent entries from the domain glossary and the `.claude-plugin/plugin.json` description
 - `agents` entry from `package.json` `files`
 
 ### Kept (from 0.6.0–0.8.0)
@@ -228,7 +241,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - `dom --filter` — depth now defaults to unlimited so deep matches aren't truncated
 - `src/cdp/console-stream.ts` — `ConsoleStream` deep module: per-target ring buffer,
   level/since/target filtering, live subscription
-- `CONTEXT.md` — domain glossary
+- `.claude/self/GLOSSARY.md` — domain glossary
 
 ### Changed
 
