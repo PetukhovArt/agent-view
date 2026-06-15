@@ -31,13 +31,18 @@ jobs:
 
       - run: pnpm test
 
-      - name: Verify tag matches package.json version
+      - name: Verify tag matches package.json and plugin.json versions
         shell: bash
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
+          PLUGIN_VERSION="$(node -p "require('./.claude-plugin/plugin.json').version")"
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match .claude-plugin/plugin.json version $PLUGIN_VERSION"
             exit 1
           fi
 
