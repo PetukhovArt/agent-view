@@ -24,6 +24,9 @@ import {
 } from '../cdp/types.js'
 import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
+import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
+import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
+import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
 import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
@@ -38,6 +41,9 @@ const TOKEN_DIR = join(homedir(), '.agent-view')
 const TOKEN_PATH = join(TOKEN_DIR, 'token')
 const EVAL_OUTPUT_CAP = 64 * 1024
 const DEFAULT_CONSOLE_TARGETS: ReadonlyArray<TargetType> = [TargetType.Page, TargetType.SharedWorker, TargetType.ServiceWorker]
+const DEFAULT_NETWORK_BUFFER = 200
+const DEFAULT_NETWORK_MAX_LINES = 50
+const NETWORK_PAGE_TARGETS = new Set<TargetType>([TargetType.Page, TargetType.Iframe])
 
 const RUNTIME_ONLY_TARGETS = new Set<TargetType>([
   TargetType.SharedWorker,
@@ -141,6 +147,9 @@ export class AgentViewServer {
   private domTextCache = new Map<string, string>()
   private axTreeCache = new AxTreeCache()
   private consoleStream = new ConsoleStream()
+  private networkStream = new NetworkStream()
+  private networkRefs = new Map<number, { targetId: string; requestId: string }>()
+  private networkNextRef = 1
   private token = ''
   private activeWatches = new Set<WatchSession>()
 
@@ -158,6 +167,7 @@ export class AgentViewServer {
     targets: (req: ServerRequest) => this.handleTargets(req),
     eval: (req: ServerRequest) => this.handleEval(req),
     console: (req: ServerRequest) => this.handleConsole(req),
+    network: (req: ServerRequest) => this.handleNetwork(req),
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
@@ -331,6 +341,7 @@ export class AgentViewServer {
     }
 
     if (await isRunning(req.port)) {
+      await this.ensureNetworkAttached(req, config).catch(() => {})
       return { ok: true, data: 'Application already running' }
     }
 
@@ -347,7 +358,32 @@ export class AgentViewServer {
       }
       throw err
     }
+    // Eager attach (ADR 0002): start capture the moment the app is ready, so page-load
+    // traffic is not missed. Best-effort — a launch must not fail on a capture hiccup.
+    await this.ensureNetworkAttached(req, config).catch(() => {})
     return { ok: true, data: 'Application launched and ready' }
+  }
+
+  /**
+   * Connect+attach NetworkStream to every page/iframe target. Idempotent per target.
+   * Recreates the stream with config-tuned capacity/captureBody while it is still empty,
+   * mirroring the consoleStream pattern.
+   */
+  private async ensureNetworkAttached(req: ServerRequest, config: { networkBufferSize?: number; captureBody?: boolean } | null): Promise<void> {
+    if (this.networkStream.attachedCount === 0) {
+      this.networkStream = new NetworkStream({
+        capacity: config?.networkBufferSize ?? DEFAULT_NETWORK_BUFFER,
+        captureBody: config?.captureBody ?? false,
+      })
+    }
+    const all = await listSupportedTargets(req.port)
+    for (const t of all) {
+      if (!NETWORK_PAGE_TARGETS.has(t.type)) continue
+      try {
+        const session = await this.getPageSession(req, t.id)
+        await this.networkStream.attach(session)
+      } catch { /* a single unreachable target shouldn't abort capture */ }
+    }
   }
 
   private async handleDom(req: ServerRequest): Promise<ServerResponse> {
@@ -1066,6 +1102,115 @@ export class AgentViewServer {
     return { ok: true, data: formatConsoleMessages(messages) }
   }
 
+  private async handleNetwork(req: ServerRequest): Promise<ServerResponse> {
+    const cwd = argStr(req.args, 'cwd')
+    const config = cwd ? readConfig(resolve(cwd)) : null
+    await this.ensureNetworkAttached(req, config)
+
+    let resolvedTargetId: string | undefined
+    const targetQuery = argStr(req.args, 'target') ?? argStr(req.args, 'window')
+    if (targetQuery) {
+      const all = await listSupportedTargets(req.port)
+      const resolved = findTargetByIdOrSubstring(all, targetQuery)
+      if (!resolved) {
+        return { ok: false, error: `Target not found: "${targetQuery}". Run \`agent-view targets\` for the full list.` }
+      }
+      resolvedTargetId = resolved.id
+    }
+
+    const reqN = argNum(req.args, 'req')
+    if (reqN !== undefined) {
+      const ref = this.networkRefs.get(reqN)
+      if (!ref) {
+        return { ok: false, error: `Invalid req: ${reqN}. Run \`agent-view network\` to get fresh handles.` }
+      }
+      const entry = this.networkStream.getEntry(ref.targetId, ref.requestId)
+      if (!entry) {
+        return { ok: false, error: `Request ${reqN} is no longer buffered (evicted or app restarted).` }
+      }
+      return { ok: true, data: formatNetworkDetail(entry, { rawHeaders: argBool(req.args, 'rawHeaders') ?? false }) }
+    }
+
+    if (argBool(req.args, 'clear')) {
+      this.networkStream.clear(resolvedTargetId)
+      return { ok: true, data: 'Network buffer cleared' }
+    }
+
+    const filter: NetworkFilter = {
+      targetId: resolvedTargetId,
+      since: argNum(req.args, 'since'),
+      url: argStr(req.args, 'url'),
+      method: parseMethodFilter(argStrArray(req.args, 'method')),
+      type: parseTypeFilter(argStrArray(req.args, 'type')),
+      ...parseStatusFilter(argStrArray(req.args, 'status')),
+    }
+
+    const maxLines = argNum(req.args, 'maxLines') ?? DEFAULT_NETWORK_MAX_LINES
+    const follow = argBool(req.args, 'follow') ?? false
+    const untilPattern = argStr(req.args, 'until')
+    if (untilPattern && !follow) {
+      return { ok: false, error: '--until requires --follow' }
+    }
+
+    if (follow) {
+      return this.followNetwork(req, filter, maxLines, untilPattern)
+    }
+
+    const entries = this.networkStream.drain(filter)
+    return { ok: true, data: this.renderNetworkList(entries, maxLines) }
+  }
+
+  private renderNetworkList(entries: StampedNetworkEntry[], maxLines: number): string {
+    const { text, refs, nextRef } = formatNetworkList(entries, { startRef: this.networkNextRef, maxLines })
+    this.networkRefs.clear()
+    for (const r of refs) this.networkRefs.set(r.ref, { targetId: r.targetId, requestId: r.requestId })
+    this.networkNextRef = nextRef
+    return text
+  }
+
+  private async followNetwork(
+    req: ServerRequest,
+    filter: NetworkFilter,
+    maxLines: number,
+    untilPattern: string | undefined,
+  ): Promise<ServerResponse> {
+    const timeoutSec = argNum(req.args, 'timeout') ?? 10
+    const matcher = untilPattern ? buildMatcher(untilPattern) : null
+    const matchText = (e: StampedNetworkEntry): string =>
+      `${e.method ?? (e.isWebSocket ? 'WS' : e.isEventSource ? 'SSE' : '')} ${e.status ?? e.state} ${e.url}`
+
+    if (matcher) {
+      const pre = this.networkStream.drain(filter)
+      const hit = pre.findIndex(e => matcher(matchText(e)))
+      if (hit !== -1) return { ok: true, data: this.renderNetworkList(pre.slice(0, hit + 1), maxLines) }
+    }
+
+    const matched = await new Promise<boolean>((resolveFollow) => {
+      const dispose = matcher
+        ? this.networkStream.subscribe(() => {
+            const cur = this.networkStream.drain(filter)
+            if (cur.some(e => matcher(matchText(e)))) {
+              clearTimeout(timer)
+              dispose()
+              resolveFollow(true)
+            }
+          })
+        : (): void => {}
+      const timer = setTimeout(() => {
+        dispose()
+        resolveFollow(false)
+      }, timeoutSec * 1000)
+      timer.unref?.()
+    })
+
+    if (matcher && !matched) {
+      return { ok: false, error: `Timeout: pattern not seen in ${timeoutSec}s` }
+    }
+
+    const entries = this.networkStream.drain(filter)
+    return { ok: true, data: this.renderNetworkList(entries, maxLines) }
+  }
+
   private async handleStop(): Promise<ServerResponse> {
     setTimeout(() => this.shutdown(), 100)
     return { ok: true, data: 'Server stopping' }
@@ -1079,6 +1224,7 @@ export class AgentViewServer {
     await unlink(TOKEN_PATH).catch(() => {})
 
     this.consoleStream.detach()
+    this.networkStream.detach()
     for (const cached of this.connections.values()) {
       try { await cached.session.close() } catch { /* ignore */ }
     }
@@ -1114,6 +1260,49 @@ function parseLevelFilter(levels: string[] | undefined): ReadonlySet<ConsoleLeve
     if (valid.includes(l)) set.add(l as ConsoleLevel)
   }
   return set.size > 0 ? set : undefined
+}
+
+function parseMethodFilter(methods: string[] | undefined): ReadonlySet<string> | undefined {
+  if (!methods || methods.length === 0) return undefined
+  const set = new Set(methods.map(m => m.trim().toUpperCase()).filter(Boolean))
+  return set.size > 0 ? set : undefined
+}
+
+function parseTypeFilter(types: string[] | undefined): ReadonlySet<NetworkResourceType> | undefined {
+  if (!types || types.length === 0) return undefined
+  const valid = Object.values(NetworkResourceType) as string[]
+  const set = new Set<NetworkResourceType>()
+  for (const t of types) {
+    const lower = t.trim().toLowerCase()
+    if (valid.includes(lower)) set.add(lower as NetworkResourceType)
+  }
+  return set.size > 0 ? set : undefined
+}
+
+function parseStatusFilter(tokens: string[] | undefined): { statusClasses?: ReadonlySet<number>; statusCodes?: ReadonlySet<number>; includeFailed?: boolean } {
+  if (!tokens || tokens.length === 0) return {}
+  const classes = new Set<number>()
+  const codes = new Set<number>()
+  let includeFailed = false
+  for (const tok of tokens) {
+    const t = tok.trim().toLowerCase()
+    if (t === 'failed' || t === 'fail') {
+      includeFailed = true
+      continue
+    }
+    const classMatch = /^([1-5])xx$/.exec(t)
+    if (classMatch) {
+      classes.add(Number(classMatch[1]))
+      continue
+    }
+    const n = Number(t)
+    if (Number.isInteger(n) && n >= 100 && n <= 599) codes.add(n)
+  }
+  return {
+    statusClasses: classes.size > 0 ? classes : undefined,
+    statusCodes: codes.size > 0 ? codes : undefined,
+    includeFailed: includeFailed ? true : undefined,
+  }
 }
 
 function buildMatcher(pattern: string): (text: string) => boolean {

@@ -152,6 +152,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
+| `network`     | Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`. Captures page-load traffic. |
 | `wait`        | Block until an element appears (default 10s).                                            |
 | `scene`       | WebGL scene graph (PixiJS today, engine-pluggable). `--compact` and `--diff` mirror `dom`. |
 | `snap`        | DOM + scene + optional screenshot in one call.                                           |
@@ -317,7 +318,9 @@ Full form with all optional fields:
     "engine": "pixi"
   },
   "consoleBufferSize": 500,
-  "consoleTargets": ["page", "shared_worker", "service_worker"]
+  "consoleTargets": ["page", "shared_worker", "service_worker"],
+  "captureBody": false,
+  "networkBufferSize": 200
 }
 ```
 
@@ -330,6 +333,8 @@ Full form with all optional fields:
 | `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default; opt-in for arbitrary JS execution                                                     |
 | `consoleBufferSize` | no       | Per-target console ring capacity. Positive integer. Default `500`                                                                                     |
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to on first call. Any subset of `["page", "iframe", "shared_worker", "service_worker", "worker"]`. Default `["page", "shared_worker", "service_worker"]` |
+| `captureBody`       | no       | `true` to capture response bodies and request payloads for `agent-view network`. Off by default; opt-in since bodies can carry tokens/PII. WebSocket frame payloads are visible regardless              |
+| `networkBufferSize` | no       | Per-target network ring capacity. Positive integer. Default `200` (smaller than console — entries are heavier)                                                                                         |
 
 ---
 
@@ -505,6 +510,26 @@ agent-view console --clear                      # drop in-memory ring
 `--target` resolves the same way as `eval --target`: exact id wins, then title substring, then URL substring. If no match is found, an error is returned.
 
 Default attached target types: `page`, `shared_worker`, `service_worker`. Override with `consoleTargets` in config.
+
+### `network`
+
+Lists captured network requests, one compact line each with a short `[req=N]` handle. Expand one with `--req N` for headers, timing, body, or the WebSocket frame log. Surfaces the silent failures DOM and console can't: a 404 that never throws, a CORS block, a missing `Authorization` header, a realtime socket that never receives its message.
+
+```bash
+agent-view network                              # recent requests, newest at the bottom
+agent-view network --req 3                       # expand one: headers, timing, body / WS frames
+agent-view network --status 4xx,5xx,failed       # class, exact code (404), or `failed` (no HTTP response — CORS/conn refused)
+agent-view network --method POST                 # find mutations among reads
+agent-view network --type xhr,fetch              # drop document/image/font noise
+agent-view network --url "*/api/users*"          # URL substring, or glob with *
+agent-view network --follow --until "/api/save"  # stream until a matching request fires
+agent-view network --raw-headers --req 3         # reveal redacted header values
+agent-view network --clear                       # drop in-memory ring
+```
+
+**Eager, not lazy — the one asymmetry with `console`.** `network` capture starts when the app launches, so page-load traffic (initial XHR/fetch, auth handshakes, boot 404s) is usually buffered by the time you call it. `console`, by contrast, attaches on its first call and loses anything emitted earlier. This is deliberate: network's value is front-loaded. The one caveat: a very fast app can fire its first request before capture attaches — if boot traffic looks missing, reload and re-check rather than assuming nothing fired.
+
+Sensitive headers (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, …) are redacted by default; `--raw-headers` reveals them. Request/response **bodies** stay off until the project owner sets `"captureBody": true` (bodies can carry tokens/PII). WebSocket frame payloads are visible by default — seeing them is the point — capped per frame. `--follow` and `--until` mirror `console`. `--target` / `--window` scope to one target.
 
 ### `watch`
 

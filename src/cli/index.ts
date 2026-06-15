@@ -23,13 +23,14 @@ import { runWait } from './commands/wait.js'
 import { runTargets } from './commands/targets.js'
 import { runEval } from './commands/eval.js'
 import { runConsole } from './commands/console.js'
+import { runNetwork } from './commands/network.js'
 import { runWatch } from './commands/watch.js'
 import type { AgentViewConfig } from '../config/types.js'
 
 const program = new Command()
   .name('agent-view')
   .description('Visual verification CLI for desktop apps')
-  .version('0.9.0')
+  .version('0.10.0')
 
 program
   .command('init')
@@ -191,6 +192,28 @@ program
   .action(async (options) => {
     const config = requireConfig()
     await runConsole(config, options)
+  })
+
+program
+  .command('network')
+  .description('List captured network requests, or expand one with --req')
+  .option('--req <n>', 'Expand one request by its [req=N] handle (headers, timing, body, WS frames)')
+  .option('--url <glob>', 'Filter by URL substring, or glob when it contains *')
+  .option('--method <list>', 'Filter by HTTP method(s), comma-separated (e.g. POST,PUT)')
+  .option('--status <list>', 'Filter by status class, code, or "failed", comma-separated (e.g. 4xx,5xx,404,failed)')
+  .option('--type <list>', 'Filter by resource type(s), comma-separated (e.g. xhr,fetch)')
+  .option('--raw-headers', 'Reveal real values of sensitive headers (redacted by default)')
+  .option('-f, --follow', 'Stream new requests until --timeout elapses')
+  .option('--until <pattern>', 'Exit as soon as a request matches (substring or /regex/); requires --follow')
+  .option('--timeout <seconds>', 'Follow window in seconds (default 10)')
+  .option('--max-lines <n>', 'Hard line budget for the list (default 50)')
+  .option('--since <iso>', 'Only requests newer than ISO timestamp')
+  .option('--clear', 'Drop the in-memory ring buffer')
+  .option('-t, --target <id>', 'Restrict to one target by CDP id, title, or URL substring')
+  .option('-w, --window <id>', 'Page-target by id or title')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runNetwork(config, options)
   })
 
 program

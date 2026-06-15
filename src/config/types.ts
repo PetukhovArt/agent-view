@@ -18,4 +18,12 @@ export type AgentViewConfig = {
   consoleBufferSize?: number
   /** Target types that `agent-view console` auto-attaches to on first call. */
   consoleTargets?: ReadonlyArray<TargetType>
+  /**
+   * When true, `agent-view network` captures response bodies (fetched eagerly at `loadingFinished`)
+   * and request payloads. When false or missing, only metadata + headers are kept. Project-owner
+   * opt-in — bodies may carry tokens/PII. WebSocket frame payloads are visible regardless.
+   */
+  captureBody?: boolean
+  /** Per-target network ring capacity. Default 200 (smaller than console — entries are heavier). */
+  networkBufferSize?: number
 }

@@ -43,6 +43,10 @@ function isValidConfig(obj: unknown): obj is AgentViewConfig {
   if (c.consoleTargets !== undefined) {
     if (!Array.isArray(c.consoleTargets) || !c.consoleTargets.every(t => typeof t === 'string')) return false
   }
+  if (c.captureBody !== undefined && typeof c.captureBody !== 'boolean') return false
+  if (c.networkBufferSize !== undefined) {
+    if (typeof c.networkBufferSize !== 'number' || c.networkBufferSize < 1) return false
+  }
 
   return true
 }

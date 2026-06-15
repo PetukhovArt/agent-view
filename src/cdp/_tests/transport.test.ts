@@ -61,6 +61,20 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         getDocument: vi.fn().mockResolvedValue({ root: { backendNodeId: 1 } }),
       },
       Input: { dispatchMouseEvent: mockDispatchMouse },
+      Network: {
+        enable: vi.fn().mockResolvedValue({}),
+        getResponseBody: vi.fn().mockResolvedValue({ body: '', base64Encoded: false }),
+        requestWillBeSent: vi.fn().mockReturnValue(() => {}),
+        responseReceived: vi.fn().mockReturnValue(() => {}),
+        loadingFinished: vi.fn().mockReturnValue(() => {}),
+        loadingFailed: vi.fn().mockReturnValue(() => {}),
+        webSocketCreated: vi.fn().mockReturnValue(() => {}),
+        webSocketFrameSent: vi.fn().mockReturnValue(() => {}),
+        webSocketFrameReceived: vi.fn().mockReturnValue(() => {}),
+        webSocketFrameError: vi.fn().mockReturnValue(() => {}),
+        webSocketClosed: vi.fn().mockReturnValue(() => {}),
+        eventSourceMessageReceived: vi.fn().mockReturnValue(() => {}),
+      },
       close: vi.fn().mockResolvedValue({}),
     })
 

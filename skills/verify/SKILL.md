@@ -137,6 +137,33 @@ agent-view console --level error                # expect "(no console messages)"
 
 Default attached target types: `page`, `shared_worker`, `service_worker` (override via `consoleTargets` in config).
 
+### Network (`network`)
+
+Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Use to confirm an expected API call fired, diagnose a silent 404 / CORS block / missing auth header, or verify "button disabled until the network completes".
+
+```bash
+agent-view network                              # recent requests, newest at the bottom
+agent-view network --req 3                       # expand one: headers, timing, body / WS frame log
+agent-view network --status 4xx,5xx              # only failures (class or exact code, e.g. 404)
+agent-view network --method POST                 # mutations among reads
+agent-view network --type xhr,fetch              # drop document/image/font noise
+agent-view network --url "*/api/save*"           # URL substring or * glob
+agent-view network --follow --until "/api/save"  # stream until a matching request fires
+agent-view network --clear                       # baseline before an interaction
+```
+
+**Eager, unlike `console`.** `network` captures from app launch, so page-load traffic (initial XHR/fetch, auth handshakes, boot 404s) is usually already buffered by the time you call it — in most cases you don't need to reload. `console` is the opposite (lazy: attaches on first call, loses earlier output). Call this asymmetry out so it isn't mistaken for a bug. Caveat: for very fast apps the earliest request can fire before capture attaches. If boot traffic looks missing, don't conclude "no request fired" — reload (`agent-view eval "location.reload()"`) and re-check before deciding.
+
+`[req=N]` handles are reallocated on every list call (like `dom` refs) — expand from the most recent list. Sensitive headers are redacted by default (`--raw-headers` reveals them). Response/request **bodies** require `"captureBody": true` in config; WebSocket frame payloads are visible by default.
+
+Standard pattern for "did the save call fire and succeed?":
+```bash
+agent-view network --clear
+agent-view click --filter "Save"
+agent-view wait --filter "Saved"
+agent-view network --url "*/api/save*"          # expect one POST with status 200
+```
+
 ### Targets (`targets`)
 
 When `--window` doesn't show what you expected, or you need a worker target id for `eval`/`console`:

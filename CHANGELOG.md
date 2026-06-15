@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0] - 2026-06-15
+
+`agent-view network` — CDP `Network` domain capture. Closes the largest remaining verify-flow blind spot: the silent failures that never reach the DOM, the console, or the store — a 404 that doesn't throw, a CORS block, a missing `Authorization` header, a realtime socket that never receives its message.
+
+### Added
+- `agent-view network` — lists captured requests, one compact `[req=N]` line each; `--req N` expands one for headers, timing, body, or the WebSocket/EventSource frame log.
+  - Filters mirror `console`: `--url` (substring or `*` glob), `--method`, `--status` (class `4xx`, exact `404`, or `failed` for requests with no HTTP response), `--type` (comma list of resource types), `--since`, plus `--follow` / `--until <pattern>` and `--target` / `--window` scoping.
+  - **Eager capture** — traffic is buffered from app launch, so page-load requests (initial XHR/fetch, auth handshakes, boot 404s) are typically present without a reload. This is a deliberate divergence from `console`'s lazy-attach (ADR 0002); a very fast first request can still precede attach, so reload-and-recheck if boot traffic looks missing.
+  - WebSocket and EventSource are first-class: each connection is listed by URL with a direction-tagged (`↑`/`↓`) frame log; `webSocketClosed` / `webSocketFrameError` surface as terminal frames.
+  - Sensitive headers (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, …) redacted by default; `--raw-headers` reveals them. Binary bodies render as `[binary N bytes]`.
+- Config: `captureBody` (default `false`) gates response bodies and request payloads — opt-in since bodies can carry tokens/PII; WebSocket frame payloads are visible regardless. `networkBufferSize` (default `200`) sets the per-target ring capacity.
+
+### Internal
+- `NetworkStream` (per-target ring, `drain(filter)`, `subscribe`) modeled on `ConsoleStream`; `attach` registers the subscription before `Network.enable` so no events are lost. Pure network formatter under `inspectors/network/`. ADR 0001 (native capture over `chrome-devtools-mcp`), ADR 0002 (eager lifecycle). New `bench/smoke-network.ts` proves end-to-end capture over real CDP.
+- CLI `--version` corrected to track `package.json` (was stale at `0.9.0`).
+
 ## [0.9.2] - 2026-05-14
 
 Follow-up to 0.9.1. Documentation-only.

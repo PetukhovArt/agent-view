@@ -6,6 +6,11 @@ import {
   ConsoleSource,
   EvaluationError,
   MouseButton,
+  NetworkEventKind,
+  NetworkResourceType,
+  NetworkEntryState,
+  WebSocketOpcode,
+  WebSocketDirection,
   type CDPTarget,
   type AXNode,
   type ScreenshotClip,
@@ -18,6 +23,7 @@ import {
   type DragOpts,
   type ClickOpts,
   type Point,
+  type NetworkEvent,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
 
@@ -74,6 +80,27 @@ type ConsoleSubscription = {
   add: (handler: (msg: ConsoleMessage) => void) => () => void
 }
 
+type RawCDPNetwork = {
+  enable: (params?: Record<string, unknown>) => Promise<unknown>
+  getResponseBody: (params: { requestId: string }) => Promise<{ body: string; base64Encoded: boolean }>
+  requestWillBeSent: (cb: (p: Record<string, unknown>) => void) => () => void
+  responseReceived: (cb: (p: Record<string, unknown>) => void) => () => void
+  loadingFinished: (cb: (p: Record<string, unknown>) => void) => () => void
+  loadingFailed: (cb: (p: Record<string, unknown>) => void) => () => void
+  webSocketCreated: (cb: (p: Record<string, unknown>) => void) => () => void
+  webSocketFrameSent: (cb: (p: Record<string, unknown>) => void) => () => void
+  webSocketFrameReceived: (cb: (p: Record<string, unknown>) => void) => () => void
+  webSocketFrameError: (cb: (p: Record<string, unknown>) => void) => () => void
+  webSocketClosed: (cb: (p: Record<string, unknown>) => void) => () => void
+  eventSourceMessageReceived: (cb: (p: Record<string, unknown>) => void) => () => void
+}
+
+type NetworkSubscription = {
+  add: (handler: (ev: NetworkEvent) => void) => () => void
+  enable: () => Promise<void>
+  getResponseBody: (requestId: string) => Promise<{ body: string; base64Encoded: boolean }>
+}
+
 type RawCDPClient = {
   Runtime: {
     enable: () => Promise<unknown>
@@ -88,6 +115,7 @@ type RawCDPClient = {
     enable: () => Promise<unknown>
     entryAdded: (cb: (params: LogEntryAddedEvent) => void) => () => void
   }
+  Network: RawCDPNetwork
   close: () => Promise<unknown>
 } & Record<string, unknown>
 
@@ -206,6 +234,170 @@ function attachConsoleSubscription(client: RawCDPClient): ConsoleSubscription {
   }
 }
 
+const CDP_RESOURCE_TYPE_MAP: Record<string, NetworkResourceType> = {
+  Document: NetworkResourceType.Document,
+  Stylesheet: NetworkResourceType.Stylesheet,
+  Image: NetworkResourceType.Image,
+  Media: NetworkResourceType.Media,
+  Font: NetworkResourceType.Font,
+  Script: NetworkResourceType.Script,
+  TextTrack: NetworkResourceType.TextTrack,
+  XHR: NetworkResourceType.Xhr,
+  Fetch: NetworkResourceType.Fetch,
+  EventSource: NetworkResourceType.EventSource,
+  WebSocket: NetworkResourceType.WebSocket,
+  Manifest: NetworkResourceType.Manifest,
+  Ping: NetworkResourceType.Ping,
+  Other: NetworkResourceType.Other,
+}
+
+function toResourceType(raw: unknown): NetworkResourceType {
+  return (typeof raw === 'string' && CDP_RESOURCE_TYPE_MAP[raw]) || NetworkResourceType.Other
+}
+
+function toStringRecord(raw: unknown): Record<string, string> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, string>
+  }
+  return {}
+}
+
+function str(v: unknown): string { return typeof v === 'string' ? v : '' }
+function num(v: unknown): number { return typeof v === 'number' ? v : 0 }
+function bool(v: unknown): boolean { return typeof v === 'boolean' ? v : false }
+
+function attachNetworkSubscription(network: RawCDPNetwork): NetworkSubscription {
+  const handlers = new Set<(ev: NetworkEvent) => void>()
+  let networkEnabled = false
+
+  const emit = (ev: NetworkEvent): void => {
+    for (const h of handlers) {
+      try { h(ev) } catch { /* ignore */ }
+    }
+  }
+
+  network.requestWillBeSent((p) => {
+    emit({
+      kind: NetworkEventKind.RequestWillBeSent,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      url: str((p['request'] as Record<string, unknown>)?.['url'] ?? p['documentURL']),
+      method: str((p['request'] as Record<string, unknown>)?.['method']),
+      resourceType: toResourceType(p['type']),
+      headers: toStringRecord((p['request'] as Record<string, unknown>)?.['headers']),
+      postData: typeof (p['request'] as Record<string, unknown>)?.['postData'] === 'string'
+        ? str((p['request'] as Record<string, unknown>)['postData'])
+        : undefined,
+    })
+  })
+
+  network.responseReceived((p) => {
+    const response = (p['response'] as Record<string, unknown>) ?? {}
+    emit({
+      kind: NetworkEventKind.ResponseReceived,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      status: num(response['status']),
+      statusText: str(response['statusText']),
+      headers: toStringRecord(response['headers']),
+      mimeType: str(response['mimeType']),
+      resourceType: toResourceType(p['type']),
+    })
+  })
+
+  network.loadingFinished((p) => {
+    emit({
+      kind: NetworkEventKind.LoadingFinished,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      encodedDataLength: num(p['encodedDataLength']),
+    })
+  })
+
+  network.loadingFailed((p) => {
+    emit({
+      kind: NetworkEventKind.LoadingFailed,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      errorText: str(p['errorText']),
+      canceled: bool(p['canceled']),
+      resourceType: toResourceType(p['type']),
+    })
+  })
+
+  network.webSocketCreated((p) => {
+    emit({
+      kind: NetworkEventKind.WebSocketCreated,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      url: str(p['url']),
+    })
+  })
+
+  network.webSocketFrameSent((p) => {
+    const frame = (p['response'] as Record<string, unknown>) ?? {}
+    emit({
+      kind: NetworkEventKind.WebSocketFrameSent,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      opcode: num(frame['opcode']) as WebSocketOpcode,
+      payloadData: str(frame['payloadData']),
+    })
+  })
+
+  network.webSocketFrameReceived((p) => {
+    const frame = (p['response'] as Record<string, unknown>) ?? {}
+    emit({
+      kind: NetworkEventKind.WebSocketFrameReceived,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      opcode: num(frame['opcode']) as WebSocketOpcode,
+      payloadData: str(frame['payloadData']),
+    })
+  })
+
+  network.webSocketFrameError((p) => {
+    emit({
+      kind: NetworkEventKind.WebSocketFrameError,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      errorMessage: str(p['errorMessage']),
+    })
+  })
+
+  network.webSocketClosed((p) => {
+    emit({
+      kind: NetworkEventKind.WebSocketClosed,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+    })
+  })
+
+  network.eventSourceMessageReceived((p) => {
+    emit({
+      kind: NetworkEventKind.EventSourceMessageReceived,
+      requestId: str(p['requestId']),
+      ts: Date.now(),
+      eventName: str(p['eventName']),
+      data: str(p['data']),
+      messageId: str(p['eventId']),
+    })
+  })
+
+  return {
+    add(handler) {
+      handlers.add(handler)
+      return () => handlers.delete(handler)
+    },
+    async enable() {
+      if (networkEnabled) return
+      networkEnabled = true
+      await network.enable()
+    },
+    getResponseBody: (requestId) => network.getResponseBody({ requestId }),
+  }
+}
+
 async function evaluateImpl(
   client: RawCDPClient,
   expression: string,
@@ -241,6 +433,7 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   const client = await openClient(port, target)
   // Subscribe BEFORE enable so we catch buffered messages emitted at enable-time.
   const consoleSub = attachConsoleSubscription(client)
+  const networkSub = attachNetworkSubscription(client.Network)
   await client.Runtime.enable()
   await client.Log.enable()
 
@@ -248,6 +441,9 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
     target,
     evaluate: (expression, opts) => evaluateImpl(client, expression, opts),
     onConsole: (handler) => consoleSub.add(handler),
+    onNetwork: (handler) => networkSub.add(handler),
+    enableNetwork: () => networkSub.enable(),
+    getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
     async close() {
       await client.close()
     },
@@ -277,6 +473,7 @@ export async function connectToPage(
 
   // Subscribe BEFORE enable so we catch buffered console/log entries emitted at enable-time.
   const consoleSub = attachConsoleSubscription(client)
+  const networkSub = attachNetworkSubscription(client.Network)
   await Page.enable()
   await DOM.enable()
   await Accessibility.enable()
@@ -363,6 +560,9 @@ export async function connectToPage(
 
     evaluate: (expression, opts) => evaluateImpl(client, expression, opts),
     onConsole: (handler) => consoleSub.add(handler),
+    onNetwork: (handler) => networkSub.add(handler),
+    enableNetwork: () => networkSub.enable(),
+    getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
 
     async getAccessibilityTree(): Promise<AXNode[]> {
       const cached = cache.get(cacheKey)

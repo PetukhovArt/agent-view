@@ -229,6 +229,24 @@
       flags: { darkMode: false, betaFeatures: true },
     }
 
+    // ── Page-load network traffic for `agent-view network` ──────────────────────
+    // Fires at parse time so an eager-attached capture sees real page-load requests.
+    const NET_BASE = 'http://127.0.0.1:19333'
+    fetch(NET_BASE + '/api/bootstrap').then(r => r.json()).then(d => {
+      console.log('[bench] bootstrap ok', d.user)
+    }).catch(() => {})
+    fetch(NET_BASE + '/api/missing').then(r => {
+      console.log('[bench] missing status', r.status)
+    }).catch(() => {})
+    try {
+      const ws = new WebSocket('ws://127.0.0.1:19333')
+      ws.onopen = () => ws.send('PING_FROM_PAGE')
+      ws.onmessage = (e) => console.log('[bench] ws frame', e.data)
+      window.benchWebSocket = ws
+    } catch (err) {
+      console.warn('[bench] WebSocket unavailable:', err.message)
+    }
+
     // ── Console signals for `agent-view console` ────────────────────────────────
     console.log('[bench] app booted at', new Date().toISOString())
     window.addEventListener('error', (e) => {
