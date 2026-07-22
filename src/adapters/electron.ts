@@ -1,8 +1,9 @@
 import { listSupportedTargets, connectToPage } from '../cdp/transport.js'
 import type { RuntimeAdapter } from './types.js'
 import { RuntimeType, type WindowInfo } from '../types.js'
-import { TargetType, type PageSession } from '../cdp/types.js'
+import { type PageSession } from '../cdp/types.js'
 import type { AxTreeCache } from '../cdp/ax-cache.js'
+import { isAppTarget } from './target-filter.js'
 
 export const electronAdapter: RuntimeAdapter = {
   runtime: RuntimeType.Electron,
@@ -10,7 +11,7 @@ export const electronAdapter: RuntimeAdapter = {
   async discover(port: number): Promise<WindowInfo[]> {
     const targets = await listSupportedTargets(port)
     return targets
-      .filter(t => t.type === TargetType.Page)
+      .filter(isAppTarget)
       .map(t => ({ id: t.id, title: t.title, url: t.url, type: t.type }))
   },
 

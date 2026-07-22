@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
+import { isAppTarget } from '../adapters/target-filter.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
 import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
@@ -848,7 +849,7 @@ export class AgentViewServer {
       return found
     }
 
-    const firstPage = allTargets.find(t => t.type === TargetType.Page)
+    const firstPage = allTargets.find(isAppTarget) ?? allTargets.find(t => t.type === TargetType.Page)
     if (!firstPage) throw new Error('No page targets found.')
     return firstPage
   }

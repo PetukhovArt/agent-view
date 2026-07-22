@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.1] - 2026-07-22
+
+### Fixed
+- Default window selection no longer picks the DevTools frontend. Opening DevTools on a Chromium app registers a first-in-list `devtools://` **page** target; commands without an explicit `--target`/`--window` selected it instead of the app window, so DOM/screenshot/eval ran against the DevTools UI. The Electron and Browser adapters now filter targets through the shared `isAppTarget` (already used by Tauri), and the server's default target resolution skips `devtools://` / `about:blank` / `chrome-extension://` pages.
+
 ## [0.10.0] - 2026-06-15
 
 `agent-view network` — CDP `Network` domain capture. Closes the largest remaining verify-flow blind spot: the silent failures that never reach the DOM, the console, or the store — a 404 that doesn't throw, a CORS block, a missing `Authorization` header, a realtime socket that never receives its message.

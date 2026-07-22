@@ -1,21 +1,11 @@
 import { listSupportedTargets, connectToPage } from '../cdp/transport.js'
 import type { RuntimeAdapter } from './types.js'
 import { RuntimeType, type WindowInfo } from '../types.js'
-import { TargetType, type PageSession } from '../cdp/types.js'
+import { type PageSession } from '../cdp/types.js'
 import type { AxTreeCache } from '../cdp/ax-cache.js'
+import { isAppTarget } from './target-filter.js'
 
-/** URLs that Tauri/WebView2 exposes as CDP targets but aren't app windows */
-const INTERNAL_URL_PATTERNS = [
-  'about:blank',
-  'devtools://',
-  'chrome-extension://',
-]
-
-export function isAppTarget(target: { type: string; url: string; title: string }): boolean {
-  if (target.type !== TargetType.Page) return false
-  const url = target.url.toLowerCase()
-  return !INTERNAL_URL_PATTERNS.some(pattern => url.startsWith(pattern))
-}
+export { isAppTarget }
 
 export const tauriAdapter: RuntimeAdapter = {
   runtime: RuntimeType.Tauri,
