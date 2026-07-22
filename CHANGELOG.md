@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.2] - 2026-07-22
+
+### Fixed
+- `agent-view --version` now reports the real version. It was a hardcoded literal that drifted from `package.json` on every release (reported `0.10.0` after `0.10.1` shipped). The version is now read from `package.json` at runtime, resolving to the same path in dev (`src/cli`) and build (`dist/cli`).
+
 ## [0.10.1] - 2026-07-22
 
 ### Fixed

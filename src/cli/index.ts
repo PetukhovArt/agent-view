@@ -7,6 +7,9 @@ if (nodeMajor < 18) {
 }
 
 import { Command } from 'commander'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { readConfig } from '../config/manager.js'
 import { runInit } from './commands/init.js'
 import { runDiscover } from './commands/discover.js'
@@ -27,10 +30,20 @@ import { runNetwork } from './commands/network.js'
 import { runWatch } from './commands/watch.js'
 import type { AgentViewConfig } from '../config/types.js'
 
+// Resolve version from package.json at runtime — same path in dev (src/cli) and build (dist/cli).
+function resolveVersion(): string {
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '../../package.json')
+    return JSON.parse(readFileSync(pkgPath, 'utf8')).version as string
+  } catch {
+    return '0.0.0'
+  }
+}
+
 const program = new Command()
   .name('agent-view')
   .description('Visual verification CLI for desktop apps')
-  .version('0.10.0')
+  .version(resolveVersion())
 
 program
   .command('init')
