@@ -256,9 +256,9 @@ When two tools could answer the same question, prefer the one higher up the tabl
 
 A run can produce one of three outcomes per step: **pass**, **fail**, **requires_visual_review**. There is no fourth bucket called "actually fine, here's why". A failed `Expected:` line is FAIL.
 
-These heuristics catch real bugs. Skipping them is how recipes silently pass while bugs sit in plain sight in the same data:
+These heuristics catch real bugs. Skipping them is how a run silently passes while the bug sits in plain sight in the same data:
 
-1. **A failed `Expected:` is FAIL.** If output disagrees with the expected line, mark `fail` and continue. Do not edit the expected line. Do not invent prose explanations inline ("label reuse", "convention", "recipe arithmetic off"). Justifications belong in the bug report after the run, never in the per-step log.
+1. **A failed expectation is FAIL.** If output disagrees with what the step expected, mark `fail` and continue. Do not soften the expectation. Do not invent prose explanations inline ("label reuse", "convention", "arithmetic off"). Justifications belong in the bug report after the run, never in the per-step log.
 
 2. **UI-vs-model mismatch is the bug, not noise.** When a count or hierarchy check returns `match: false`:
    - Default hypothesis: the UI renderer is wrong.
@@ -267,28 +267,13 @@ These heuristics catch real bugs. Skipping them is how recipes silently pass whi
 
 3. **Defensive eval reads.** Every `node.field` read (e.g. `transform.x`, `transform.width`) must be sentinel-checked before being used in arithmetic. A renamed field silently returns `NaN`/`null`, which fail-passes downstream comparisons. Add `isFinite(value)` / `value !== undefined` guards inline.
 
-4. **No hardcoded literal IDs.** If a recipe contains hardcoded node-ID prefixes that don't match the current scene, the entire recipe degrades to no-op without errors. Verify at least one expected ID exists; if not, derive IDs by role at runtime and proceed with the corrected lookup. Flag the recipe as needing an ID-refresh fix.
+4. **No hardcoded literal IDs.** A hardcoded node-ID prefix that no longer matches the current scene degrades the whole check to a silent no-op. Verify at least one expected ID exists; if not, derive IDs by role at runtime and proceed with the corrected lookup, and say the plan needs an ID refresh.
 
-5. **Reload checkpoint is not optional.** If the recipe has a `## Round-Trip Checkpoint` or `## Invariants` section mentioning reload/save/persistence — run it. If it does not, but the feature mutated persisted structure — run one anyway: `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift is a real bug, not a "fixed-up on save".
+5. **Reload checkpoint is not optional.** If the feature mutated persisted structure, run one: `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift is a real bug, not a "fixed-up on save".
 
-6. **Recipe-stated invariants run first or fail closed.** If the recipe has an `## Invariants` section, execute those steps before the action-specific evidence commands. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep running the remaining steps, tag them as "trust-impaired until invariant restored".
+6. **Invariants run first or fail closed.** When the plan states invariants, execute those steps before the action-specific checks. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep running the remaining steps, tag them as "trust-impaired until invariant restored".
 
 7. **Never claim a `window.*` API is missing without `eval`.** Before reporting "API not exposed" / "global X doesn't exist" / "the host doesn't expose Y", you MUST run `agent-view eval "typeof window.X"` and report the literal result (`"undefined"` / `"object"` / `"function"`). DOM scraping cannot answer this question — globals are not in the AX tree. If `eval` returns `"undefined"`, the API really is absent from the main world; if it returns anything else, the API is reachable and your earlier conclusion was wrong. No exceptions, no "I checked the source code instead".
-
-### Recipe Execution Mode (when a recipe file exists)
-
-If the developer points you at a `.claude/verify-recipes/<slug>.md` file, or one is discoverable via `ls .claude/verify-recipes/`, execute it inline yourself — **no subagent**.
-
-1. `Read` the recipe.
-2. If it has a `## Repro Steps` section, follow them — log in, navigate, set up data — using `agent-view` commands. Modern recipes (0.6+) may have `## Manual Preconditions` / `## Bringup` / `## Machine Preconditions` instead; treat those as documentation describing the expected state and execute the actions inline. There is no formal DSL — read what the section says and do it.
-3. Resolve the window id once with `agent-view discover` if you need `--window`.
-4. **If the recipe has an `## Invariants` section, run those steps first.** A failed invariant is FAIL — record it, then continue to evidence commands but tag subsequent results as "trust-impaired" until the invariant is restored.
-5. Run each `## Evidence Commands` subsection in order. Compare output to its `Expected:` line. Mark each as `pass` / `fail` / `requires_visual_review`. **Follow the Execution discipline above** — particularly rules 1 and 2.
-6. After 2–3 consecutive failures, stop and flag the recipe as likely stale. Distinguish "recipe stale" (hardcoded IDs no longer match) from "feature broken" (invariants violated on a current scene).
-7. Run `## Regression Checks`.
-8. **Run the round-trip checkpoint** (discipline rule 5) — either the recipe's section or, if absent and the feature is persistent, an ad-hoc reload check.
-9. If a `## Design Conformance` section is present, run the inline workflow below.
-10. Report a tight summary: passed / failed / visual-review counts plus one-liner per failure, and **any invariant violations called out separately**. Don't paste raw stdout unless asked.
 
 ### Ad-hoc Mode (standalone)
 
@@ -315,9 +300,15 @@ When UI scenarios are pre-generated (e.g., from a plan file with `## UI Scenario
 
 This mode works with any workflow that generates plan files with UI scenarios.
 
+### Reporting
+
+Run the whole thing inline — **no subagent**. Resolve the window id once with `agent-view discover` if you need `--window`.
+
+Report a tight summary: passed / failed / visual-review counts, one line per failure, invariant violations called out separately. Don't paste raw stdout unless asked. After 2–3 consecutive failures, stop and distinguish "the plan is stale" (hardcoded IDs no longer match the current UI) from "the feature is broken" (invariants violated on a current scene) — they need opposite fixes.
+
 ### Design Conformance (inline)
 
-When a recipe contains a `## Design Conformance` table — `(label, screenshot command, expected reference path)` rows — execute it yourself, no subagent.
+When you are given `(label, screenshot command, expected reference path)` rows — from a plan, or from the developer directly — execute them yourself, no subagent.
 
 For each row:
 1. Run the screenshot command (capture the saved file path from stdout).

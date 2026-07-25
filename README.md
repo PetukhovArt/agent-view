@@ -51,9 +51,9 @@ cd your-project
 agent-view init                          # writes agent-view.config.json (runtime, port, launch script)
 ```
 
-`init` auto-detects most projects. Review the generated `launch` field if your dev command is non-standard, and set `"allowEval": true` if you want recipes to use `eval`/`watch`. Prefer to write the config by hand? See [Config](#config) for the field list.
+`init` auto-detects most projects. Review the generated `launch` field if your dev command is non-standard, and set `"allowEval": true` if you want verification to use `eval`/`watch`. Prefer to write the config by hand? See [Config](#config) for the field list.
 
-**2. Install the Claude Code plugin** (adds the `verify` and `verify-recipe` skills):
+**2. Install the Claude Code plugin** (adds the `verify` skill):
 
 ```text
 /plugin marketplace add PetukhovArt/agent-view
@@ -104,7 +104,7 @@ Verify: after clicking Save, the button must be disabled until network completes
 No console errors.
 ```
 
-The `verify` skill starts your app via `agent-view launch`, runs the cheapest checks first (`eval` before `dom` before `screenshot`), and reports pass/fail. For repeatable checks, ask it to author a recipe first; see [Workflow with Claude Code](#workflow-with-claude-code).
+The `verify` skill starts your app via `agent-view launch`, runs the cheapest checks first (`eval` before `dom` before `screenshot`), and reports pass/fail. See [Workflow with Claude Code](#workflow-with-claude-code) for driving it from a plan or a diff.
 
 ---
 
@@ -138,7 +138,7 @@ Full command surface in [Commands](#commands). For non-Claude-Code agents, see a
                                            │   reuses one CDP socket across commands
 ```
 
-The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CDP socket, a 300ms AX-tree cache, parallel CDP calls inside `click`. CLI commands themselves are stateless. Each one is a single shell call you can drop into a script or a recipe.
+The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CDP socket, a 300ms AX-tree cache, parallel CDP calls inside `click`. CLI commands themselves are stateless. Each one is a single shell call you can drop into a script.
 
 ---
 
@@ -166,45 +166,31 @@ Full flag reference in [Commands](#commands).
 
 ## Workflow with Claude Code
 
-The plugin adds two skills built around an author-once / re-run loop:
-
-- `verify-recipe` interviews you about a feature or fix, then writes `.claude/verify-recipes/<slug>.md` with Repro Steps, Evidence Commands (cheapest first: `eval` before `dom` before `screenshot`), and an optional Design Conformance table mapping screenshots to local reference images.
-- `verify` reads a recipe (or runs ad-hoc), executes the commands against the live app, and reports pass/fail.
+The plugin adds the `verify` skill: it launches the app, picks the cheapest tool that can answer each question (`eval` before `dom` before `screenshot`), executes the checks against the live app, and reports pass / fail / requires-visual-review per step.
 
 ```mermaid
 flowchart LR
-    subgraph Author["Phase 1 — author once"]
-      direction TB
-      Dev1["Developer"] -->|prompt + plan/commits| Recipe["verify-recipe<br/>skill"]
-      Recipe -->|writes| File[".claude/verify-recipes/<br/>&lt;slug&gt;.md"]
-    end
-
-    subgraph Run["Phase 2 — run after every iteration"]
-      direction TB
-      Dev2["Developer"] -->|"run the recipe"| Verify["verify skill"]
-      File -.->|read| Verify
-      Verify -->|"dom / eval / click /<br/>screenshot / watch"| CLI["agent-view CLI"]
-      CLI -->|CDP| App["Live app"]
-      App -->|results| Verify
-      Verify -->|pass/fail + design verdict| Dev2
-    end
+    Dev["Developer"] -->|"what must be true"| Verify["verify skill"]
+    Verify -->|"dom / eval / click /<br/>screenshot / watch / logs"| CLI["agent-view CLI"]
+    CLI -->|CDP| App["Live app"]
+    App -->|results| Verify
+    Verify -->|pass/fail + design verdict| Dev
 ```
 
-### Phase 1: author
+### Ad-hoc
 
 ```text
-Generate a verify-recipe for commits <hash1>..<hash2>.
-Source plan: .claude/plans/2026-04-27-login-redirect.md
+Verify: after clicking Save, the button must be disabled until network completes. No console errors.
+```
+
+### From a plan or a diff
+
+```text
+Verify the scenarios in .claude/plans/2026-04-27-login-redirect.md for commits <hash1>..<hash2>.
 Symptom: after login, redirect went to /home instead of /dashboard.
 
 Design references (optional):
 - /abs/path/figma-exports/post-login.png   → "post-login dashboard"
-```
-
-### Phase 2: run
-
-```text
-Run the verify-recipe at .claude/verify-recipes/login-redirect.md.
 ```
 
 When something fails:
@@ -213,17 +199,11 @@ When something fails:
 Step 4 failed (zone filter not mutating store). Fix and re-run that step plus step 7.
 ```
 
-### One-shot (no plan, no persistent recipe)
-
-```text
-Verify: after clicking Save, the button must be disabled until network completes. No console errors.
-```
-
 ### Anti-patterns
 
-- "Just verify the feature" with no symptom. The recipe author can't pick the cheapest signal without knowing what "works" means.
+- "Just verify the feature" with no symptom. Without knowing what "works" means, the skill can't pick the cheapest signal.
 - Pasting Figma URLs. agent-view doesn't fetch from Figma; export to PNG and pass the local path.
-- 50 assertions in one recipe. Split per-feature; a recipe should run in under 2 minutes.
+- 50 assertions in one run. Split per-feature; a verification pass should finish in under 2 minutes.
 
 ---
 

@@ -56,5 +56,10 @@ What to verify: stream exits early on pattern match.
 What to verify: substring match on title/URL works.
 - `agent-view console --target bench` (substring of page URL) → returns messages, no "target not found" error
 
-## 12. verify-recipe skill
-Markdown-only — skipped at runtime.
+## 12. logs feed
+What to verify: page + worker console land in one file, filters read it back.
+- `agent-view logs start --truncate` → status lists page and shared_worker as attached
+- inject log: `agent-view eval "console.warn('FEED-CHECK')"`
+- `agent-view logs tail --grep FEED-CHECK` → one record, single line, `[warn]`
+- `agent-view logs clear` → `logs tail` shows only the "feed cleared" marker
+- `agent-view logs stop`
