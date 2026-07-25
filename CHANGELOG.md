@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.0] - 2026-07-25
+
+### Removed
+- `verify-recipe` skill, and the recipe format it authored, along with the `verify` skill's Recipe Execution Mode. Unused in practice; the rigor it carried (invariants first, failed expectation is FAIL, reload checkpoint, defensive `eval` reads) stays in `verify`'s Execution discipline, which now applies to ad-hoc and plan-driven runs alike. The plugin ships one skill.
+
 ## [0.11.0] - 2026-07-25
 
 ### Fixed
