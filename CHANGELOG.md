@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.11.0] - 2026-07-25
 
 ### Fixed
 - `--target` / `--window` accept the 8-char id prefix `targets` prints (case-insensitive, ≥4 chars, ambiguous prefix reported). Worker handles were unusable before.
