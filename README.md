@@ -152,6 +152,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
+| `logs`        | Durable file feed of page + worker console, surviving reloads and worker restarts. `tail --grep/--since/--level`, `clear`, plus re-injecting `--probe` scripts. |
 | `network`     | Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`. Captures page-load traffic. |
 | `wait`        | Block until an element appears (default 10s).                                            |
 | `scene`       | WebGL scene graph (PixiJS today, engine-pluggable). `--compact` and `--diff` mirror `dom`. |
@@ -296,7 +297,9 @@ A JSON response with process info means CDP is reachable.
 
 ## Config
 
-Running `agent-view init` in your project root generates `agent-view.config.json`. Minimal form:
+Running `agent-view init` in your project root generates `agent-view.config.json`. Every other command locates it by walking up from the current directory (like git looks for `.git`), so commands work from any subdirectory of the project; the config's directory is what `launch` uses as the app's working directory.
+
+Minimal form:
 
 ```json
 {
@@ -320,7 +323,9 @@ Full form with all optional fields:
   "consoleBufferSize": 500,
   "consoleTargets": ["page", "shared_worker", "service_worker"],
   "captureBody": false,
-  "networkBufferSize": 200
+  "networkBufferSize": 200,
+  "logFile": ".agent-view/console.log",
+  "logMaxBytes": 8388608
 }
 ```
 
@@ -335,6 +340,8 @@ Full form with all optional fields:
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to on first call. Any subset of `["page", "iframe", "shared_worker", "service_worker", "worker"]`. Default `["page", "shared_worker", "service_worker"]` |
 | `captureBody`       | no       | `true` to capture response bodies and request payloads for `agent-view network`. Off by default; opt-in since bodies can carry tokens/PII. WebSocket frame payloads are visible regardless              |
 | `networkBufferSize` | no       | Per-target network ring capacity. Positive integer. Default `200` (smaller than console — entries are heavier)                                                                                         |
+| `logFile`           | no       | Feed file for `agent-view logs`. Relative paths resolve against the project root. Default `.agent-view/console.log` (gitignore it)                                                                     |
+| `logMaxBytes`       | no       | Feed size cap in bytes; on overflow it rotates once to `<file>.prev`. Default `8388608` (8 MB)                                                                                                         |
 
 ---
 
@@ -419,11 +426,14 @@ agent-view screenshot --scale 0.5             # Half-res WebP (~3× fewer vision
 agent-view screenshot --scale 0.25            # Quarter-res WebP (~12× fewer, 1 tile)
 agent-view screenshot --crop "Sidebar"        # Crop to element bounding box (~12× fewer in best case)
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
+agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not its heading
 ```
 
 `--scale` accepts a factor in `(0, 1]`. CDP-side clip + WebP encode; recommended for agent loops where vision tokens dominate cost.
 
 `--crop <filter>` resolves a DOM element by the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box before encoding. One tile (~1.6k vision tokens) instead of twelve (~19k) in the best case. If the filter matches nothing a warning is emitted to stderr and the full window is captured instead. Combines naturally with `--scale`.
+
+A text filter matches the text-bearing node, so cropping on a section title yields a thin strip of that title; `--crop-up <n>` climbs `n` element ancestors first (`1` usually gets the surrounding card). A text-sized crop is reported on stderr.
 
 ### `scene`
 
@@ -507,9 +517,34 @@ agent-view console --clear                      # drop in-memory ring
 
 `--until <pattern>` requires `--follow`. Exits as soon as a message matches the pattern (substring or `/regex/flags`). On timeout without match exits non-zero with `Timeout: pattern not seen in <N>s`.
 
-`--target` resolves the same way as `eval --target`: exact id wins, then title substring, then URL substring. If no match is found, an error is returned.
+`--target` resolves the same way as `eval --target`: exact id wins, then a case-insensitive id prefix of at least 4 chars (the 8-char handle `targets` prints), then title substring, then URL substring. An ambiguous id prefix is reported as ambiguous rather than resolved; if nothing matches, an error is returned.
 
 Default attached target types: `page`, `shared_worker`, `service_worker`. Override with `consoleTargets` in config.
+
+### `logs`
+
+Records the console output of every attached target into one file and queries it. `console` answers from an in-memory ring that dies with the server; `logs` gives a durable timeline that outlives reloads, worker restarts and the 5-min idle shutdown — the tool for intermittent bugs and long scenarios.
+
+```bash
+agent-view logs start --truncate            # record from empty; suspends idle shutdown
+agent-view logs                             # tail last 200 records (default subcommand)
+agent-view logs tail -n 50 --level error,warn
+agent-view logs tail --grep "ws closed"     # substring or /regex/flags
+agent-view logs tail --since -2m            # -30s | -5m | -2h | 09:31 | 09:31:02.500 | ISO
+agent-view logs status                      # attached targets, feed size, rescan ticks
+agent-view logs clear                       # truncate feed + drop console ring (baseline)
+agent-view logs stop
+```
+
+Feed format is one record per physical line — `HH:MM:SS.mmm [level] [type:id8] text`, local clock, newlines inside a message escaped to `\n`, records capped at 4000 chars. Line-oriented tools (`grep`, `awk`, `--since`) therefore never trip over a wrapped stack trace or JSON payload.
+
+While recording, targets are re-discovered every 3s (`--rescan <ms>`), so a SharedWorker that restarts under a new id rejoins the feed on its own. Default file `.agent-view/console.log` under the project root (`logFile` in config, or `--file`); at `logMaxBytes` (8 MB) it rotates once to `<file>.prev`. `--target` records a single target, `--level` filters at write time.
+
+`--probe <file.js>[@target]` injects JS into matching targets and re-injects it whenever the context is gone (page reload, worker restart), so a probe keeps reporting for the whole run. Probes report through plain `console.log`, which lands in the feed like any other message. **Requires `"allowEval": true`** — it is arbitrary JS. The `@target` suffix filters by type/id-prefix/title/URL substring.
+
+```bash
+agent-view logs start --probe ./probes/orchestrator.js@shared_worker
+```
 
 ### `network`
 

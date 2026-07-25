@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseFilter, resolveDepth, textContentFallback, findTargetByIdOrSubstring } from './server.js'
+import { parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs } from './server.js'
 import type { PageSession, AXNode, TargetInfo } from '../cdp/types.js'
 import { TargetType } from '../cdp/types.js'
 
@@ -101,6 +101,7 @@ function makeNode(backendDOMNodeId: number, role: string, name: string): AXNode 
 function makeMockConn(overrides: Partial<PageSession> = {}): PageSession {
   return {
     target: { id: 't', type: TargetType.Page, title: '', url: '' },
+    onDisconnect: vi.fn(),
     getAccessibilityTree: vi.fn().mockResolvedValue([]),
     getAccessibilityTreeMeta: vi.fn().mockResolvedValue({ nodes: [], fromCache: false }),
     queryAXTree: vi.fn().mockResolvedValue(null),
@@ -183,7 +184,11 @@ function makeTarget(id: string, title: string, url: string): TargetInfo {
   return { id, title, url, type: TargetType.Page }
 }
 
-describe('findTargetByIdOrSubstring', () => {
+function foundId(match: ReturnType<typeof matchTarget>): string | undefined {
+  return match.kind === 'found' ? match.target.id : undefined
+}
+
+describe('matchTarget', () => {
   const targets: TargetInfo[] = [
     makeTarget('abc123', 'Main App', 'http://localhost:3000/'),
     makeTarget('def456', 'Sync Worker', 'http://localhost:3000/worker.js'),
@@ -191,15 +196,15 @@ describe('findTargetByIdOrSubstring', () => {
   ]
 
   it('exact id match wins', () => {
-    expect(findTargetByIdOrSubstring(targets, 'abc123')?.id).toBe('abc123')
+    expect(foundId(matchTarget(targets, 'abc123'))).toBe('abc123')
   })
 
   it('title substring match (case-insensitive)', () => {
-    expect(findTargetByIdOrSubstring(targets, 'sync')?.id).toBe('def456')
+    expect(foundId(matchTarget(targets, 'sync'))).toBe('def456')
   })
 
   it('url substring match', () => {
-    expect(findTargetByIdOrSubstring(targets, 'settings')?.id).toBe('ghi789')
+    expect(foundId(matchTarget(targets, 'settings'))).toBe('ghi789')
   })
 
   it('exact id wins over title substring when both match', () => {
@@ -207,8 +212,7 @@ describe('findTargetByIdOrSubstring', () => {
       makeTarget('worker', 'Something Else', 'http://localhost/other'),
       makeTarget('zzzzzz', 'Worker Page', 'http://localhost/worker'),
     ]
-    // 'worker' matches as exact id → first wins
-    expect(findTargetByIdOrSubstring(mixed, 'worker')?.id).toBe('worker')
+    expect(foundId(matchTarget(mixed, 'worker'))).toBe('worker')
   })
 
   it('first substring match returned when multiple match', () => {
@@ -216,14 +220,64 @@ describe('findTargetByIdOrSubstring', () => {
       makeTarget('id1', 'App Worker A', 'http://localhost/a'),
       makeTarget('id2', 'App Worker B', 'http://localhost/b'),
     ]
-    expect(findTargetByIdOrSubstring(dupes, 'worker')?.id).toBe('id1')
+    expect(foundId(matchTarget(dupes, 'worker'))).toBe('id1')
   })
 
-  it('no match → null', () => {
-    expect(findTargetByIdOrSubstring(targets, 'nonexistent')).toBeNull()
+  it('no match → none', () => {
+    expect(matchTarget(targets, 'nonexistent').kind).toBe('none')
   })
 
-  it('empty targets → null', () => {
-    expect(findTargetByIdOrSubstring([], 'abc')).toBeNull()
+  it('empty targets → none', () => {
+    expect(matchTarget([], 'abc').kind).toBe('none')
+  })
+
+  // Regression: `targets` prints ids truncated to 8 chars; passing that handle back to
+  // `eval --target` used to fail with "Target not found" for workers, whose title/url
+  // never contains the hex prefix.
+  it('resolves the 8-char id prefix printed by `targets`', () => {
+    const workers: TargetInfo[] = [{
+      id: 'B03D57047D166CFC462A7A54FF129238',
+      type: TargetType.SharedWorker,
+      title: 'bench-shared-worker',
+      url: 'blob:file:///453d9917',
+    }]
+    expect(foundId(matchTarget(workers, 'B03D5704'))).toBe('B03D57047D166CFC462A7A54FF129238')
+    expect(foundId(matchTarget(workers, 'b03d5704'))).toBe('B03D57047D166CFC462A7A54FF129238')
+  })
+
+  it('id prefix shared by several targets → ambiguous, never a silent pick', () => {
+    const twins: TargetInfo[] = [
+      makeTarget('AAAA1111', 'One', 'http://x/1'),
+      makeTarget('AAAA2222', 'Two', 'http://x/2'),
+    ]
+    const match = matchTarget(twins, 'AAAA')
+    expect(match.kind).toBe('ambiguous')
+    expect(describeTargetMatchFailure('AAAA', match)).toContain('ambiguous')
+  })
+
+  it('short queries are treated as text, not id prefixes', () => {
+    const targetsWithShortIshIds: TargetInfo[] = [
+      makeTarget('ab12cd34', 'Main', 'http://x/main'),
+      makeTarget('zz99', 'ab Page', 'http://x/ab'),
+    ]
+    expect(foundId(matchTarget(targetsWithShortIshIds, 'ab'))).toBe('zz99')
+  })
+})
+
+// ── requestDeadlineMs ────────────────────────────────────────────────────────
+
+describe('requestDeadlineMs', () => {
+  it('bounds ordinary commands', () => {
+    expect(requestDeadlineMs('eval', {})).toBeGreaterThan(0)
+  })
+
+  it('extends the budget by a poll command\'s own --timeout', () => {
+    const base = requestDeadlineMs('console', {})
+    const withFollow = requestDeadlineMs('console', { timeout: 30 })
+    expect(withFollow).toBe((base ?? 0) + 30_000)
+  })
+
+  it('leaves launch unbounded — it blocks for minutes by design', () => {
+    expect(requestDeadlineMs('launch', {})).toBeNull()
   })
 })

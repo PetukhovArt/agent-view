@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import type { AgentViewConfig } from './types.js'
 import { RuntimeType, WebGLEngine } from '../types.js'
 
@@ -14,6 +14,22 @@ export function readConfig(cwd: string): AgentViewConfig | null {
     throw new Error(`Invalid agent-view.config.json: must have runtime, port (number), and launch (string)`)
   }
   return parsed
+}
+
+/**
+ * Walk up from `startDir` to the filesystem root looking for the config, like git does
+ * for `.git`. Returns the directory that owns it — the CLI treats that as the project
+ * root so a command run from a subdirectory (or a sibling package) still resolves.
+ */
+export function findConfig(startDir: string): { config: AgentViewConfig; dir: string } | null {
+  let dir = resolve(startDir)
+  for (;;) {
+    const config = readConfig(dir)
+    if (config) return { config, dir }
+    const parent = dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
 }
 
 function isValidConfig(obj: unknown): obj is AgentViewConfig {
@@ -46,6 +62,10 @@ function isValidConfig(obj: unknown): obj is AgentViewConfig {
   if (c.captureBody !== undefined && typeof c.captureBody !== 'boolean') return false
   if (c.networkBufferSize !== undefined) {
     if (typeof c.networkBufferSize !== 'number' || c.networkBufferSize < 1) return false
+  }
+  if (c.logFile !== undefined && typeof c.logFile !== 'string') return false
+  if (c.logMaxBytes !== undefined) {
+    if (typeof c.logMaxBytes !== 'number' || c.logMaxBytes < 1024) return false
   }
 
   return true

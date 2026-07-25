@@ -3,7 +3,7 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { isAppTarget } from '../adapters/target-filter.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
@@ -31,8 +31,29 @@ import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
 import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
+import { buildMatcher } from './pattern.js'
+import {
+  DEFAULT_TAIL_LINES,
+  LogRecorder,
+  filterLogLines,
+  localStamp,
+  parseSinceToken,
+  readFeedLines,
+  resolveLogFile,
+  type ProbeSpec,
+  type RecorderStatus,
+} from './log-recorder.js'
+import type { AgentViewConfig } from '../config/types.js'
 
 const SERVER_PORT = 47922
+/**
+ * Every non-streaming command answers within this budget (plus its own `--timeout`,
+ * for the commands that poll). A CDP call that never returns used to leave the CLI
+ * hanging forever with no way back except killing the server.
+ */
+const REQUEST_DEADLINE_MS = envMs('AGENT_VIEW_REQUEST_DEADLINE_MS', 45_000)
+/** `launch` legitimately blocks for minutes (60s Electron / 10min Tauri) — it bounds itself. */
+const UNBOUNDED_COMMANDS: ReadonlySet<string> = new Set(['launch'])
 const VALID_RUNTIMES = new Set<RuntimeType>(Object.values(RuntimeType))
 const VALID_ENGINES = new Set<WebGLEngine>(Object.values(WebGLEngine))
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
@@ -45,12 +66,27 @@ const DEFAULT_CONSOLE_TARGETS: ReadonlyArray<TargetType> = [TargetType.Page, Tar
 const DEFAULT_NETWORK_BUFFER = 200
 const DEFAULT_NETWORK_MAX_LINES = 50
 const NETWORK_PAGE_TARGETS = new Set<TargetType>([TargetType.Page, TargetType.Iframe])
+/** Below this, a crop rect is a line of text rather than a container worth screenshotting. */
+const TEXT_LINE_HEIGHT_PX = 32
 
 const RUNTIME_ONLY_TARGETS = new Set<TargetType>([
   TargetType.SharedWorker,
   TargetType.ServiceWorker,
   TargetType.Worker,
 ])
+
+function envMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name])
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback
+}
+
+/** Poll-based commands carry their own `--timeout` (seconds); the deadline must outlive it. */
+export function requestDeadlineMs(command: string, args: Record<string, unknown>): number | null {
+  if (UNBOUNDED_COMMANDS.has(command)) return null
+  const ownTimeout = args['timeout']
+  const extra = typeof ownTimeout === 'number' && ownTimeout > 0 ? ownTimeout * 1000 : 0
+  return REQUEST_DEADLINE_MS + extra
+}
 
 function argStr(args: Record<string, unknown>, key: string): string | undefined {
   const v = args[key]
@@ -153,6 +189,7 @@ export class AgentViewServer {
   private networkNextRef = 1
   private token = ''
   private activeWatches = new Set<WatchSession>()
+  private logRecorder: LogRecorder | null = null
 
   private readonly handlers = {
     discover: (req: ServerRequest) => this.handleDiscover(req),
@@ -169,6 +206,7 @@ export class AgentViewServer {
     eval: (req: ServerRequest) => this.handleEval(req),
     console: (req: ServerRequest) => this.handleConsole(req),
     network: (req: ServerRequest) => this.handleNetwork(req),
+    logs: (req: ServerRequest) => this.handleLogs(req),
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
@@ -179,9 +217,11 @@ export class AgentViewServer {
     installCDPErrorGuard()
     mkdirSync(TOKEN_DIR, { recursive: true })
     this.token = randomBytes(32).toString('hex')
-    await writeFile(TOKEN_PATH, this.token, { mode: 0o600 })
 
-    return new Promise((resolve, reject) => {
+    // Publish the token only after winning the port. A server that loses the bind race
+    // must not overwrite the live server's token — that leaves every CLI call
+    // "Unauthorized" with no way back, since nobody knows the running server's token.
+    await new Promise<void>((resolve, reject) => {
       this.server = createServer((socket: Socket) => this.handleSocket(socket))
       this.server.on('error', reject)
       this.server.listen(SERVER_PORT, '127.0.0.1', () => {
@@ -189,12 +229,14 @@ export class AgentViewServer {
         resolve()
       })
     })
+    await writeFile(TOKEN_PATH, this.token, { mode: 0o600 })
   }
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
-    if (this.activeWatches.size > 0) {
-      // Pause idle shutdown while streaming handlers are alive.
+    if (this.activeWatches.size > 0 || this.logRecorder !== null) {
+      // Pause idle shutdown while streaming handlers or a log recording are alive —
+      // a recording that dies at the 5-min mark loses exactly the long scenario it was for.
       this.idleTimer = null
       return
     }
@@ -223,7 +265,10 @@ export class AgentViewServer {
   private async processRequest(data: string, socket: Socket): Promise<void> {
     try {
       const request = JSON.parse(data) as ServerRequest
-      if (request.token !== this.token) {
+      // `stop` needs no token: it only shuts this server down (any local process can do
+      // that via the OS anyway), and it is the recovery path when the token file no
+      // longer matches a running server.
+      if (request.command !== 'stop' && request.token !== this.token) {
         socket.end(JSON.stringify({ ok: false, error: 'Unauthorized' } satisfies ServerResponse) + DELIMITER)
         return
       }
@@ -249,7 +294,7 @@ export class AgentViewServer {
         await this.handleWatchStreaming(request, socket)
         return
       }
-      const response = await this.handleCommand(request)
+      const response = await this.runWithDeadline(request)
       socket.end(JSON.stringify(response) + DELIMITER)
     } catch (err) {
       const response: ServerResponse = {
@@ -266,6 +311,60 @@ export class AgentViewServer {
     return handler(req)
   }
 
+  /**
+   * Answer within the deadline no matter what CDP does. On expiry the cached sessions
+   * for that port are dropped, so the next command reconnects instead of queueing
+   * behind the same dead socket.
+   */
+  private async runWithDeadline(req: ServerRequest): Promise<ServerResponse> {
+    const budget = requestDeadlineMs(req.command, req.args)
+    if (budget === null) return this.handleCommand(req)
+
+    const pending = this.handleCommand(req)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = Symbol('expired')
+    try {
+      const outcome = await Promise.race([
+        pending,
+        new Promise<typeof expired>((resolveRace) => {
+          timer = setTimeout(() => resolveRace(expired), budget)
+        }),
+      ])
+      if (outcome !== expired) return outcome
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+
+    // The abandoned handler may still reject later — never let it reach the process guard.
+    pending.catch(() => { /* orphaned after deadline */ })
+    this.dropSessionsForPort(req.port)
+    return {
+      ok: false,
+      error: `Timed out after ${Math.round(budget / 1000)}s waiting for CDP (command: ${req.command}, port: ${req.port}). `
+        + `Dropped cached CDP sessions for that port — retry the command. `
+        + `If it keeps timing out, the app's DevTools endpoint is wedged: restart the app, or run \`agent-view stop\`.`,
+      code: ServerErrorCode.CDPTimeout,
+    }
+  }
+
+  private evictSession(connKey: string): void {
+    const cached = this.connections.get(connKey)
+    if (!cached) return
+    this.connections.delete(connKey)
+    const targetId = cached.session.target.id
+    this.consoleStream.detach(targetId)
+    this.networkStream.detach(targetId)
+    this.axTreeCache.invalidate(connKey)
+    cached.session.close().catch(() => { /* socket already gone */ })
+  }
+
+  private dropSessionsForPort(port: number): void {
+    const prefix = `${port}:`
+    for (const connKey of [...this.connections.keys()]) {
+      if (connKey.startsWith(prefix)) this.evictSession(connKey)
+    }
+  }
+
   private async resolveWindow(req: ServerRequest): Promise<{ targetId: string; windows: WindowInfo[] }> {
     const adapter = getAdapter(req.runtime)
     const windowArg = (req.args.window as string) || undefined
@@ -278,9 +377,11 @@ export class AgentViewServer {
     let targetId: string
 
     if (windowArg) {
+      const q = windowArg.toLowerCase()
       const byId = windows.find(w => w.id === windowArg)
-      const byTitle = windows.find(w => w.title.toLowerCase().includes(windowArg.toLowerCase()))
-      const found = byId ?? byTitle
+      const byIdPrefix = q.length >= 4 ? windows.filter(w => w.id.toLowerCase().startsWith(q)) : []
+      const byTitle = windows.find(w => w.title.toLowerCase().includes(q))
+      const found = byId ?? (byIdPrefix.length === 1 ? byIdPrefix[0] : undefined) ?? byTitle
       if (!found) {
         throw new Error(`Window not found: "${windowArg}". Available: ${windows.map(w => `"${w.title}" (${w.id})`).join(', ')}`)
       }
@@ -302,6 +403,7 @@ export class AgentViewServer {
     const adapter = getAdapter(req.runtime)
     const session = await adapter.connect(req.port, targetId, this.axTreeCache)
     this.connections.set(connKey, { kind: 'page', session })
+    session.onDisconnect(() => this.evictSession(connKey))
     return session
   }
 
@@ -318,6 +420,7 @@ export class AgentViewServer {
     }
     const session = await connectToRuntime(req.port, target)
     this.connections.set(connKey, { kind: 'runtime', session })
+    session.onDisconnect(() => this.evictSession(connKey))
     return session
   }
 
@@ -729,7 +832,12 @@ export class AgentViewServer {
       if (!found) {
         warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
       } else {
-        clip = await conn.getBoxRect(found.backendDOMNodeId, { scrollIntoView: true })
+        const cropUp = argNum(req.args, 'cropUp') ?? 0
+        clip = await conn.getBoxRect(found.backendDOMNodeId, { scrollIntoView: true, ancestorLevels: cropUp })
+        if (clip.height < TEXT_LINE_HEIGHT_PX && cropUp === 0) {
+          warning = `crop matched a text-sized box (${Math.round(clip.width)}×${Math.round(clip.height)}) — `
+            + `pass --crop-up 1 (or 2) to capture the surrounding container instead`
+        }
       }
     }
 
@@ -833,9 +941,9 @@ export class AgentViewServer {
     const allTargets = await listSupportedTargets(req.port)
 
     if (explicitId) {
-      const found = findTargetByIdOrSubstring(allTargets, explicitId)
-      if (found) return found
-      throw new Error(`Target not found: "${explicitId}". Run \`agent-view targets\` for the full list.`)
+      const match = matchTarget(allTargets, explicitId)
+      if (match.kind === 'found') return match.target
+      throw new Error(describeTargetMatchFailure(explicitId, match))
     }
 
     if (windowArg) {
@@ -980,12 +1088,63 @@ export class AgentViewServer {
     }
   }
 
+  /**
+   * Console target types for this request: explicit arg → project config → defaults.
+   */
+  private resolveConsoleTypes(req: ServerRequest, config: AgentViewConfig | null): Set<TargetType> {
+    const requested = argStrArray(req.args, 'consoleTargets')
+      ?? (config?.consoleTargets as string[] | undefined)
+      ?? DEFAULT_CONSOLE_TARGETS
+    return new Set<TargetType>(
+      requested
+        .filter((t): t is string => typeof t === 'string')
+        .filter((t): t is TargetType => Object.values(TargetType).includes(t as TargetType)) as TargetType[],
+    )
+  }
+
+  /**
+   * Lazy-attach: give every matching target a session feeding `consoleStream`. Idempotent,
+   * and re-run on every console/logs call — that is how a restarted worker (fresh target id)
+   * rejoins the feed. Returns the sessions now attached.
+   */
+  private async attachConsoleTargets(
+    req: ServerRequest,
+    opts: { targets: TargetInfo[]; allowedTypes: Set<TargetType>; targetId?: string },
+  ): Promise<RuntimeSession[]> {
+    const sessions: RuntimeSession[] = []
+    if (process.env.AV_DEBUG_CONSOLE) {
+      // eslint-disable-next-line no-console
+      console.error(`[av-debug] attachConsoleTargets: targets=${opts.targets.length} explicit=${opts.targetId ?? 'none'} types=${[...opts.allowedTypes].join(',')}`)
+    }
+    for (const t of opts.targets) {
+      if (opts.targetId && t.id !== opts.targetId) continue
+      if (!opts.targetId && !opts.allowedTypes.has(t.type)) continue
+      if (!RUNTIME_ONLY_TARGETS.has(t.type) && t.type !== TargetType.Page && t.type !== TargetType.Iframe) continue
+      try {
+        const session = await this.getRuntimeSession(req, t)
+        this.consoleStream.attach(session)
+        sessions.push(session)
+        if (process.env.AV_DEBUG_CONSOLE) {
+          // eslint-disable-next-line no-console
+          console.error(`[av-debug] attachConsoleTargets: attached ${t.type}:${t.id.slice(0, 8)} (stream now has ${this.consoleStream.attachedCount})`)
+        }
+      } catch (err) {
+        if (process.env.AV_DEBUG_CONSOLE) {
+          // eslint-disable-next-line no-console
+          console.error(`[av-debug] attachConsoleTargets: SKIP ${t.type}:${t.id.slice(0, 8)} — ${(err as Error).message}`)
+        }
+      }
+    }
+    return sessions
+  }
+
   private async handleConsole(req: ServerRequest): Promise<ServerResponse> {
     const cwd = argStr(req.args, 'cwd')
     const config = cwd ? readConfig(resolve(cwd)) : null
     const bufferSize = config?.consoleBufferSize ?? 500
-    if (this.consoleStream.attachedCount === 0) {
-      // Recreate with config-tuned capacity on first attach
+    if (this.consoleStream.attachedCount === 0 && this.logRecorder === null) {
+      // Recreate with config-tuned capacity on first attach. Never while recording — the
+      // recorder's subscription lives on the stream instance and would be dropped silently.
       this.consoleStream = new ConsoleStream({ capacity: bufferSize })
     }
 
@@ -995,11 +1154,11 @@ export class AgentViewServer {
     const all = await listSupportedTargets(req.port)
     let resolvedTargetId: string | undefined
     if (targetQuery) {
-      const resolved = findTargetByIdOrSubstring(all, targetQuery)
-      if (!resolved) {
-        return { ok: false, error: `Target not found: "${targetQuery}". Run \`agent-view targets\` for the full list.` }
+      const match = matchTarget(all, targetQuery)
+      if (match.kind !== 'found') {
+        return { ok: false, error: describeTargetMatchFailure(targetQuery, match) }
       }
-      resolvedTargetId = resolved.id
+      resolvedTargetId = match.target.id
     }
 
     if (argBool(req.args, 'clear')) {
@@ -1007,39 +1166,11 @@ export class AgentViewServer {
       return { ok: true, data: 'Console buffer cleared' }
     }
 
-    const requestedTypes = argStrArray(req.args, 'consoleTargets')
-      ?? (config?.consoleTargets as string[] | undefined)
-      ?? DEFAULT_CONSOLE_TARGETS
-
-    const allowedTypes = new Set<TargetType>(
-      requestedTypes
-        .filter((t): t is string => typeof t === 'string')
-        .filter((t): t is TargetType => Object.values(TargetType).includes(t as TargetType)) as TargetType[],
-    )
-
-    // Lazy attach: ensure every matching target has a session
-    if (process.env.AV_DEBUG_CONSOLE) {
-      // eslint-disable-next-line no-console
-      console.error(`[av-debug] handleConsole: targets=${all.length} explicit=${resolvedTargetId ?? 'none'} types=${[...allowedTypes].join(',')}`)
-    }
-    for (const t of all) {
-      if (resolvedTargetId && t.id !== resolvedTargetId) continue
-      if (!resolvedTargetId && !allowedTypes.has(t.type)) continue
-      if (!RUNTIME_ONLY_TARGETS.has(t.type) && t.type !== TargetType.Page && t.type !== TargetType.Iframe) continue
-      try {
-        const session = await this.getRuntimeSession(req, t)
-        this.consoleStream.attach(session)
-        if (process.env.AV_DEBUG_CONSOLE) {
-          // eslint-disable-next-line no-console
-          console.error(`[av-debug] handleConsole: attached ${t.type}:${t.id.slice(0, 8)} (stream now has ${this.consoleStream.attachedCount})`)
-        }
-      } catch (err) {
-        if (process.env.AV_DEBUG_CONSOLE) {
-          // eslint-disable-next-line no-console
-          console.error(`[av-debug] handleConsole: SKIP ${t.type}:${t.id.slice(0, 8)} — ${(err as Error).message}`)
-        }
-      }
-    }
+    await this.attachConsoleTargets(req, {
+      targets: all,
+      allowedTypes: this.resolveConsoleTypes(req, config),
+      targetId: resolvedTargetId,
+    })
 
     const levelFilter = parseLevelFilter(argStrArray(req.args, 'levels'))
     const since = argNum(req.args, 'since')
@@ -1112,11 +1243,11 @@ export class AgentViewServer {
     const targetQuery = argStr(req.args, 'target') ?? argStr(req.args, 'window')
     if (targetQuery) {
       const all = await listSupportedTargets(req.port)
-      const resolved = findTargetByIdOrSubstring(all, targetQuery)
-      if (!resolved) {
-        return { ok: false, error: `Target not found: "${targetQuery}". Run \`agent-view targets\` for the full list.` }
+      const match = matchTarget(all, targetQuery)
+      if (match.kind !== 'found') {
+        return { ok: false, error: describeTargetMatchFailure(targetQuery, match) }
       }
-      resolvedTargetId = resolved.id
+      resolvedTargetId = match.target.id
     }
 
     const reqN = argNum(req.args, 'req')
@@ -1212,6 +1343,149 @@ export class AgentViewServer {
     return { ok: true, data: this.renderNetworkList(entries, maxLines) }
   }
 
+  /**
+   * Durable side of the console feed. `console` answers from a ring buffer that dies with the
+   * server; `logs` appends every message from every attached target to one file, so a diagnosis
+   * can grep a timeline that outlives the scenario (and the 5-min idle shutdown).
+   */
+  private async handleLogs(req: ServerRequest): Promise<ServerResponse> {
+    const action = argStr(req.args, 'action') ?? 'tail'
+    const cwd = argStr(req.args, 'cwd')
+    const projectDir = cwd ? resolve(cwd) : process.cwd()
+    const config = cwd ? readConfig(projectDir) : null
+    const explicitFile = argStr(req.args, 'file')
+    // An active recording owns the feed path — only an explicit --file overrides it.
+    const file = explicitFile
+      ? resolveLogFile(projectDir, explicitFile)
+      : this.logRecorder?.file ?? resolveLogFile(projectDir, config?.logFile)
+
+    switch (action) {
+      case 'start': return this.startLogRecording(req, config, file)
+      case 'stop': return this.stopLogRecording()
+      case 'status': return { ok: true, data: this.logRecorder ? formatRecorderStatus(this.logRecorder.status()) : formatIdleFeed(file) }
+      case 'clear': return this.clearLogFeed(file)
+      case 'tail': return this.tailLogFeed(req, file)
+      default: return { ok: false, error: `Unknown logs action: ${action}` }
+    }
+  }
+
+  private async startLogRecording(req: ServerRequest, config: AgentViewConfig | null, file: string): Promise<ServerResponse> {
+    if (this.logRecorder) {
+      if (this.logRecorder.file === file) {
+        return { ok: true, data: `Already recording\n${formatRecorderStatus(this.logRecorder.status())}` }
+      }
+      return { ok: false, error: `Already recording into ${this.logRecorder.file}. Run \`agent-view logs stop\` first.` }
+    }
+
+    const probes = parseProbes(req.args)
+    if (probes.length > 0 && !config?.allowEval) {
+      return { ok: false, error: 'logs --probe evaluates arbitrary JS. Set "allowEval": true in agent-view.config.json to enable it.' }
+    }
+
+    const targetQuery = argStr(req.args, 'target')
+    let resolvedTargetId: string | undefined
+    const all = await listSupportedTargets(req.port)
+    if (targetQuery) {
+      const match = matchTarget(all, targetQuery)
+      if (match.kind !== 'found') {
+        return { ok: false, error: describeTargetMatchFailure(targetQuery, match) }
+      }
+      resolvedTargetId = match.target.id
+    }
+
+    if (this.consoleStream.attachedCount === 0) {
+      this.consoleStream = new ConsoleStream({ capacity: config?.consoleBufferSize ?? 500 })
+    }
+
+    const allowedTypes = this.resolveConsoleTypes(req, config)
+    const recorder = new LogRecorder({
+      file,
+      levels: parseLevelFilter(argStrArray(req.args, 'levels')),
+      targetId: resolvedTargetId,
+      rescanMs: argNum(req.args, 'rescan'),
+      maxBytes: config?.logMaxBytes,
+      truncate: argBool(req.args, 'truncate') ?? false,
+      probes,
+      rescan: async () => this.attachConsoleTargets(req, {
+        targets: await listSupportedTargets(req.port),
+        allowedTypes,
+        targetId: resolvedTargetId,
+      }),
+      subscribe: (handler) => this.consoleStream.subscribe(handler),
+    })
+
+    try {
+      await recorder.start()
+    } catch (err) {
+      recorder.stop('start failed')
+      return { ok: false, error: `Could not start recording into ${file}: ${err instanceof Error ? err.message : String(err)}` }
+    }
+
+    this.logRecorder = recorder
+    this.resetIdleTimer()
+    return { ok: true, data: formatRecorderStatus(recorder.status()) }
+  }
+
+  private async stopLogRecording(): Promise<ServerResponse> {
+    if (!this.logRecorder) return { ok: true, data: 'Not recording' }
+    const { file, lines } = this.logRecorder.status()
+    this.logRecorder.stop('stop requested')
+    this.logRecorder = null
+    this.resetIdleTimer()
+    return { ok: true, data: `Recording stopped — ${lines} lines in ${file}` }
+  }
+
+  private async clearLogFeed(file: string): Promise<ServerResponse> {
+    this.consoleStream.clear()
+    if (this.logRecorder?.file === file) {
+      this.logRecorder.clearFeed()
+      return { ok: true, data: `Feed cleared, recording continues — ${file}` }
+    }
+    if (!existsSync(file)) {
+      return { ok: true, data: `Console buffer cleared. No feed file at ${file}.` }
+    }
+    writeFileSync(file, '')
+    return { ok: true, data: `Feed cleared — ${file}` }
+  }
+
+  private async tailLogFeed(req: ServerRequest, file: string): Promise<ServerResponse> {
+    if (!existsSync(file)) {
+      return { ok: false, error: `No log feed at ${file}. Run \`agent-view logs start\` first.` }
+    }
+
+    const sinceToken = argStr(req.args, 'since')
+    let since: string | undefined
+    if (sinceToken !== undefined) {
+      const parsed = parseSinceToken(sinceToken)
+      if (parsed === null) {
+        return { ok: false, error: `Invalid --since "${sinceToken}". Use -5m, 09:31, 09:31:02.500, or an ISO timestamp.` }
+      }
+      since = parsed
+    }
+
+    const { lines, scanTruncated } = readFeedLines(file)
+    const selected = filterLogLines(lines, {
+      grep: argStr(req.args, 'grep'),
+      since,
+      level: parseLevelFilter(argStrArray(req.args, 'levels')),
+      limit: argNum(req.args, 'lines') ?? DEFAULT_TAIL_LINES,
+    })
+
+    if (selected.length === 0) {
+      return { ok: true, data: lines.length === 0 ? '(feed is empty)' : '(no records match)' }
+    }
+
+    const { text, dropped } = capTailOutput(selected)
+    const warnings = [
+      dropped > 0 ? `Output cap hit — ${dropped} older matching records omitted.` : null,
+      scanTruncated ? `Feed exceeds the scan window — older records are only in ${file}.` : null,
+      // Without this, a static feed reads as "the app went quiet" instead of "nobody is recording".
+      this.logRecorder?.file === file ? null : 'Not recording — this feed is static. Run `agent-view logs start`.',
+    ].filter((w): w is string => w !== null)
+
+    return { ok: true, data: text, warning: warnings.length > 0 ? warnings.join(' ') : undefined }
+  }
+
   private async handleStop(): Promise<ServerResponse> {
     setTimeout(() => this.shutdown(), 100)
     return { ok: true, data: 'Server stopping' }
@@ -1222,6 +1496,8 @@ export class AgentViewServer {
     for (const watch of [...this.activeWatches]) {
       watch.stop(StopReason.ServerShutdown, false)
     }
+    this.logRecorder?.stop('server shutdown')
+    this.logRecorder = null
     await unlink(TOKEN_PATH).catch(() => {})
 
     this.consoleStream.detach()
@@ -1238,13 +1514,43 @@ export class AgentViewServer {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-export function findTargetByIdOrSubstring(targets: TargetInfo[], query: string): TargetInfo | null {
+export type TargetMatch =
+  | { kind: 'found'; target: TargetInfo }
+  | { kind: 'none' }
+  | { kind: 'ambiguous'; matches: TargetInfo[] }
+
+const MIN_ID_PREFIX_LENGTH = 4
+
+/**
+ * Resolve a `--target` query: exact id → id prefix → title/url substring.
+ * The id-prefix step is load-bearing: `targets` prints ids truncated to 8 chars,
+ * and that printed handle must be accepted back (workers have no title/url to
+ * match on).
+ */
+export function matchTarget(targets: TargetInfo[], query: string): TargetMatch {
   const byId = targets.find(t => t.id === query)
-  if (byId) return byId
+  if (byId) return { kind: 'found', target: byId }
+
   const q = query.toLowerCase()
-  return targets.find(
+
+  if (q.length >= MIN_ID_PREFIX_LENGTH) {
+    const byPrefix = targets.filter(t => t.id.toLowerCase().startsWith(q))
+    if (byPrefix.length === 1) return { kind: 'found', target: byPrefix[0] }
+    if (byPrefix.length > 1) return { kind: 'ambiguous', matches: byPrefix }
+  }
+
+  const bySubstring = targets.find(
     t => t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q),
-  ) ?? null
+  )
+  return bySubstring ? { kind: 'found', target: bySubstring } : { kind: 'none' }
+}
+
+export function describeTargetMatchFailure(query: string, match: TargetMatch): string {
+  if (match.kind === 'ambiguous') {
+    const list = match.matches.map(t => `${t.id} (${t.type})`).join(', ')
+    return `Target id prefix "${query}" is ambiguous — matches: ${list}. Pass more characters.`
+  }
+  return `Target not found: "${query}". Run \`agent-view targets\` for the full list.`
 }
 
 function parseMouseButton(value: string | undefined): MouseButton | undefined {
@@ -1306,13 +1612,81 @@ function parseStatusFilter(tokens: string[] | undefined): { statusClasses?: Read
   }
 }
 
-function buildMatcher(pattern: string): (text: string) => boolean {
-  const regexMatch = /^\/(.+)\/([gimsuy]*)$/.exec(pattern)
-  if (regexMatch) {
-    const re = new RegExp(regexMatch[1], regexMatch[2])
-    return (text) => re.test(text)
+/** Response cap for `logs tail` — a feed can be megabytes; an agent's context cannot. */
+const TAIL_OUTPUT_CAP = 200_000
+
+function capTailOutput(lines: string[]): { text: string; dropped: number } {
+  let total = 0
+  let start = lines.length
+  for (let i = lines.length - 1; i >= 0; i--) {
+    total += lines[i].length + 1
+    if (total > TAIL_OUTPUT_CAP) break
+    start = i
   }
-  return (text) => text.includes(pattern)
+  const kept = start === lines.length ? lines.slice(-1) : lines.slice(start)
+  return { text: kept.join('\n'), dropped: lines.length - kept.length }
+}
+
+function parseProbes(args: Record<string, unknown>): ProbeSpec[] {
+  const raw = args['probes']
+  if (!Array.isArray(raw)) return []
+  const probes: ProbeSpec[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    if (typeof e.name !== 'string' || typeof e.source !== 'string') continue
+    probes.push({
+      name: e.name,
+      source: e.source,
+      targetQuery: typeof e.targetQuery === 'string' ? e.targetQuery : undefined,
+    })
+  }
+  return probes
+}
+
+function formatRecorderStatus(s: RecorderStatus): string {
+  const out = [
+    `recording  ${s.file}`,
+    `started    ${localStamp(s.startedAt)} (${formatElapsed(Date.now() - s.startedAt)} ago)`,
+    `feed       ${s.lines} lines, ${formatBytes(s.bytes)}${s.rotations > 0 ? `, rotated ${s.rotations}x` : ''}`,
+    `targets    ${s.attached.length > 0 ? s.attached.join(', ') : '(none attached yet)'}`,
+    `filters    levels=${s.levels?.join(',') ?? 'all'} target=${s.targetId ? s.targetId.slice(0, 8) : 'all'}`,
+    `rescan     ${s.rescanMs}ms, ${s.ticks} ticks, last ${s.lastTickAt === null ? 'never' : localStamp(s.lastTickAt)}`,
+  ]
+  if (s.probes.length > 0) {
+    out.push(`probes     ${s.probes.map(p => `${p.name}${p.targetQuery ? `@${p.targetQuery}` : ''} x${p.injections}`).join(', ')}`)
+  }
+  if (s.lastError) out.push(`last error ${s.lastError}`)
+  return out.join('\n')
+}
+
+function formatIdleFeed(file: string): string {
+  if (!existsSync(file)) {
+    return `not recording\nfeed       ${file} (does not exist)\nstart with \`agent-view logs start\``
+  }
+  const stats = statSync(file)
+  return [
+    'not recording',
+    `feed       ${file}`,
+    `size       ${formatBytes(stats.size)}, last write ${localStamp(stats.mtimeMs)}`,
+    'start with `agent-view logs start` — `logs tail` still reads the existing feed',
+  ].join('\n')
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`
+  if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`
+  return `${s}s`
 }
 
 function formatConsoleMessages(msgs: StampedConsoleMessage[]): string {

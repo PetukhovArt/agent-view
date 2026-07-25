@@ -75,6 +75,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         webSocketClosed: vi.fn().mockReturnValue(() => {}),
         eventSourceMessageReceived: vi.fn().mockReturnValue(() => {}),
       },
+      on: vi.fn(),
       close: vi.fn().mockResolvedValue({}),
     })
 
@@ -83,7 +84,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
 
-import { connectToPage, connectToRuntime } from '../transport.js'
+import { connectToPage, connectToRuntime, listTargets } from '../transport.js'
 import { AxTreeCache } from '../ax-cache.js'
 import { TargetType, type TargetInfo } from '../types.js'
 
@@ -374,5 +375,28 @@ describe('evaluate', () => {
       exceptionDetails: { exception: { description: 'ReferenceError: x is not defined' } },
     })
     await expect(session.evaluate('x')).rejects.toThrow(/ReferenceError/)
+  })
+})
+
+// ── target enumeration is bounded ─────────────────────────────────────────────
+
+describe('listTargets against a wedged CDP endpoint', () => {
+  // Regression: a port that accepts TCP but never answers HTTP (app mid-restart)
+  // used to leave /json/list pending forever, and with it every agent-view command.
+  it('gives up instead of hanging when the port accepts TCP but never answers', async () => {
+    const { createServer } = await import('node:net')
+    const silent = createServer(() => { /* accept, never respond */ })
+    await new Promise<void>(r => silent.listen(0, '127.0.0.1', () => r()))
+    const port = (silent.address() as { port: number }).port
+
+    vi.stubEnv('AGENT_VIEW_CDP_PROBE_TIMEOUT_MS', '300')
+    try {
+      const started = Date.now()
+      await expect(listTargets(port)).resolves.toEqual([])
+      expect(Date.now() - started).toBeLessThan(3_000)
+    } finally {
+      vi.unstubAllEnvs()
+      silent.close()
+    }
   })
 })

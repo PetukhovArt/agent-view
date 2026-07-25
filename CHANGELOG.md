@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `--target` / `--window` accept the 8-char id prefix `targets` prints (case-insensitive, ≥4 chars, ambiguous prefix reported). Worker handles were unusable before.
+- `/json/list` probe (5s) and WebSocket handshake (10s) now time out — a port accepting TCP without answering HTTP froze every command. Env: `AGENT_VIEW_CDP_PROBE_TIMEOUT_MS`, `AGENT_VIEW_CDP_CONNECT_TIMEOUT_MS`.
+- Non-streaming commands answer within a deadline (45s + own `--timeout`; `launch` unbounded), returning `CDP_TIMEOUT` and dropping that port's cached sessions. Sessions also evicted on WebSocket disconnect. CLI backstop: 120s.
+- CLI exits after auto-starting the server — the `READY` pipe kept its event loop alive (the "first call hangs >120s" symptom).
+- Token is written only after the port bind succeeds; a server losing the bind race used to clobber it, leaving every call `Unauthorized`. `stop` needs no token, and the CLI replaces an orphaned server on `Unauthorized`.
+- Config is located by walking up the directory tree, so commands work from a subdirectory.
+- Dev mode spawns its server on Windows again (`npx.cmd` + `shell: false` → `EINVAL`; now `process.execPath` + tsx CLI).
+- CDP session bring-up (`Runtime.enable` and friends) is bounded like the handshake. A target that accepted the socket and then went silent — a worker that died between `/json/list` and connect — hung the caller forever.
+
+### Added
+- `agent-view logs start|tail|status|clear|stop` — durable file feed of page + worker console. One record per line (`HH:MM:SS.mmm [level] [type:id8] text`, newlines escaped), so `grep`/`awk` and `tail --grep/--since/--level` stay reliable. Targets are re-discovered every 3s, recording suspends idle shutdown, feed rotates at `logMaxBytes`. Config: `logFile`, `logMaxBytes`.
+- `logs start --probe <file.js>[@target]` injects JS that reports through `console.log`, re-injected after page reloads and worker restarts. Requires `allowEval`.
+- `screenshot --crop-up <n>` climbs `n` element ancestors before cropping (title → its card). Text-sized crops warn on stderr.
+
 ## [0.10.2] - 2026-07-22
 
 ### Fixed

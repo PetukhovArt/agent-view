@@ -67,10 +67,13 @@ agent-view screenshot --scale 0.5              # Recommended: JPEG at half-res (
 agent-view screenshot --scale 0.5 --window <id>  # Specific window
 agent-view screenshot --crop "Sidebar"         # Crop to element bounding box (~1.6k tokens — 12× win)
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
+agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not just its heading
 agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
 ```
 
 `--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing.
+
+A text filter usually matches the text-bearing node, so cropping on a section title returns a thin strip of that title. `--crop-up <n>` climbs `n` element ancestors before cropping — use `1` (sometimes `2`) to get the surrounding card/section. When a crop comes back text-sized, the command says so on stderr.
 
 ### Runtime State (`eval`)
 
@@ -137,6 +140,40 @@ agent-view console --level error                # expect "(no console messages)"
 
 Default attached target types: `page`, `shared_worker`, `service_worker` (override via `consoleTargets` in config).
 
+### Log feed (`logs`)
+
+`console` reads a ring buffer that dies with the server; `logs` records the same messages — page *and* every worker — into one file you can grep later. Reach for it when a bug needs a timeline instead of a snapshot: intermittent failures, long scenarios, anything spanning reloads or worker restarts.
+
+```bash
+agent-view logs start --truncate           # start clean; keeps recording across reloads
+agent-view logs                            # tail last 200 records (alias of `logs tail`)
+agent-view logs tail --grep "ws closed"    # substring or /regex/
+agent-view logs tail --since -2m           # -30s | -5m | -2h | 09:31 | 09:31:02.500 | ISO
+agent-view logs tail --level error,warn -n 50
+agent-view logs clear                      # truncate feed + drop console buffer (baseline)
+agent-view logs status                     # attached targets, feed size, tick count
+agent-view logs stop
+```
+
+Feed format — one record per line, always `HH:MM:SS.mmm [level] [type:id8] text`, local time, embedded newlines escaped as `\n`. That makes external `grep`/`awk` safe on it; a wrapped stack or JSON payload never breaks line-oriented filtering.
+
+Default file `.agent-view/console.log` in the project root (override with `logFile` in config or `--file`). Caps at 8 MB, then rotates once to `<file>.prev` (`logMaxBytes` to change). Recording suspends the server's 5-min idle shutdown, so a long scenario keeps writing.
+
+Standard pattern for "it fails once every N runs":
+```bash
+agent-view logs start --truncate
+# … drive the scenario, reload, retry as many times as needed …
+agent-view logs tail --level error,warn
+agent-view logs tail --grep "/socket|retry/" --since -5m
+agent-view logs stop
+```
+
+**Probes** (`--probe <file.js>[@target]`, requires `allowEval`) inject JS that logs into the same feed — use it when the evidence you need isn't logged by the app (wrap a method, count events, dump a scheduler). The probe is re-injected automatically whenever its context is gone: page reload, worker restart. Write it idempotent and let it report via plain `console.log`.
+
+```bash
+agent-view logs start --probe ./probes/orchestrator.js@shared_worker --probe ./probes/audio.js@index.html
+```
+
 ### Network (`network`)
 
 Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Use to confirm an expected API call fired, diagnose a silent 404 / CORS block / missing auth header, or verify "button disabled until the network completes".
@@ -176,6 +213,8 @@ agent-view targets --json                                # machine-readable
 
 You usually don't need this — `eval --target <substring>` and `--window <name>` both do fuzzy matching. Reach for `targets` when the substring is ambiguous.
 
+`targets` prints ids truncated to 8 chars, and `--target` / `--window` accept that printed handle (case-insensitive id prefix, ≥4 chars) as well as a full id or a title/URL substring. An ambiguous prefix is reported as ambiguous rather than resolved to an arbitrary target. Worker targets often share a blank title, so the printed id prefix is the reliable handle for them.
+
 ### Scene / Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
 
 These commands read the scene graph from canvas-based rendering engines. Skip this section if the project has no `webgl` field in config.
@@ -203,6 +242,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
 | Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
+| What happened over a long / flaky / reload-spanning run | `logs start` … `logs tail --grep`/`--since` | Durable one-line-per-record timeline of page + workers; `console` loses it on idle shutdown |
 | Layout/visual of a specific element | `screenshot --crop "<element>"` | ~1.6k tokens (1 tile) — crops to bounding box, massive token win |
 | Layout, spacing, full-window visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
 | Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
@@ -292,6 +332,7 @@ Tolerance default: a designer's code-review level — flag what they'd notice, i
 - **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
 - **Element not found:** Wait 2s, retry once (render delay after HMR). If still missing — report FAIL
 - **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (auto-starts Electron/Browser/Tauri). On `PORT_CONFLICT` — surface PID/process and ask user.
+- **`CDP_TIMEOUT` error:** the command hit the server-side deadline; cached CDP sessions for that port were dropped, so retry once. Repeated timeouts mean the app's DevTools endpoint is wedged — restart the app.
 - **Max retries per command:** 2. After that — SKIP scenario step with warning
 
 ## Important Notes

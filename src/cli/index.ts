@@ -10,7 +10,7 @@ import { Command } from 'commander'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { readConfig } from '../config/manager.js'
+import { findConfig } from '../config/manager.js'
 import { runInit } from './commands/init.js'
 import { runDiscover } from './commands/discover.js'
 import { runLaunch } from './commands/launch.js'
@@ -27,6 +27,7 @@ import { runTargets } from './commands/targets.js'
 import { runEval } from './commands/eval.js'
 import { runConsole } from './commands/console.js'
 import { runNetwork } from './commands/network.js'
+import { runLogs } from './commands/logs.js'
 import { runWatch } from './commands/watch.js'
 import type { AgentViewConfig } from '../config/types.js'
 
@@ -139,6 +140,7 @@ program
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-s, --scale <factor>', 'Scale factor 0..1 — reduces image size and Claude vision token cost (e.g. 0.5)', parseFloat)
   .option('--crop <filter>', 'Crop to bounding box of matched element (massive vision-token win)')
+  .option('--crop-up <n>', 'Climb N element ancestors from the --crop match before cropping (heading → its card)', parseCropUp)
   .action(async (options) => {
     const config = requireConfig()
     await runScreenshot(config, options)
@@ -229,6 +231,64 @@ program
     await runNetwork(config, options)
   })
 
+const logs = program
+  .command('logs')
+  .description('Record the console feed of every target to a file, then tail/filter/clear it')
+
+logs
+  .command('start')
+  .description('Start recording (survives page reloads and worker restarts; keeps the server alive)')
+  .option('--file <path>', 'Feed file (default: config logFile, else .agent-view/console.log)')
+  .option('-t, --target <id>', 'Record one target only (CDP id, id prefix, title, or URL substring)')
+  .option('-l, --level <levels>', 'Comma-separated level filter (log,info,warn,error,debug)')
+  .option('--rescan <ms>', 'Target rediscovery interval, min 500 (default 3000)', parseDepth)
+  .option('--truncate', 'Start from an empty feed instead of appending')
+  .option('--probe <path[@target]>', 'Inject a JS probe into matching targets, re-injected after restarts (requires allowEval)', collectProbe, [])
+  .action(async (options) => {
+    const config = requireConfig()
+    await runLogs(config, 'start', options)
+  })
+
+logs
+  .command('stop')
+  .description('Stop recording (the feed file stays readable)')
+  .option('--file <path>', 'Feed file to report on')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runLogs(config, 'stop', options)
+  })
+
+logs
+  .command('status')
+  .description('Show recording state, attached targets, feed size')
+  .option('--file <path>', 'Feed file to report on')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runLogs(config, 'status', options)
+  })
+
+logs
+  .command('tail', { isDefault: true })
+  .description('Print the tail of the feed (default 200 records)')
+  .option('-n, --lines <n>', 'Records to print (default 200)', parseMaxLines)
+  .option('--grep <pattern>', 'Keep records matching a substring or /regex/')
+  .option('--since <when>', 'Records at or after -5m | -30s | 09:31 | 09:31:02.500 | ISO timestamp')
+  .option('-l, --level <levels>', 'Comma-separated level filter (log,info,warn,error,debug)')
+  .option('--file <path>', 'Feed file to read')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runLogs(config, 'tail', options)
+  })
+
+logs
+  .command('clear')
+  .description('Truncate the feed and drop the in-memory console buffer')
+  .option('--file <path>', 'Feed file to truncate')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runLogs(config, 'clear', options)
+  })
+
 program
   .command('watch <expression>')
   .description('Watch a JS expression and stream JSON-patch diffs (requires "allowEval": true)')
@@ -251,19 +311,38 @@ program
     await runStop()
   })
 
+/**
+ * Resolves the project by walking up from cwd, then chdirs into the config's directory:
+ * every command sends `cwd` to the server for config/policy re-reads, and `launch` spawns
+ * the app there. Running from a subdirectory must behave like running from the root.
+ */
 function requireConfig(): AgentViewConfig {
-  const config = readConfig(process.cwd())
-  if (!config) {
-    console.error('No agent-view.config.json found. Run `agent-view init` first.')
+  const found = findConfig(process.cwd())
+  if (!found) {
+    console.error('No agent-view.config.json found in this directory or any parent. Run `agent-view init` first.')
     process.exit(1)
   }
-  return config
+  if (found.dir !== process.cwd()) process.chdir(found.dir)
+  return found.config
 }
 
 function parseDepth(value: string): number {
   const n = parseInt(value, 10)
   if (isNaN(n)) {
     console.error(`Invalid depth value: "${value}"`)
+    process.exit(1)
+  }
+  return n
+}
+
+function collectProbe(value: string, previous: string[]): string[] {
+  return [...previous, value]
+}
+
+function parseCropUp(value: string): number {
+  const n = parseInt(value, 10)
+  if (isNaN(n) || n < 0) {
+    console.error(`Invalid --crop-up value: "${value}" (must be 0 or a positive integer)`)
     process.exit(1)
   }
   return n

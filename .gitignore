@@ -143,6 +143,9 @@ vite.config.ts.timestamp-*
 # Benchmark run results (baseline.json is committed, results.json is not)
 bench/results.json
 
+# agent-view log feed (`agent-view logs`)
+.agent-view/
+
 # Personal/dev files
 .claude*
 !.claude-plugin

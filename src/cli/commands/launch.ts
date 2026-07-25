@@ -9,7 +9,7 @@ function sendLaunch(config: AgentViewConfig): Promise<ServerResponse> {
     port: config.port,
     runtime: config.runtime,
     args: { launch: config.launch, cwd: process.cwd() },
-  })
+  }, { timeoutMs: 0 })  // app startup is bounded server-side (60s Electron / 10min Tauri)
 }
 
 function promptRetry(): Promise<boolean> {

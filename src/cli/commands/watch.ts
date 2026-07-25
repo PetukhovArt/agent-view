@@ -1,15 +1,10 @@
 import { connect, type Socket } from 'node:net'
-import { spawn } from 'node:child_process'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import type { AgentViewConfig } from '../../config/types.js'
+import { readToken, startServer } from '../client.js'
 import { WATCH_MIN_INTERVAL_MS, type WatchFrame, type JsonPatchOp } from '../../inspectors/watch/types.js'
 
 const SERVER_PORT = 47922
 const DELIMITER = '\n'
-const TOKEN_PATH = join(homedir(), '.agent-view', 'token')
 
 export type WatchOptions = {
   interval?: string
@@ -219,45 +214,3 @@ function parsePosInt(raw: string | undefined, fallback: number, name: string): n
   return Math.floor(n)
 }
 
-function readToken(): string {
-  try {
-    return readFileSync(TOKEN_PATH, 'utf-8').trim()
-  } catch {
-    return ''
-  }
-}
-
-async function startServer(): Promise<void> {
-  const __dirname = dirname(fileURLToPath(import.meta.url))
-  const serverEntryJs = join(__dirname, '..', '..', 'server', 'index.js')
-  const serverEntryTs = join(__dirname, '..', '..', 'server', 'index.ts')
-
-  const isDev = existsSync(serverEntryTs) && !existsSync(serverEntryJs)
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-  const cmd = isDev ? npx : 'node'
-  const args = isDev ? ['tsx', serverEntryTs] : [serverEntryJs]
-  const projectRoot = join(__dirname, '..', '..', '..')
-
-  const child = spawn(cmd, args, {
-    detached: true,
-    stdio: ['ignore', 'pipe', 'ignore'],
-    shell: false,
-    cwd: projectRoot,
-    windowsHide: true,
-  })
-  child.unref()
-
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Server startup timeout (10s)')), 10_000)
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (chunk.toString().includes('READY')) {
-        clearTimeout(timeout)
-        resolve()
-      }
-    })
-    child.on('error', (err: Error) => {
-      clearTimeout(timeout)
-      reject(err)
-    })
-  })
-}

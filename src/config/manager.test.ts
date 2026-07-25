@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readConfig, generateConfig, writeConfig } from './manager.js'
+import { readConfig, findConfig, generateConfig, writeConfig } from './manager.js'
 import { RuntimeType, WebGLEngine } from '../types.js'
 
 function makeTempDir(): string {
@@ -64,6 +64,33 @@ describe('readConfig', () => {
     const config = { runtime: RuntimeType.Browser, port: 65536, launch: 'npm run dev' }
     writeFileSync(join(tmpDir, 'agent-view.config.json'), JSON.stringify(config), 'utf-8')
     expect(() => readConfig(tmpDir)).toThrow()
+  })
+})
+
+describe('findConfig', () => {
+  let tmpDir: string
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  // Running a command from a subdirectory used to fail with "No agent-view.config.json
+  // found", which reads as a tool failure rather than a wrong cwd.
+  it('finds the config from a nested subdirectory and reports its directory', () => {
+    tmpDir = makeTempDir()
+    const config = { runtime: RuntimeType.Electron, port: 9222, launch: 'npm run dev' }
+    writeFileSync(join(tmpDir, 'agent-view.config.json'), JSON.stringify(config), 'utf-8')
+    const nested = join(tmpDir, 'packages', 'app', 'src')
+    mkdirSync(nested, { recursive: true })
+
+    const found = findConfig(nested)
+    expect(found?.config).toEqual(config)
+    expect(found?.dir).toBe(tmpDir)
+  })
+
+  it('returns null when no ancestor holds a config', () => {
+    tmpDir = makeTempDir()
+    expect(findConfig(tmpDir)).toBeNull()
   })
 })
 

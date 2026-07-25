@@ -5,6 +5,7 @@ type ScreenshotOptions = {
   window?: string
   scale?: number
   crop?: string
+  cropUp?: number
 }
 
 export async function runScreenshot(config: AgentViewConfig, options: ScreenshotOptions): Promise<void> {
@@ -12,6 +13,7 @@ export async function runScreenshot(config: AgentViewConfig, options: Screenshot
   if (options.window) args.window = options.window
   if (options.scale !== undefined) args.scale = options.scale
   if (options.crop !== undefined) args.crop = options.crop
+  if (options.cropUp !== undefined) args.cropUp = options.cropUp
 
   const response = await sendCommand({
     command: 'screenshot',

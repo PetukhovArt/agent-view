@@ -33,6 +33,8 @@ export type ServerRequest = {
 
 export enum ServerErrorCode {
   PortConflict = 'PORT_CONFLICT',
+  /** A command hit the server-side deadline waiting for CDP. Cached sessions were dropped; retry is safe. */
+  CDPTimeout = 'CDP_TIMEOUT',
 }
 
 export type PortConflictData = {

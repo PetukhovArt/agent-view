@@ -35,6 +35,54 @@ const targetHostMap = new Map<string, string>()
 
 const KNOWN_TARGET_TYPES: ReadonlySet<string> = new Set(Object.values(TargetType))
 
+/**
+ * Every /json/list probe and every WebSocket handshake is bounded. A port that
+ * accepts TCP but never answers HTTP (app mid-restart, wedged renderer) would
+ * otherwise leave the request pending forever — and since every command starts
+ * by enumerating targets, one wedged app froze the whole server.
+ */
+const probeTimeoutMs = (): number => envMs('AGENT_VIEW_CDP_PROBE_TIMEOUT_MS', 5_000)
+const connectTimeoutMs = (): number => envMs('AGENT_VIEW_CDP_CONNECT_TIMEOUT_MS', 10_000)
+
+function envMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name])
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback
+}
+
+function hostForUrl(host: string): string {
+  return host.includes(':') ? `[${host}]` : host
+}
+
+export class CDPTimeoutError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CDPTimeoutError'
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new CDPTimeoutError(`${what} timed out after ${ms}ms`)), ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+async function fetchTargetList(host: string, port: number): Promise<CDPTarget[]> {
+  const res = await fetch(`http://${hostForUrl(host)}:${port}/json/list`, {
+    signal: AbortSignal.timeout(probeTimeoutMs()),
+  })
+  if (!res.ok) throw new Error(`CDP /json/list on ${host}:${port} returned ${res.status}`)
+  const parsed: unknown = await res.json()
+  return Array.isArray(parsed) ? parsed as CDPTarget[] : []
+}
+
 function toTargetInfo(t: CDPTarget): TargetInfo | null {
   if (!KNOWN_TARGET_TYPES.has(t.type)) return null
   return {
@@ -51,8 +99,8 @@ export async function listTargets(port: number): Promise<CDPTarget[]> {
 
   for (const host of CDP_HOSTS) {
     try {
-      const targets = await CDP.List({ host, port })
-      for (const t of targets as CDPTarget[]) {
+      const targets = await fetchTargetList(host, port)
+      for (const t of targets) {
         if (!seen.has(t.id)) {
           seen.add(t.id)
           targetHostMap.set(`${port}:${t.id}`, host)
@@ -116,6 +164,7 @@ type RawCDPClient = {
     entryAdded: (cb: (params: LogEntryAddedEvent) => void) => () => void
   }
   Network: RawCDPNetwork
+  on: (event: string, cb: () => void) => void
   close: () => Promise<unknown>
 } & Record<string, unknown>
 
@@ -422,7 +471,50 @@ async function evaluateImpl(
 
 async function openClient(port: number, target: TargetInfo): Promise<RawCDPClient> {
   const host = targetHostMap.get(`${port}:${target.id}`) ?? 'localhost'
-  return await CDP({ host, port, target: target.id }) as RawCDPClient
+  const connect = CDP({ host, port, target: target.id }) as Promise<RawCDPClient>
+  return withTimeout(connect, connectTimeoutMs(), `CDP connect to ${target.type}:${target.id.slice(0, 8)}`)
+}
+
+/**
+ * A target can accept the WebSocket and then never answer a command — a worker that died
+ * between `/json/list` and the handshake does exactly that. Without a bound here the
+ * `*.enable` calls hang forever and take the caller (a request, or a log-recorder rescan)
+ * with them. The half-open client is closed so a failed bring-up leaks no socket.
+ */
+async function bringUpSession(client: RawCDPClient, target: TargetInfo, steps: () => Promise<void>): Promise<void> {
+  try {
+    await withTimeout(steps(), connectTimeoutMs(), `CDP session setup for ${target.type}:${target.id.slice(0, 8)}`)
+  } catch (err) {
+    try { await client.close() } catch { /* already gone */ }
+    throw err
+  }
+}
+
+/**
+ * chrome-remote-interface rejects in-flight commands on `disconnect`, but a
+ * cached session over a dead socket would keep serving requests. Sessions
+ * expose the event so the owner can evict them.
+ */
+function attachDisconnectSubscription(client: RawCDPClient): (handler: () => void) => void {
+  const handlers = new Set<() => void>()
+  let disconnected = false
+
+  client.on('disconnect', () => {
+    if (disconnected) return
+    disconnected = true
+    for (const h of handlers) {
+      try { h() } catch { /* one bad handler shouldn't break others */ }
+    }
+    handlers.clear()
+  })
+
+  return (handler) => {
+    if (disconnected) {
+      handler()
+      return
+    }
+    handlers.add(handler)
+  }
 }
 
 export async function connectToRuntime(port: number, target: TargetInfo): Promise<RuntimeSession> {
@@ -434,12 +526,16 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   // Subscribe BEFORE enable so we catch buffered messages emitted at enable-time.
   const consoleSub = attachConsoleSubscription(client)
   const networkSub = attachNetworkSubscription(client.Network)
-  await client.Runtime.enable()
-  await client.Log.enable()
+  const onDisconnect = attachDisconnectSubscription(client)
+  await bringUpSession(client, target, async () => {
+    await client.Runtime.enable()
+    await client.Log.enable()
+  })
 
   return {
     target,
     evaluate: (expression, opts) => evaluateImpl(client, expression, opts),
+    onDisconnect,
     onConsole: (handler) => consoleSub.add(handler),
     onNetwork: (handler) => networkSub.add(handler),
     enableNetwork: () => networkSub.enable(),
@@ -466,7 +562,7 @@ export async function connectToPage(
   const { Runtime, Accessibility, Page, DOM, Input } = client as RawCDPClient & {
     Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
     Page: { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
-    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }> }
+    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }> }
     Input: { dispatchMouseEvent: (p: Record<string, unknown>) => Promise<unknown> }
   }
   const cacheKey = `${port}:${target.id}`
@@ -474,15 +570,18 @@ export async function connectToPage(
   // Subscribe BEFORE enable so we catch buffered console/log entries emitted at enable-time.
   const consoleSub = attachConsoleSubscription(client)
   const networkSub = attachNetworkSubscription(client.Network)
-  await Page.enable()
-  await DOM.enable()
-  await Accessibility.enable()
-  await Runtime.enable()
-  await client.Log.enable()
-
-  // Fetch document root once — needed as subtree root for Accessibility.queryAXTree
-  const { root } = await DOM.getDocument({ depth: 0 })
-  let documentBackendNodeId: number = root.backendNodeId
+  const onDisconnect = attachDisconnectSubscription(client)
+  let documentBackendNodeId = 0
+  await bringUpSession(client, target, async () => {
+    await Page.enable()
+    await DOM.enable()
+    await Accessibility.enable()
+    await Runtime.enable()
+    await client.Log.enable()
+    // Fetch document root once — needed as subtree root for Accessibility.queryAXTree
+    const { root } = await DOM.getDocument({ depth: 0 })
+    documentBackendNodeId = root.backendNodeId
+  })
 
   // null = not yet tested; true = available; false = unavailable (API not supported)
   let queryAXTreeAvailable: boolean | null = null
@@ -544,6 +643,29 @@ export async function connectToPage(
     return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 }
   }
 
+  /**
+   * Walk up `levels` element ancestors and return that node's backendNodeId.
+   * A filter match usually lands on the text-bearing node (a heading), while the
+   * interesting rect is its container.
+   */
+  async function resolveAncestor(backendNodeId: number, levels: number): Promise<number> {
+    const { object } = await DOM.resolveNode({ backendNodeId })
+    const climbed = await Runtime.callFunctionOn({
+      objectId: object.objectId,
+      functionDeclaration: `function(levels) {
+        let el = this.nodeType === Node.TEXT_NODE ? this.parentElement : this;
+        for (let i = 0; i < levels && el.parentElement; i++) el = el.parentElement;
+        return el;
+      }`,
+      arguments: [{ value: levels }],
+    }) as { result?: { objectId?: string } }
+    const ancestorObjectId = climbed.result?.objectId
+    if (!ancestorObjectId) return backendNodeId
+    const { nodeId } = await DOM.requestNode({ objectId: ancestorObjectId })
+    const { node } = await DOM.describeNode({ nodeId })
+    return node.backendNodeId
+  }
+
   async function resolveBoxRect(backendNodeId: number, scrollIntoView: boolean): Promise<ScreenshotClip> {
     if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
     const { model } = await DOM.getBoxModel({ backendNodeId })
@@ -559,6 +681,7 @@ export async function connectToPage(
     target,
 
     evaluate: (expression, opts) => evaluateImpl(client, expression, opts),
+    onDisconnect,
     onConsole: (handler) => consoleSub.add(handler),
     onNetwork: (handler) => networkSub.add(handler),
     enableNetwork: () => networkSub.enable(),
@@ -649,8 +772,10 @@ export async function connectToPage(
       return resolveBoxCenter(backendNodeId, opts?.scrollIntoView ?? true)
     },
 
-    async getBoxRect(backendNodeId: number, opts?: { scrollIntoView?: boolean }): Promise<ScreenshotClip> {
-      return resolveBoxRect(backendNodeId, opts?.scrollIntoView ?? true)
+    async getBoxRect(backendNodeId: number, opts?: { scrollIntoView?: boolean; ancestorLevels?: number }): Promise<ScreenshotClip> {
+      const levels = opts?.ancestorLevels ?? 0
+      const nodeId = levels > 0 ? await resolveAncestor(backendNodeId, levels) : backendNodeId
+      return resolveBoxRect(nodeId, opts?.scrollIntoView ?? true)
     },
 
     async dragBetweenPositions(from: Point, to: Point, opts?: DragOpts): Promise<void> {

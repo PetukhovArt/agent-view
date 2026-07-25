@@ -103,6 +103,12 @@ export type RuntimeSession = {
    * Only pass trusted, hardcoded expressions or expressions explicitly authorized via `allowEval`.
    */
   evaluate: (expression: string, opts?: EvaluateOpts) => Promise<unknown>
+  /**
+   * Fires once when the CDP WebSocket drops (target closed, app exited). Registering
+   * after the drop invokes the handler immediately — a session over a dead socket must
+   * never stay cached.
+   */
+  onDisconnect: (handler: () => void) => void
   /** Subscribe to normalized console events. Returns disposer. Multiple subscribers share the underlying CDP subscription. */
   onConsole: (handler: (msg: ConsoleMessage) => void) => () => void
   /** Subscribe to normalized CDP `Network.*` events. Returns disposer. Subscribe BEFORE `enableNetwork` to avoid losing events. */
@@ -126,8 +132,12 @@ export type PageSession = RuntimeSession & {
   fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>
   /** Resolve box-model center for an element. `scrollIntoView` defaults to true. */
   getBoxCenter: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<Point>
-  /** Resolve axis-aligned bounding rect for an element. `scrollIntoView` defaults to true. */
-  getBoxRect: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<ScreenshotClip>
+  /**
+   * Resolve axis-aligned bounding rect for an element. `scrollIntoView` defaults to true.
+   * `ancestorLevels` climbs that many element ancestors first — a text match's rect is
+   * the text line, not the container it lives in.
+   */
+  getBoxRect: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean; ancestorLevels?: number }) => Promise<ScreenshotClip>
   /** CDP-level mouse drag: press → N × move → release. */
   dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<void>
 }

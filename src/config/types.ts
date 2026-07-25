@@ -26,4 +26,8 @@ export type AgentViewConfig = {
   captureBody?: boolean
   /** Per-target network ring capacity. Default 200 (smaller than console — entries are heavier). */
   networkBufferSize?: number
+  /** Feed file for `agent-view logs`. Relative paths resolve against the project root. Default `.agent-view/console.log`. */
+  logFile?: string
+  /** Feed size cap in bytes. On overflow the feed rotates once to `<file>.prev`. Default 8 MB. */
+  logMaxBytes?: number
 }
