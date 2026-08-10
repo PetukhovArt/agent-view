@@ -47,7 +47,8 @@ agent-view dom --diff                   # Lines changed since last dom call (+ a
 ### Interaction
 ```bash
 agent-view click <ref>                  # Click element by ref from dom output
-agent-view click --pos 100,200          # Click by coordinates (for canvas)
+agent-view click --filter "Save"        # Find element by text and click
+agent-view click --pos 100,200          # Click by coordinates — CANVAS ONLY, see below
 agent-view click <ref> --double         # Double-click (fires dblclick handlers); works with --filter / --pos too
 agent-view fill <ref> "text"            # Type into input field
 agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
@@ -60,6 +61,38 @@ ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targe
 `--from-pos`/`--to-pos` — derive the centroid via `agent-view eval` from the scene graph.
 Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.
 Increase `--steps` for handlers using `globalpointermove` so intermediate frames are not skipped.
+
+**Coordinates are a last resort.** `--pos` / `--from-pos` / `--to-pos` exist for canvas and WebGL,
+where no ref exists. On DOM the correct order is `dom --filter "<text>"` → take the `[ref=N]` →
+`click <ref>`, or `click --filter "<text>"` in one step. A coordinate pair breaks on any layout
+shift, scroll, zoom, or window resize, and it clicks whatever now sits at that point — silently.
+If you reach for `--pos` on a DOM element, first say why the ref was not usable.
+
+### Waiting (`wait`)
+
+```bash
+agent-view wait --filter "Saved"                    # until the text appears in the AX tree
+agent-view wait --filter "Saved" --timeout 20       # max wait in seconds (default 10)
+agent-view wait --filter "Row 5" --window "Main"    # specific window
+```
+
+Exits as soon as the element appears; exits non-zero on timeout — so `&&` after it is a real gate.
+
+**Never sleep for a fixed time.** No `sleep`, no `timeout`, no `ping -n N 127.0.0.1` as a delay
+(agents reach for `ping` when the harness blocks `sleep` — it is the same mistake in worse
+clothing). A fixed pause is either too short, and you assert against a half-rendered UI, or too
+long, and you burn wall-clock on every step. agent-view has a condition-based wait for every kind
+of signal:
+
+| You are waiting for… | Use |
+|---|---|
+| An element to render | `wait --filter "<text>"` |
+| A store/state value | `watch "<expr>" --until "<expr>"` |
+| A log line | `console --follow --until "<pattern>"` |
+| A request to fire | `network --follow --until "<url>"` |
+
+If none of these fits, poll: `dom --filter X --count` in a loop with an explicit attempt cap, and
+report how many attempts it took.
 
 ### Screenshots
 ```bash
@@ -239,6 +272,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Count of matching elements | `dom --filter X --count` | Single integer, no tree output, no ref mutations |
 | App state, store contents, computed values | `eval "expr"` | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable |
 | Does `window.X` / a globally-exposed API exist? | `eval "typeof window.X"` | DOM doesn't show JS globals; only authoritative check |
+| An element that has not rendered yet | `wait --filter "<text>"` | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause |
 | State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
 | Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
 | Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
@@ -255,6 +289,22 @@ When two tools could answer the same question, prefer the one higher up the tabl
 ### Execution discipline (read first, every run)
 
 A run can produce one of three outcomes per step: **pass**, **fail**, **requires_visual_review**. There is no fourth bucket called "actually fine, here's why". A failed `Expected:` line is FAIL.
+
+**How to run the commands themselves:**
+
+- **Never discard output.** No `>/dev/null`, no `2>&1` to nowhere, no `| head -1` on a command whose
+  failure you have not yet read. Every agent-view command prints either the evidence or the reason
+  it failed; a suppressed `click` that matched nothing looks exactly like a successful one.
+- **Chain with `&&`, not newlines.** Newline-separated commands keep running after a failure, so a
+  broken first step is followed by three steps acting on the wrong state. `&&` stops at the first
+  non-zero exit.
+- **One action, then one check.** `click` is not evidence. The evidence is the `dom --diff`,
+  `dom --filter … --count`, `eval`, or `console --level error` you run after it. A block of three
+  clicks in a row with no check between them proves nothing about any of them.
+- **Call the `agent-view` binary.** Install it once in the target project
+  (`pnpm add -D @petukhovart/agent-view`) and call `agent-view …` or `pnpm exec agent-view …`.
+  Do not prefix every call with `npx <package>`: it re-resolves the package on each invocation and
+  falls outside this skill's `allowed-tools`, so each call needs a fresh permission prompt.
 
 These heuristics catch real bugs. Skipping them is how a run silently passes while the bug sits in plain sight in the same data:
 
@@ -321,7 +371,7 @@ Tolerance default: a designer's code-review level — flag what they'd notice, i
 ## Resilience
 
 - **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
-- **Element not found:** Wait 2s, retry once (render delay after HMR). If still missing — report FAIL
+- **Element not found:** `agent-view wait --filter "<text>" --timeout 5` (covers the render delay after HMR). If it times out — report FAIL. Do not insert a blind pause and retry.
 - **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (auto-starts Electron/Browser/Tauri). On `PORT_CONFLICT` — surface PID/process and ask user.
 - **`CDP_TIMEOUT` error:** the command hit the server-side deadline; cached CDP sessions for that port were dropped, so retry once. Repeated timeouts mean the app's DevTools endpoint is wedged — restart the app.
 - **Max retries per command:** 2. After that — SKIP scenario step with warning
