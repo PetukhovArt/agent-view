@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.0] - 2026-08-16
+
+Modal handling. A modal agent-view could not answer used to end a run: the window looked
+frozen, every later command timed out, and nothing explained why.
+
+### Fixed
+- **JS modals no longer hang the session.** `connectToPage` enables the CDP `Page` domain, which makes Chromium stop showing `alert` / `confirm` / `prompt` / `beforeunload` natively and wait for the client to answer — and nothing answered. Any `alert()` in the app froze the renderer for good. Every page session now answers on its own (default: dismiss) and records the modal as a console warning, `[agent-view] confirm auto-dismissed: <message>`, so a surprising `false` is explainable.
+
+### Added
+- `agent-view dialog` — standing answer plus the log of modals and intercepted pickers for a window. `dialog policy accept|dismiss [--text]` changes what future modals return; `dialog accept|dismiss` answers one that is open right now, which is the only way out of a modal that opened *before* agent-view attached.
+- `agent-view upload --file <path>… --selector <css> | --ref <n> | --filter <text>` — puts files into a file input via `DOM.setFileInputFiles`; no picker opens. `--selector` exists because upload inputs are usually hidden (`display:none`, `v-show="false"`), which keeps them out of the AX tree and leaves them without a `[ref=N]`. Paths are resolved against cwd and checked — CDP accepts a missing path silently and the app then reads an empty file.
+- `agent-view dialog arm --file <path>… | --cancel` / `dialog disarm` — holds an answer ready for the next native file picker, so it never opens. Covers the input that is created and removed inside the click handler, which no selector can address. One-shot: spent by the first picker, after which interception turns itself off. Two engines are armed together and the caller need not know which applies — CDP file-chooser interception for webview pickers, and a `window.__TAURI_INTERNALS__.invoke` shim for `@tauri-apps/plugin-dialog`, whose dialog runs in Rust past the webview where CDP cannot reach it.
+
+### Notes
+- `beforeunload` is always dismissed, whatever the policy says. Accepting it navigates away in the middle of a run and loses the state under inspection; staying put is the recoverable answer.
+- `upload` deliberately has no `--filter`. An accessible name resolves to the label or button carrying it, not to the `<input type=file>` behind it, so a filter match would set files on the wrong node. `--selector` addresses the input itself.
+- A file chooser answer is guaranteed either way: if the files cannot be attached (the input went away mid-flight) the page is sent a `cancel` instead, because the chooser is already suppressed and silence would hang the app.
+- An arm does not outlive a navigation, and a fresh arm is no longer cancelled by the previous one finishing.
+- Arm before the click, and click through `agent-view click`: Chromium refuses to open a file picker without user activation, so an `eval`-driven `el.click()` is silently dropped and never intercepted.
+- Out of scope: `showOpenFilePicker()` exposes no input to fill and can only be cancelled; Electron does not implement `window.prompt`; native dialogs opened from an Electron **main** process stay unreachable until `eval --main` ships.
+
 ## [0.12.0] - 2026-07-25
 
 ### Removed

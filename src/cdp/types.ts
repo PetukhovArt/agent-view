@@ -61,6 +61,70 @@ export type DragOpts = {
 
 export type Point = { x: number; y: number }
 
+// ── Modal dialogs ────────────────────────────────────────────────────────────
+
+/** CDP `Page.DialogType`. */
+export enum JsDialogType {
+  Alert = 'alert',
+  Confirm = 'confirm',
+  Prompt = 'prompt',
+  BeforeUnload = 'beforeunload',
+}
+
+/** One `window.alert` / `confirm` / `prompt` / `beforeunload` dialog. */
+export type JsDialogInfo = {
+  ts: number
+  type: JsDialogType
+  message: string
+  /** Pre-filled text of a `prompt`. Absent for the other types. */
+  defaultPrompt?: string
+  url: string
+  /** How the session answered it, once answered. */
+  answer?: JsDialogAnswer
+}
+
+export type JsDialogAnswer = {
+  accept: boolean
+  promptText?: string
+  /** True when the session answered on its own, without an explicit command. */
+  automatic: boolean
+}
+
+/**
+ * Standing answer applied to every JS dialog the moment it opens.
+ * Dismiss is the default: while the Page domain is enabled Chromium blocks the
+ * renderer until the CDP client answers, so "do nothing" is not an option.
+ */
+export type JsDialogPolicy = {
+  accept: boolean
+  /** Text typed into a `prompt` before accepting. */
+  promptText?: string
+}
+
+/** The answer held ready for the next native file chooser. One-shot. */
+export type FileChooserArm =
+  | { kind: 'files'; files: string[] }
+  | { kind: 'cancel' }
+
+/** CDP `Page.fileChooserOpened.mode`. */
+export enum FileChooserMode {
+  Single = 'selectSingle',
+  Multiple = 'selectMultiple',
+}
+
+export type FileChooserEvent = {
+  ts: number
+  mode: FileChooserMode
+  /**
+   * False when the chooser did not come from an `<input type=file>` — the File
+   * System Access API (`showOpenFilePicker`) gives no node to put files on, so
+   * such a chooser can only be cancelled, never answered.
+   */
+  matchedInput: boolean
+  answer: 'files' | 'cancel' | 'unanswered'
+  files?: string[]
+}
+
 export enum ConsoleLevel {
   Log = 'log',
   Info = 'info',
@@ -121,6 +185,41 @@ export type RuntimeSession = {
 }
 
 export type PageSession = RuntimeSession & {
+  /**
+   * Subscribe to JS dialogs. The handler runs *before* the session applies its
+   * policy, so a subscriber sees the dialog even though it is answered at once.
+   * Returns disposer.
+   */
+  onJsDialog: (handler: (dialog: JsDialogInfo) => void) => () => void
+  /** Answer the dialog that is open right now. Rejects when none is showing. */
+  answerJsDialog: (accept: boolean, promptText?: string) => Promise<void>
+  /** Replace the standing answer applied to every future dialog. */
+  setJsDialogPolicy: (policy: JsDialogPolicy) => void
+  getJsDialogPolicy: () => JsDialogPolicy
+  /** Dialogs seen by this session, oldest first, bounded. */
+  recentJsDialogs: () => JsDialogInfo[]
+  /**
+   * Put files into a file input directly. No chooser opens, so nothing has to be
+   * armed first. `files` must be absolute paths — CDP does not check that they
+   * exist, and a bad path reaches the app as a broken `File`.
+   */
+  uploadByNodeId: (backendDOMNodeId: number, files: string[]) => Promise<void>
+  /**
+   * Same, addressed by CSS selector. Needed because upload inputs are usually
+   * hidden (`display:none`, `v-show="false"`) and never reach the AX tree, so
+   * they have no `[ref=N]`. Returns false when the selector matches nothing.
+   */
+  uploadBySelector: (selector: string, files: string[]) => Promise<boolean>
+  /**
+   * Hold an answer ready for the next native file chooser, so it never opens.
+   * Needed for inputs created and removed inside the click handler, which no
+   * selector can address. `null` disarms and restores normal chooser behaviour.
+   * Arm before the click — the chooser cannot be caught after it is open.
+   */
+  armFileChooser: (arm: FileChooserArm | null) => Promise<void>
+  fileChooserArm: () => FileChooserArm | null
+  /** Choosers intercepted by this session, oldest first, bounded. */
+  recentFileChoosers: () => FileChooserEvent[]
   getAccessibilityTree: () => Promise<AXNode[]>
   /** Same as getAccessibilityTree but also signals whether nodes came from the AX tree cache. */
   getAccessibilityTreeMeta: () => Promise<{ nodes: AXNode[]; fromCache: boolean }>

@@ -2,9 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
 
-const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockCDP } =
+const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
   vi.hoisted(() => {
     const callOrder: string[] = []
+
+    // Captures the `Page.javascriptDialogOpening` listener so a test can fire it.
+    const dialogHook: { fire?: (params: Record<string, unknown>) => void } = {}
+    const mockHandleJsDialog = vi.fn().mockResolvedValue({})
+
+    const chooserHook: { fire?: (params: Record<string, unknown>) => void } = {}
+    const navigatedHook: { fire?: () => void } = {}
+    const mockSetIntercept = vi.fn().mockResolvedValue({})
+    const mockSetFileInputFiles = vi.fn().mockResolvedValue({})
 
     const mockDomResolve = vi.fn().mockImplementation(() => {
       callOrder.push('DOM.resolveNode')
@@ -51,7 +60,20 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         enable: vi.fn().mockResolvedValue({}),
         captureScreenshot: mockCaptureScreenshot,
         getLayoutMetrics: mockGetLayoutMetrics,
-        frameNavigated: vi.fn(),
+        frameNavigated: vi.fn().mockImplementation((cb: () => void) => {
+          navigatedHook.fire = cb
+          return () => {}
+        }),
+        javascriptDialogOpening: vi.fn().mockImplementation((cb: (params: Record<string, unknown>) => void) => {
+          dialogHook.fire = cb
+          return () => {}
+        }),
+        handleJavaScriptDialog: mockHandleJsDialog,
+        fileChooserOpened: vi.fn().mockImplementation((cb: (params: Record<string, unknown>) => void) => {
+          chooserHook.fire = cb
+          return () => {}
+        }),
+        setInterceptFileChooserDialog: mockSetIntercept,
       },
       DOM: {
         enable: vi.fn().mockResolvedValue({}),
@@ -59,6 +81,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         getBoxModel: mockDomBoxModel,
         focus: vi.fn().mockResolvedValue({}),
         getDocument: vi.fn().mockResolvedValue({ root: { backendNodeId: 1 } }),
+        setFileInputFiles: mockSetFileInputFiles,
       },
       Input: { dispatchMouseEvent: mockDispatchMouse },
       Network: {
@@ -79,14 +102,14 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       close: vi.fn().mockResolvedValue({}),
     })
 
-    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockCDP }
+    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
   })
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
 
 import { connectToPage, connectToRuntime, listTargets } from '../transport.js'
 import { AxTreeCache } from '../ax-cache.js'
-import { TargetType, type TargetInfo } from '../types.js'
+import { ConsoleLevel, JsDialogType, TargetType, type ConsoleMessage, type TargetInfo } from '../types.js'
 
 const pageTarget: TargetInfo = { id: 'target-1', type: TargetType.Page, title: 'Test', url: 'http://x' }
 const workerTarget: TargetInfo = { id: 'worker-1', type: TargetType.SharedWorker, title: 'sw.js', url: 'http://x/sw' }
@@ -398,5 +421,310 @@ describe('listTargets against a wedged CDP endpoint', () => {
       vi.unstubAllEnvs()
       silent.close()
     }
+  })
+})
+
+describe('JS dialogs', () => {
+  const flush = (): Promise<void> => new Promise(r => setTimeout(r, 0))
+
+  beforeEach(() => {
+    mockHandleJsDialog.mockClear()
+  })
+
+  // Regression: connectToPage enables the Page domain, which makes Chromium hold
+  // the renderer until the CDP client answers. With no answer an alert() froze
+  // the session forever, and every later command timed out with no explanation.
+  it('answers an opening dialog without being asked', async () => {
+    await connectToPage(9222, pageTarget, new AxTreeCache())
+
+    dialogHook.fire?.({ type: 'alert', message: 'boom', url: 'http://x' })
+    await flush()
+
+    expect(mockHandleJsDialog).toHaveBeenCalledWith({ accept: false })
+  })
+
+  it('applies the standing policy, prompt text included', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    session.setJsDialogPolicy({ accept: true, promptText: 'typed' })
+
+    dialogHook.fire?.({ type: 'prompt', message: 'Name?', defaultPrompt: '', url: 'http://x' })
+    await flush()
+
+    expect(mockHandleJsDialog).toHaveBeenCalledWith({ accept: true, promptText: 'typed' })
+    expect(session.getJsDialogPolicy()).toEqual({ accept: true, promptText: 'typed' })
+  })
+
+  // A subscriber must see the dialog even though it is answered at once —
+  // otherwise the only observer of a modal would be racing the answer.
+  it('reports the dialog to subscribers before answering it', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const order: string[] = []
+    mockHandleJsDialog.mockImplementationOnce(() => {
+      order.push('answer')
+      return Promise.resolve({})
+    })
+    session.onJsDialog(d => order.push(`subscriber:${d.type}:${d.message}`))
+
+    dialogHook.fire?.({ type: 'confirm', message: 'Delete?', url: 'http://x' })
+    await flush()
+
+    expect(order).toEqual(['subscriber:confirm:Delete?', 'answer'])
+  })
+
+  it('keeps a log of what was answered and how', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+
+    dialogHook.fire?.({ type: 'confirm', message: 'Delete?', url: 'http://x' })
+    await flush()
+
+    expect(session.recentJsDialogs()).toEqual([
+      expect.objectContaining({
+        type: JsDialogType.Confirm,
+        message: 'Delete?',
+        answer: { accept: false, promptText: undefined, automatic: true },
+      }),
+    ])
+  })
+
+  // The auto-answer is invisible in the UI, so it has to be visible in the feed —
+  // otherwise a confirm() that silently returned false is unexplainable.
+  it('records the auto-answer as a console warning', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const messages: ConsoleMessage[] = []
+    session.onConsole(m => messages.push(m))
+
+    dialogHook.fire?.({ type: 'confirm', message: 'Delete?', url: 'http://x' })
+    await flush()
+
+    expect(messages).toEqual([
+      expect.objectContaining({ level: ConsoleLevel.Warn, text: '[agent-view] confirm auto-dismissed: Delete?' }),
+    ])
+  })
+
+  // A dialog opened before agent-view attached produced no opening event, so
+  // there is nothing pending to match — the answer still has to go out.
+  it('answers blind when nothing was tracked as pending', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+
+    await session.answerJsDialog(true, 'manual')
+
+    expect(mockHandleJsDialog).toHaveBeenCalledWith({ accept: true, promptText: 'manual' })
+  })
+
+  it('surfaces the CDP error when no dialog is showing', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    mockHandleJsDialog.mockRejectedValueOnce(new Error('No dialog is showing'))
+
+    await expect(session.answerJsDialog(false)).rejects.toThrow('No dialog is showing')
+  })
+})
+
+describe('file chooser interception', () => {
+  const flush = (): Promise<void> => new Promise(r => setTimeout(r, 0))
+
+  beforeEach(() => {
+    mockSetIntercept.mockClear()
+    mockSetFileInputFiles.mockClear()
+  })
+
+  // Interception must stay off until asked for: turning it on by default would
+  // suppress a chooser the user meant to see, and the app would look broken.
+  it('does not intercept until something is armed', async () => {
+    await connectToPage(9222, pageTarget, new AxTreeCache())
+
+    expect(mockSetIntercept).not.toHaveBeenCalled()
+  })
+
+  it('turns interception on when armed with files', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+
+    expect(mockSetIntercept).toHaveBeenCalledWith({ enabled: true, cancel: false })
+    expect(session.fileChooserArm()).toEqual({ kind: 'files', files: ['/tmp/a.png'] })
+  })
+
+  // Chromium's own cancel flag suppresses the chooser but does not deliver
+  // `input.oncancel` to the page, so the outcome is driven from here instead.
+  it('delivers a cancel event to the input the chooser came from', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'cancel' })
+    expect(mockSetIntercept).toHaveBeenCalledWith({ enabled: true, cancel: false })
+    mockCallFunctionOn.mockClear()
+
+    chooserHook.fire?.({ mode: 'selectSingle', backendNodeId: 77 })
+    await flush()
+
+    expect(mockSetFileInputFiles).not.toHaveBeenCalled()
+    expect(mockCallFunctionOn).toHaveBeenCalledWith(expect.objectContaining({
+      functionDeclaration: expect.stringContaining("new Event('cancel')"),
+    }))
+    expect(session.recentFileChoosers()).toEqual([
+      expect.objectContaining({ answer: 'cancel', matchedInput: true }),
+    ])
+  })
+
+  it('fills the input the chooser came from, then disarms', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+    mockSetIntercept.mockClear()
+
+    chooserHook.fire?.({ mode: 'selectSingle', backendNodeId: 77 })
+    await flush()
+
+    expect(mockSetFileInputFiles).toHaveBeenCalledWith({ backendNodeId: 77, files: ['/tmp/a.png'] })
+    expect(session.fileChooserArm()).toBeNull()
+    expect(mockSetIntercept).toHaveBeenCalledWith({ enabled: false })
+    expect(session.recentFileChoosers()).toEqual([
+      expect.objectContaining({ answer: 'files', matchedInput: true, files: ['/tmp/a.png'] }),
+    ])
+  })
+
+  // `showOpenFilePicker` gives no backing node, so files cannot be injected.
+  // Reporting success there would be a lie the caller cannot detect.
+  it('reports a cancel when the chooser has no file input behind it', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+
+    chooserHook.fire?.({ mode: 'selectMultiple' })
+    await flush()
+
+    expect(mockSetFileInputFiles).not.toHaveBeenCalled()
+    expect(session.recentFileChoosers()).toEqual([
+      expect.objectContaining({ answer: 'cancel', matchedInput: false }),
+    ])
+  })
+
+  it('disarms without leaving interception on', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+
+    await session.armFileChooser(null)
+
+    expect(mockSetIntercept).toHaveBeenLastCalledWith({ enabled: false })
+    expect(session.fileChooserArm()).toBeNull()
+  })
+})
+
+describe('uploadBySelector', () => {
+  beforeEach(() => {
+    mockSetFileInputFiles.mockClear()
+  })
+
+  it('sets files on the node the selector resolves to', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const client = await mockCDP.mock.results[0].value
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { objectId: 'obj-7', type: 'object' } })
+
+    await expect(session.uploadBySelector('#file', ['/tmp/a.png'])).resolves.toBe(true)
+
+    expect(mockSetFileInputFiles).toHaveBeenCalledWith({ objectId: 'obj-7', files: ['/tmp/a.png'] })
+  })
+
+  it('reports no match instead of throwing when the selector finds nothing', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const client = await mockCDP.mock.results[0].value
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { type: 'object', subtype: 'null' } })
+
+    await expect(session.uploadBySelector('#missing', ['/tmp/a.png'])).resolves.toBe(false)
+    expect(mockSetFileInputFiles).not.toHaveBeenCalled()
+  })
+})
+
+describe('modal answers stay consistent under failure and re-entry', () => {
+  const flush = (): Promise<void> => new Promise(r => setTimeout(r, 0))
+  const cancelDispatched = (): boolean =>
+    mockCallFunctionOn.mock.calls.some(([p]) =>
+      String((p as { functionDeclaration?: string }).functionDeclaration ?? '').includes("new Event('cancel')"))
+
+  beforeEach(() => {
+    mockSetIntercept.mockClear()
+    mockSetFileInputFiles.mockClear()
+    mockCallFunctionOn.mockClear()
+    mockHandleJsDialog.mockClear()
+  })
+
+  // Regression: the chooser is already suppressed, so failing to attach files
+  // without telling the page left it waiting for a user who never comes —
+  // the exact hang the feature exists to prevent.
+  it('cancels on the page when the files cannot be attached', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+    mockSetFileInputFiles.mockRejectedValueOnce(new Error('Node is not a file input element'))
+
+    chooserHook.fire?.({ mode: 'selectSingle', backendNodeId: 77 })
+    await flush()
+    await flush()
+
+    expect(cancelDispatched()).toBe(true)
+    expect(session.recentFileChoosers()).toEqual([expect.objectContaining({ answer: 'cancel' })])
+  })
+
+  // Regression: answering is async, so a fresh arm could land mid-flight and be
+  // silently killed by the old answer's disarm — status said "armed" while the
+  // next chooser opened as a real OS window.
+  it('does not disarm an arm that arrived while the previous answer was in flight', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+
+    chooserHook.fire?.({ mode: 'selectSingle', backendNodeId: 77 })
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/b.png'] })
+    mockSetIntercept.mockClear()
+    await flush()
+    await flush()
+
+    expect(mockSetIntercept).not.toHaveBeenCalledWith({ enabled: false })
+    expect(session.fileChooserArm()).toEqual({ kind: 'files', files: ['/tmp/b.png'] })
+  })
+
+  // A new document means the click the arm was meant for never happened;
+  // keeping it live would answer some later, unrelated chooser.
+  it('forgets the arm when the page navigates', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await session.armFileChooser({ kind: 'files', files: ['/tmp/a.png'] })
+    mockSetIntercept.mockClear()
+
+    navigatedHook.fire?.()
+    await flush()
+
+    expect(session.fileChooserArm()).toBeNull()
+    expect(mockSetIntercept).toHaveBeenCalledWith({ enabled: false })
+  })
+
+  // Accepting beforeunload navigates away mid-run and loses everything under
+  // inspection, so the standing answer — which exists for confirm() — must not
+  // reach it.
+  it('dismisses beforeunload even when the policy accepts', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    session.setJsDialogPolicy({ accept: true, promptText: 'typed' })
+
+    dialogHook.fire?.({ type: 'beforeunload', message: '', url: 'http://x' })
+    await flush()
+
+    expect(mockHandleJsDialog).toHaveBeenCalledWith({ accept: false })
+  })
+
+  // The blind answer is the whole reason the manual command exists; leaving it
+  // out of the log made that scenario invisible in `dialog status`.
+  it('records a blind manual answer so it shows up in the log', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+
+    await session.answerJsDialog(true, 'manual')
+
+    expect(session.recentJsDialogs()).toEqual([
+      expect.objectContaining({ answer: { accept: true, promptText: 'manual', automatic: false } }),
+    ])
+  })
+
+  it('reports a malformed selector instead of treating the thrown error as the node', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const client = await mockCDP.mock.results[0].value
+    client.Runtime.evaluate.mockResolvedValueOnce({
+      result: { objectId: 'err-1', type: 'object', subtype: 'error' },
+      exceptionDetails: { text: 'Uncaught' },
+    })
+
+    await expect(session.uploadBySelector('div[', ['/tmp/a.png'])).rejects.toThrow('Invalid selector')
+    expect(mockSetFileInputFiles).not.toHaveBeenCalled()
   })
 })

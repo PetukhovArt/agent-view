@@ -22,11 +22,14 @@ import {
   type TargetInfo,
   type Point,
   type DragOpts,
+  type FileChooserArm,
 } from '../cdp/types.js'
 import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
 import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
+import { formatDialogStatus, describePolicy, describeArm } from '../inspectors/dialog/index.js'
+import { buildTauriArmScript, buildTauriStatusScript, TauriShimResult, type TauriShimStatus } from './tauri-dialog-shim.js'
 import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
 import { WatchSession } from './watch-session.js'
@@ -171,6 +174,24 @@ export function parseFilter(filter: string): ParsedFilter {
   return { kind: 'simple', name: filter }
 }
 
+/**
+ * CDP takes any path without complaint and the app then reads an empty `File`,
+ * so this is the only place a bad path stays diagnosable. A directory has to be
+ * rejected too — it passes an existence check and produces that same empty
+ * `File`, which is the failure the check exists to prevent.
+ */
+export function resolveUploadPath(cwd: string, raw: string): { path: string } | { error: string } {
+  const abs = resolve(cwd, raw)
+  let stats
+  try {
+    stats = statSync(abs)
+  } catch {
+    return { error: `File not found: ${abs}` }
+  }
+  if (!stats.isFile()) return { error: `Not a file: ${abs}` }
+  return { path: abs }
+}
+
 type CachedSession =
   | { kind: 'page'; session: PageSession }
   | { kind: 'runtime'; session: RuntimeSession }
@@ -207,6 +228,8 @@ export class AgentViewServer {
     console: (req: ServerRequest) => this.handleConsole(req),
     network: (req: ServerRequest) => this.handleNetwork(req),
     logs: (req: ServerRequest) => this.handleLogs(req),
+    upload: (req: ServerRequest) => this.handleUpload(req),
+    dialog: (req: ServerRequest) => this.handleDialog(req),
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
@@ -772,6 +795,175 @@ export class AgentViewServer {
     await conn.fillByNodeId(entry.backendDOMNodeId, value)
     this.axTreeCache.invalidate(cacheKey)
     return { ok: true, data: `Filled ref ${fillRef} with "${value}"` }
+  }
+
+  /**
+   * Puts files straight into a file input. The native chooser never opens, so
+   * there is nothing to close and nothing to arm — this is the cheapest path
+   * whenever the input exists in the DOM before the click.
+   */
+  private async handleUpload(req: ServerRequest): Promise<ServerResponse> {
+    const rawFiles = argStrArray(req.args, 'files') ?? []
+    if (rawFiles.length === 0) {
+      return { ok: false, error: 'upload requires at least one --file' }
+    }
+
+    const cwd = argStr(req.args, 'cwd') ?? process.cwd()
+    const files: string[] = []
+    for (const raw of rawFiles) {
+      const resolved = resolveUploadPath(cwd, raw)
+      if ('error' in resolved) return { ok: false, error: resolved.error }
+      files.push(resolved.path)
+    }
+
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const cacheKey = `${req.port}:${targetId}`
+    const label = files.map(f => f.split(/[\\/]/).pop()).join(', ')
+
+    const selector = argStr(req.args, 'selector')
+    if (selector) {
+      const found = await conn.uploadBySelector(selector, files)
+      if (!found) return { ok: false, error: `No element matches selector "${selector}"` }
+      this.axTreeCache.invalidate(cacheKey)
+      return { ok: true, data: `Set ${files.length} file(s) on "${selector}": ${label}` }
+    }
+
+    // No `--filter` here, unlike `click`/`fill`: an accessible name resolves to
+    // whatever node carries it, which for an upload control is the label or the
+    // button, not the `<input type=file>` behind it. Setting files on the wrong
+    // node fails deep inside CDP. `--selector` addresses the input itself.
+    const ref = argNum(req.args, 'ref')
+    if (ref === undefined) {
+      return { ok: false, error: 'upload requires --selector or --ref' }
+    }
+    const entry = this.refStore.get(ref)
+    if (!entry) {
+      return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
+    }
+    await conn.uploadByNodeId(entry.backendDOMNodeId, files)
+    this.axTreeCache.invalidate(cacheKey)
+    return { ok: true, data: `Set ${files.length} file(s) on ref ${ref}: ${label}` }
+  }
+
+  /**
+   * `dialog` covers JS modals only — `alert`/`confirm`/`prompt`/`beforeunload`.
+   * They are answered automatically the moment they open (see
+   * `attachJsDialogSubscription`); the commands here read that log, change the
+   * standing answer, and force an answer for a dialog that was already open
+   * before agent-view attached.
+   */
+  private async handleDialog(req: ServerRequest): Promise<ServerResponse> {
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const action = argStr(req.args, 'action') ?? 'status'
+    const text = argStr(req.args, 'text')
+
+    if (action === 'accept' || action === 'dismiss') {
+      const accept = action === 'accept'
+      try {
+        await conn.answerJsDialog(accept, text)
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        return { ok: false, error: `No JS dialog is showing on this window (${detail}).` }
+      }
+      const suffix = accept && text !== undefined ? ` with "${text}"` : ''
+      return { ok: true, data: `Dialog ${accept ? 'accepted' : 'dismissed'}${suffix}.` }
+    }
+
+    if (action === 'policy') {
+      const mode = argStr(req.args, 'mode')
+      if (mode !== 'accept' && mode !== 'dismiss') {
+        return { ok: false, error: 'dialog policy requires accept or dismiss' }
+      }
+      // Storing prompt text alongside a dismiss would be dead state the status
+      // output cannot show — rejecting it keeps what is stored and what is
+      // reported the same thing.
+      if (mode === 'dismiss' && text !== undefined) {
+        return { ok: false, error: '--text applies to accept only; a dismissed prompt returns null' }
+      }
+      const policy = { accept: mode === 'accept', ...(text === undefined ? {} : { promptText: text }) }
+      conn.setJsDialogPolicy(policy)
+      return { ok: true, data: `JS dialog policy: ${describePolicy(policy)}` }
+    }
+
+    if (action === 'arm' || action === 'disarm') {
+      return this.armFileChooser(req, conn, action === 'arm')
+    }
+
+    if (action !== 'status') {
+      return { ok: false, error: `Unknown dialog action: "${action}". Use status, accept, dismiss, policy, arm, or disarm.` }
+    }
+
+    const shim = await this.readTauriShimStatus(conn)
+    const status = {
+      policy: conn.getJsDialogPolicy(),
+      dialogs: conn.recentJsDialogs(),
+      chooserArm: conn.fileChooserArm(),
+      choosers: conn.recentFileChoosers(),
+      tauriPatched: shim.patched,
+      // The shim's arm lives in the page, the CDP arm lives in the session —
+      // different lifetimes. A dropped session leaves the page still armed, and
+      // reporting only the CDP half would call that "not armed".
+      tauriArmed: shim.armed,
+    }
+    return { ok: true, data: formatDialogStatus(status, localStamp) }
+  }
+
+  /**
+   * Arms both engines at once. Which one fires depends on how the app opens its
+   * dialog — a webview `<input>` goes through CDP, `@tauri-apps/plugin-dialog`
+   * goes through the IPC shim — and the caller has no reason to know which.
+   */
+  private async armFileChooser(req: ServerRequest, conn: PageSession, arming: boolean): Promise<ServerResponse> {
+    let arm: FileChooserArm | null = null
+
+    if (arming) {
+      const cancel = argBool(req.args, 'cancel') ?? false
+      const rawFiles = argStrArray(req.args, 'files') ?? []
+      if (cancel && rawFiles.length > 0) {
+        return { ok: false, error: 'dialog arm takes either --file or --cancel, not both' }
+      }
+      if (!cancel && rawFiles.length === 0) {
+        return { ok: false, error: 'dialog arm requires at least one --file, or --cancel' }
+      }
+      if (cancel) {
+        arm = { kind: 'cancel' }
+      } else {
+        const cwd = argStr(req.args, 'cwd') ?? process.cwd()
+        const files: string[] = []
+        for (const raw of rawFiles) {
+          const resolved = resolveUploadPath(cwd, raw)
+          if ('error' in resolved) return { ok: false, error: resolved.error }
+          files.push(resolved.path)
+        }
+        arm = { kind: 'files', files }
+      }
+    }
+
+    // The IPC shim goes first because it is the failure-prone half: it runs a
+    // script inside the page. Arming CDP only after it succeeds keeps the two
+    // engines from disagreeing — a reported failure must not leave a live
+    // intercept behind, which would silently swallow a later real chooser.
+    const tauri = await conn.evaluate(buildTauriArmScript(arm))
+    try {
+      await conn.armFileChooser(arm)
+    } catch (err) {
+      await conn.evaluate(buildTauriArmScript(null)).catch(() => { /* best effort */ })
+      throw err
+    }
+    const engines = tauri === TauriShimResult.Armed ? 'CDP + Tauri IPC' : 'CDP'
+
+    if (!arming) return { ok: true, data: `File chooser disarmed (${engines}).` }
+    return { ok: true, data: `File chooser ${describeArm(arm)} (${engines}). Arm before the click that opens it.` }
+  }
+
+  private async readTauriShimStatus(conn: PageSession): Promise<TauriShimStatus> {
+    try {
+      return await conn.evaluate(buildTauriStatusScript()) as TauriShimStatus
+    } catch {
+      return { patched: false, armed: false, fired: [] }
+    }
   }
 
   private async handleWait(req: ServerRequest): Promise<ServerResponse> {

@@ -68,6 +68,68 @@ where no ref exists. On DOM the correct order is `dom --filter "<text>"` → tak
 shift, scroll, zoom, or window resize, and it clicks whatever now sits at that point — silently.
 If you reach for `--pos` on a DOM element, first say why the ref was not usable.
 
+### Modals & file pickers (`dialog`, `upload`)
+
+A modal that agent-view cannot answer stops a run dead: the window looks frozen, every
+later command times out, and nothing says why. Two kinds, handled differently.
+
+**JS modals — `alert` / `confirm` / `prompt` / `beforeunload` — are answered for you.**
+Nothing to set up. While agent-view is attached these never block the page: the default
+standing answer is *dismiss*, and each one is recorded. `agent-view dialog` is the
+reliable place to read that record; the console feed carries the same line
+(`[agent-view] confirm auto-dismissed: <message>`) but only from the moment console
+attaches, so a modal answered before your first `console` call reaches `dialog` alone.
+
+```bash
+agent-view dialog                      # standing answer + every modal this window has seen
+agent-view dialog policy accept        # confirm() → true from now on
+agent-view dialog policy accept --text "name"   # prompt() → "name"
+agent-view dialog policy dismiss       # back to the default
+agent-view dialog dismiss              # answer one that is open right now
+agent-view dialog accept --text "x"    # …ditto, accepting
+```
+
+`dialog accept` / `dialog dismiss` exist for a modal that was already open **before**
+agent-view attached — that one produced no event, so no policy applied to it.
+
+**Native file pickers never open — you answer them in advance.** Which mechanism applies
+depends on how the app opens the picker, and `dialog arm` sets up all of them at once,
+so you do not have to know:
+
+```bash
+# The input already exists in the DOM (even hidden) — no picker at all, cheapest path
+agent-view upload --selector "#file-input" --file ./fixtures/a.png
+agent-view upload --selector "#imgs" --file ./a.png --file ./b.png   # multi-select
+agent-view upload --ref 12 --file ./a.png                            # if the AX tree exposes it
+
+# The input is created inside the click handler, or the app calls a native dialog API
+agent-view dialog arm --file ./fixtures/a.png    # then click the button that opens it
+agent-view dialog arm --cancel                   # act as if the user pressed Cancel
+agent-view dialog disarm                         # let real pickers open again
+```
+
+Rules that actually bite:
+
+- **Arm before the click.** A picker cannot be caught once it is open. `arm` is one-shot —
+  it is spent by the first picker and interception turns itself off, so a later click
+  opens a real OS dialog.
+- **Click through `agent-view click`, never `eval "el.click()"`.** Chromium refuses to
+  open a file picker without user activation, and an eval-driven click carries none: the
+  picker is silently dropped and never intercepted.
+- **Hidden inputs have no ref.** `display:none` / `v-show="false"` keeps them out of the
+  AX tree, so `dom` never prints one. Use `--selector`. `upload` has no `--filter` on
+  purpose: an accessible name lands on the label, not on the input behind it.
+- **`beforeunload` is always dismissed**, whatever the policy — accepting it navigates
+  away and loses the state you are checking.
+- Paths are resolved against your cwd and must exist — CDP accepts a bad path silently and
+  the app then reads an empty file.
+- `agent-view dialog` after the fact shows what was intercepted and what was answered.
+
+Known limits: `showOpenFilePicker()` (File System Access API) exposes no input to fill, so
+it can only be cancelled. Electron does not implement `window.prompt` at all. Native
+dialogs opened straight from an Electron **main** process (`dialog.showOpenDialog` behind
+an IPC channel) are out of reach — CDP does not see the main process.
+
 ### Waiting (`wait`)
 
 ```bash
@@ -281,6 +343,9 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Layout, spacing, full-window visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
 | Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
 | What DOM nodes changed after an interaction | `dom --diff` | Returns only `+`/`-` lines; much cheaper than re-reading the full tree |
+| Selecting a file for an input that exists in the DOM | `upload --selector` | No picker opens at all; works on hidden inputs, which have no ref |
+| Selecting a file when the input appears only mid-click | `dialog arm --file` then `click` | The only way — the input does not exist before the click and is gone after |
+| The window stopped responding after a click | `dialog` | Shows whether a modal was answered, and what the app was told |
 
 When two tools could answer the same question, prefer the one higher up the table. A common mistake is screenshotting to check "is the count = 5?" when `eval "store.counter"` returns the number directly for ~50 tokens.
 

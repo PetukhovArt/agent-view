@@ -29,6 +29,8 @@ import { runConsole } from './commands/console.js'
 import { runNetwork } from './commands/network.js'
 import { runLogs } from './commands/logs.js'
 import { runWatch } from './commands/watch.js'
+import { runDialog } from './commands/dialog.js'
+import { runUpload } from './commands/upload.js'
 import type { AgentViewConfig } from '../config/types.js'
 
 // Resolve version from package.json at runtime — same path in dev (src/cli) and build (dist/cli).
@@ -243,7 +245,7 @@ logs
   .option('-l, --level <levels>', 'Comma-separated level filter (log,info,warn,error,debug)')
   .option('--rescan <ms>', 'Target rediscovery interval, min 500 (default 3000)', parseDepth)
   .option('--truncate', 'Start from an empty feed instead of appending')
-  .option('--probe <path[@target]>', 'Inject a JS probe into matching targets, re-injected after restarts (requires allowEval)', collectProbe, [])
+  .option('--probe <path[@target]>', 'Inject a JS probe into matching targets, re-injected after restarts (requires allowEval)', collect, [])
   .action(async (options) => {
     const config = requireConfig()
     await runLogs(config, 'start', options)
@@ -287,6 +289,80 @@ logs
   .action(async (options) => {
     const config = requireConfig()
     await runLogs(config, 'clear', options)
+  })
+
+program
+  .command('upload')
+  .description('Put files into a file input without opening the native chooser')
+  .option('--file <path>', 'File to upload; repeat the flag for a multiple input', collect, [])
+  .option('--selector <css>', 'CSS selector of the input — use this for hidden inputs, which have no ref')
+  .option('--ref <n>', 'Input by ref from `dom` — only for an input the AX tree exposes')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runUpload(config, options)
+  })
+
+const dialog = program
+  .command('dialog')
+  .description('Inspect and answer JS modals (alert/confirm/prompt/beforeunload)')
+
+dialog
+  .command('status', { isDefault: true })
+  .description('Show the standing answer and the dialogs seen on this window')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runDialog(config, 'status', undefined, options)
+  })
+
+dialog
+  .command('accept')
+  .description('Accept the dialog that is open right now (for one opened before agent-view attached)')
+  .option('--text <value>', 'Text typed into a prompt before accepting')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runDialog(config, 'accept', undefined, options)
+  })
+
+dialog
+  .command('dismiss')
+  .description('Dismiss the dialog that is open right now')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runDialog(config, 'dismiss', undefined, options)
+  })
+
+dialog
+  .command('arm')
+  .description('Hold an answer ready for the next native file chooser, so it never opens')
+  .option('--file <path>', 'File to answer with; repeat the flag for a multi-select chooser', collect, [])
+  .option('--cancel', 'Answer as if the user pressed Cancel')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runDialog(config, 'arm', undefined, options)
+  })
+
+dialog
+  .command('disarm')
+  .description('Drop the armed answer and let native choosers open normally again')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runDialog(config, 'disarm', undefined, options)
+  })
+
+dialog
+  .command('policy <mode>')
+  .description('Set the standing answer for every future dialog. <mode> is accept or dismiss; sessions start on dismiss')
+  .option('--text <value>', 'Text typed into a prompt before accepting')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (mode, options) => {
+    const config = requireConfig()
+    await runDialog(config, 'policy', mode, options)
   })
 
 program
@@ -335,7 +411,8 @@ function parseDepth(value: string): number {
   return n
 }
 
-function collectProbe(value: string, previous: string[]): string[] {
+/** Commander accumulator for repeatable flags (`--probe`, `--file`). */
+function collect(value: string, previous: string[]): string[] {
   return [...previous, value]
 }
 

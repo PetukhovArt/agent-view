@@ -213,6 +213,20 @@
       <p id="drag-status" role="status" aria-live="polite" style="margin-top:8px;">idle</p>
     </section>
 
+    <section id="modals" class="section" aria-labelledby="modals-heading">
+      <h2 id="modals-heading">Modals</h2>
+      <button id="alert-btn" aria-label="Show alert">Show alert</button>
+      <button id="confirm-btn" aria-label="Show confirm">Show confirm</button>
+      <button id="prompt-btn" aria-label="Show prompt">Show prompt</button>
+      <!-- Hidden on purpose: real upload inputs are hidden and clicked from code,
+           so they never reach the AX tree and have no [ref=N]. -->
+      <input id="hidden-file" type="file" multiple style="display:none">
+      <button id="hidden-file-btn" aria-label="Open hidden picker">Open hidden picker</button>
+      <!-- Created and removed inside the handler — no selector can address it. -->
+      <button id="dynamic-pick-btn" aria-label="Open dynamic picker">Open dynamic picker</button>
+      <p id="modal-status" role="status" aria-live="polite">idle</p>
+    </section>
+
     <section id="async-container" class="section" aria-labelledby="async-heading">
       <h2 id="async-heading">Async Elements</h2>
       <p id="async-status">Waiting for async element...</p>
@@ -246,6 +260,52 @@
     } catch (err) {
       console.warn('[bench] WebSocket unavailable:', err.message)
     }
+
+    // ── Modals for `agent-view dialog` / `agent-view upload` ────────────────────
+    // Every outcome is logged, because that is the only way to tell what the app
+    // actually received: an auto-answered modal leaves no trace in the UI.
+    const modalStatus = () => document.getElementById('modal-status')
+    const modalLog = (text) => {
+      const el = modalStatus()
+      if (el) el.textContent = text
+      console.log('[bench-modal] ' + text)
+    }
+
+    document.getElementById('alert-btn').addEventListener('click', () => {
+      alert('bench alert')
+      modalLog('alert returned')
+    })
+    document.getElementById('confirm-btn').addEventListener('click', () => {
+      modalLog('confirm=' + confirm('bench confirm'))
+    })
+    document.getElementById('prompt-btn').addEventListener('click', () => {
+      modalLog('prompt=' + prompt('bench prompt', 'default'))
+    })
+
+    const fileNames = (list) => Array.from(list || []).map(f => f.name).join(',')
+
+    document.getElementById('hidden-file').addEventListener('change', (e) => {
+      modalLog('hidden-file=' + fileNames(e.target.files))
+    })
+    document.getElementById('hidden-file-btn').addEventListener('click', () => {
+      document.getElementById('hidden-file').click()
+    })
+
+    document.getElementById('dynamic-pick-btn').addEventListener('click', () => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.style.display = 'none'
+      document.body.appendChild(input)
+      input.onchange = () => {
+        modalLog('dynamic-file=' + fileNames(input.files))
+        input.remove()
+      }
+      input.oncancel = () => {
+        modalLog('dynamic-cancel')
+        input.remove()
+      }
+      input.click()
+    })
 
     // ── Console signals for `agent-view console` ────────────────────────────────
     console.log('[bench] app booted at', new Date().toISOString())

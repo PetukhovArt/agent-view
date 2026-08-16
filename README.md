@@ -154,6 +154,8 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
 | `logs`        | Durable file feed of page + worker console, surviving reloads and worker restarts. `tail --grep/--since/--level`, `clear`, plus re-injecting `--probe` scripts. |
 | `network`     | Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`. Captures page-load traffic. |
+| `upload`      | Puts files into a file input — no picker opens. `--selector` reaches the hidden inputs that have no ref. |
+| `dialog`      | JS modals are answered automatically so they cannot freeze the run; sets the answer, and pre-answers native file pickers with `arm`. |
 | `wait`        | Block until an element appears (default 10s).                                            |
 | `scene`       | WebGL scene graph (PixiJS today, engine-pluggable). `--compact` and `--diff` mirror `dom`. |
 | `snap`        | DOM + scene + optional screenshot in one call.                                           |
@@ -395,6 +397,44 @@ agent-view drag --from 5 --to 9 --steps 20 --hold-ms 150
 ```
 
 `--steps` (default 10) controls intermediate `mouseMoved` events so libraries that throttle on movement deltas still see continuous motion. `--hold-ms` inserts a pause between press and the first move (some libs require >100ms for touch-style activation). `--button` accepts `left|right|middle`.
+
+### `upload`
+
+Puts files into a file input through CDP `DOM.setFileInputFiles`. No picker opens, so there is nothing to arm and nothing to close.
+
+```bash
+agent-view upload --selector "#file-input" --file ./fixtures/a.png
+agent-view upload --selector "#images" --file ./a.png --file ./b.png   # multi-select input
+agent-view upload --ref 12 --file ./a.png
+```
+
+`--selector` is the flag you will usually want: upload inputs are almost always hidden (`display:none`, `class="d-none"`, `v-show="false"`) and clicked from code, which keeps them out of the accessibility tree — so `dom` never prints a `[ref=N]` for them. There is deliberately no `--filter`: an accessible name resolves to the label or the button carrying it, not to the `<input type=file>` behind it. Paths resolve against the current directory and must be real files; CDP accepts a missing path or a directory without complaint and the app then reads an empty file.
+
+### `dialog`
+
+Everything modal. JS modals are answered automatically — this command is how you change that answer, inspect what happened, and pre-answer native file pickers.
+
+```bash
+agent-view dialog                            # standing answer + log of modals and pickers
+agent-view dialog policy accept              # confirm() → true from now on
+agent-view dialog policy accept --text "hi"  # prompt() → "hi"
+agent-view dialog policy dismiss             # back to the default
+agent-view dialog accept | dismiss           # answer the one open right now
+agent-view dialog arm --file ./a.png         # pre-answer the next native file picker
+agent-view dialog arm --cancel               # …as if the user pressed Cancel
+agent-view dialog disarm                     # let real pickers open again
+```
+
+**JS modals.** `connectToPage` enables the CDP `Page` domain, and Chromium then stops showing `alert`/`confirm`/`prompt`/`beforeunload` natively — it blocks the renderer until the client answers. Every page session therefore answers on its own; the default is dismiss. `beforeunload` is always dismissed regardless of the policy: accepting it would navigate away mid-run and lose the state under inspection. Each one is written to the console feed as `[agent-view] confirm auto-dismissed: <message>`, which is how you explain a `confirm()` that returned `false` for no visible reason. `dialog accept` / `dialog dismiss` handle the one case the policy cannot: a modal that was already open before agent-view attached, which produced no event.
+
+**Native file pickers.** `dialog arm` holds an answer ready so the picker never opens, and arms two engines at once — CDP file-chooser interception for webview pickers, and a `window.__TAURI_INTERNALS__.invoke` shim for `@tauri-apps/plugin-dialog`, whose dialog runs in Rust past the webview where CDP cannot reach it. Use it for the input that is created and removed inside the click handler; a selector cannot address that one. Otherwise prefer `upload`.
+
+Two rules that bite:
+
+- **Arm before the click.** A picker cannot be caught once open. The arm is one-shot: the first picker spends it and interception turns itself off, so a later click opens a real OS dialog.
+- **Click with `agent-view click`, not `eval "el.click()"`.** Chromium refuses to open a file picker without user activation, and an eval-driven click has none — the picker is silently dropped and never intercepted.
+
+Out of reach: `showOpenFilePicker()` (File System Access API) exposes no input to fill and can only be cancelled; Electron does not implement `window.prompt`; a native dialog opened from an Electron **main** process is invisible to CDP.
 
 ### `screenshot`
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs } from './server.js'
+import { parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs, resolveUploadPath } from './server.js'
+import { join } from 'node:path'
 import type { PageSession, AXNode, TargetInfo } from '../cdp/types.js'
 import { TargetType } from '../cdp/types.js'
 
@@ -279,5 +280,25 @@ describe('requestDeadlineMs', () => {
 
   it('leaves launch unbounded — it blocks for minutes by design', () => {
     expect(requestDeadlineMs('launch', {})).toBeNull()
+  })
+})
+
+describe('resolveUploadPath', () => {
+  const repoRoot = process.cwd()
+
+  it('resolves a relative path against the caller cwd, not the server cwd', () => {
+    expect(resolveUploadPath(repoRoot, 'package.json'))
+      .toEqual({ path: join(repoRoot, 'package.json') })
+  })
+
+  it('reports a missing file with the absolute path it looked at', () => {
+    const result = resolveUploadPath(repoRoot, 'nope.txt')
+    expect(result).toEqual({ error: `File not found: ${join(repoRoot, 'nope.txt')}` })
+  })
+
+  // A directory passes an existence check and reaches CDP, where it becomes the
+  // empty File this validation exists to prevent.
+  it('rejects a directory', () => {
+    expect(resolveUploadPath(repoRoot, 'src')).toEqual({ error: `Not a file: ${join(repoRoot, 'src')}` })
   })
 })

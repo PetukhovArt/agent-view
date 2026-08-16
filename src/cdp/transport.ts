@@ -9,6 +9,8 @@ import {
   NetworkEventKind,
   NetworkResourceType,
   NetworkEntryState,
+  JsDialogType,
+  FileChooserMode,
   WebSocketOpcode,
   WebSocketDirection,
   type CDPTarget,
@@ -24,6 +26,10 @@ import {
   type ClickOpts,
   type Point,
   type NetworkEvent,
+  type JsDialogInfo,
+  type JsDialogPolicy,
+  type FileChooserArm,
+  type FileChooserEvent,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
 
@@ -153,7 +159,7 @@ type RawCDPClient = {
   Runtime: {
     enable: () => Promise<unknown>
     evaluate: (params: Record<string, unknown>) => Promise<{
-      result: { value?: unknown; type?: string; description?: string; subtype?: string }
+      result: { value?: unknown; type?: string; description?: string; subtype?: string; objectId?: string }
       exceptionDetails?: { text?: string; exception?: { description?: string }; stackTrace?: { description?: string } }
     }>
     callFunctionOn: (params: Record<string, unknown>) => Promise<unknown>
@@ -280,6 +286,286 @@ function attachConsoleSubscription(client: RawCDPClient): ConsoleSubscription {
       handlers.add(handler)
       return () => handlers.delete(handler)
     },
+  }
+}
+
+/** Dialogs are rare; a short tail is enough to explain a surprising `confirm()` result. */
+const MAX_TRACKED_DIALOGS = 20
+
+type JavascriptDialogOpeningEvent = {
+  url?: string
+  message?: string
+  type?: string
+  defaultPrompt?: string
+}
+
+type PageDialogDomain = {
+  javascriptDialogOpening: (cb: (params: JavascriptDialogOpeningEvent) => void) => unknown
+  handleJavaScriptDialog: (params: Record<string, unknown>) => Promise<unknown>
+}
+
+type JsDialogSubscription = {
+  add: (handler: (dialog: JsDialogInfo) => void) => () => void
+  answer: (accept: boolean, promptText?: string) => Promise<void>
+  setPolicy: (policy: JsDialogPolicy) => void
+  getPolicy: () => JsDialogPolicy
+  recent: () => JsDialogInfo[]
+}
+
+const DIALOG_TYPES: ReadonlySet<string> = new Set(Object.values(JsDialogType))
+
+function dialogTypeFrom(raw: string | undefined): JsDialogType {
+  return raw && DIALOG_TYPES.has(raw) ? raw as JsDialogType : JsDialogType.Alert
+}
+
+function dialogNotice(dialog: JsDialogInfo, accept: boolean): ConsoleMessage {
+  const verb = accept ? 'auto-accepted' : 'auto-dismissed'
+  const body = dialog.message ? `: ${dialog.message}` : ''
+  return {
+    ts: Date.now(),
+    level: ConsoleLevel.Warn,
+    source: ConsoleSource.Log,
+    text: `[agent-view] ${dialog.type} ${verb}${body}`,
+  }
+}
+
+/**
+ * Answers JS dialogs so the renderer never stalls.
+ *
+ * While the Page domain is enabled Chromium stops showing the native dialog and
+ * waits for `Page.handleJavaScriptDialog` instead — with no client answer the
+ * page hangs forever. Since `connectToPage` always enables Page, every page
+ * session must own this. The standing policy dismisses; `setPolicy` changes it.
+ */
+function attachJsDialogSubscription(
+  Page: PageDialogDomain,
+  notice: (msg: ConsoleMessage) => void,
+): JsDialogSubscription {
+  const handlers = new Set<(dialog: JsDialogInfo) => void>()
+  const seen: JsDialogInfo[] = []
+  let policy: JsDialogPolicy = { accept: false }
+  let pending: JsDialogInfo | null = null
+
+  async function send(accept: boolean, promptText: string | undefined, automatic: boolean): Promise<void> {
+    const params: Record<string, unknown> = { accept }
+    if (promptText !== undefined) params.promptText = promptText
+    const answered = pending
+    pending = null
+    try {
+      await Page.handleJavaScriptDialog(params)
+    } catch (err) {
+      // Only the dialog this call was answering may be restored: a later one
+      // may already have taken the slot, and overwriting it would make the
+      // session answer the wrong dialog next time.
+      if (pending === null) pending = answered
+      throw err
+    }
+    if (answered) {
+      answered.answer = { accept, promptText, automatic }
+      return
+    }
+    // A blind answer — the dialog opened before agent-view attached, so no
+    // opening event created a record. Without this the one scenario the manual
+    // command exists for leaves no trace in `dialog status`.
+    record({
+      ts: Date.now(),
+      type: JsDialogType.Alert,
+      message: '(opened before agent-view attached)',
+      url: '',
+      answer: { accept, promptText, automatic },
+    })
+  }
+
+  function record(dialog: JsDialogInfo): JsDialogInfo {
+    seen.push(dialog)
+    if (seen.length > MAX_TRACKED_DIALOGS) seen.shift()
+    return dialog
+  }
+
+  Page.javascriptDialogOpening((params) => {
+    const dialog: JsDialogInfo = {
+      ts: Date.now(),
+      type: dialogTypeFrom(params.type),
+      message: params.message ?? '',
+      defaultPrompt: params.defaultPrompt,
+      url: params.url ?? '',
+    }
+    pending = dialog
+    record(dialog)
+
+    for (const handler of handlers) {
+      try { handler(dialog) } catch { /* one bad handler shouldn't break others */ }
+    }
+
+    // `beforeunload` is not a question about the app's own state, it is a
+    // question about leaving the page. Accepting it would navigate away in the
+    // middle of a verification run and lose everything under inspection, so the
+    // standing answer — which exists to make `confirm()` return true — does not
+    // reach it. Staying put is always the recoverable outcome.
+    const accept = dialog.type === JsDialogType.BeforeUnload ? false : policy.accept
+    const promptText = accept ? policy.promptText : undefined
+
+    void send(accept, promptText, true)
+      .then(() => notice(dialogNotice(dialog, accept)))
+      .catch(() => { /* record keeps `answer` unset — the status output shows it as still open */ })
+  })
+
+  return {
+    add(handler) {
+      handlers.add(handler)
+      return () => handlers.delete(handler)
+    },
+    /**
+     * Sent even with nothing pending: a dialog opened before agent-view attached
+     * never produced an opening event, and answering blind is the only way out.
+     */
+    answer: (accept, promptText) => send(accept, promptText, false),
+    setPolicy: (next) => { policy = next },
+    getPolicy: () => policy,
+    recent: () => [...seen],
+  }
+}
+
+type FileChooserOpenedEvent = {
+  mode?: string
+  backendNodeId?: number
+}
+
+type PageFileChooserDomain = {
+  fileChooserOpened: (cb: (params: FileChooserOpenedEvent) => void) => unknown
+  setInterceptFileChooserDialog: (params: Record<string, unknown>) => Promise<unknown>
+}
+
+type FileChooserSubscription = {
+  arm: (arm: FileChooserArm | null) => Promise<void>
+  current: () => FileChooserArm | null
+  recent: () => FileChooserEvent[]
+  forget: () => void
+}
+
+/**
+ * Intercepts the native file chooser and answers it from the armed value.
+ *
+ * Interception stays off until something is armed: turning it on unconditionally
+ * would suppress a chooser the user actually wanted to see, and the app would
+ * look broken. Arming is one-shot for the same reason — a standing intercept
+ * silently changes behaviour long after the command that set it.
+ */
+function attachFileChooserSubscription(
+  Page: PageFileChooserDomain,
+  setFiles: (backendNodeId: number, files: string[]) => Promise<void>,
+  dispatchCancel: (backendNodeId: number) => Promise<void>,
+  notice: (msg: ConsoleMessage) => void,
+): FileChooserSubscription {
+  const seen: FileChooserEvent[] = []
+  let armed: FileChooserArm | null = null
+
+  const record = (event: FileChooserEvent): FileChooserEvent => {
+    seen.push(event)
+    if (seen.length > MAX_TRACKED_DIALOGS) seen.shift()
+    return event
+  }
+
+  Page.fileChooserOpened((params) => {
+    const pending = armed
+    armed = null
+    const event = record({
+      ts: Date.now(),
+      mode: params.mode === FileChooserMode.Multiple ? FileChooserMode.Multiple : FileChooserMode.Single,
+      matchedInput: params.backendNodeId !== undefined,
+      answer: 'unanswered',
+    })
+
+    /**
+     * Answering is async, so a fresh `arm` can land while this one is still in
+     * flight. Turning interception off then would kill the new arm and let the
+     * next chooser open as a real OS window, while `fileChooserArm()` still
+     * reports it armed — so only the arm that is still current disarms.
+     */
+    const disarm = (): Promise<unknown> => {
+      if (armed !== null) return Promise.resolve()
+      return Page.setInterceptFileChooserDialog({ enabled: false }).catch(() => { /* target gone */ })
+    }
+
+    const cancelOnPage = (backendNodeId: number, outcome: string): void => {
+      // Suppressing the chooser is not enough: the page is waiting on
+      // `input.oncancel`, and Chromium's own cancel path does not deliver it
+      // here. Without this event the app waits for a user who will never come.
+      void dispatchCancel(backendNodeId)
+        .then(() => notice(chooserNotice(outcome)))
+        .catch((err: unknown) => notice(chooserNotice(`cancel could not be delivered: ${errText(err)}`)))
+        .finally(() => disarm())
+    }
+
+    if (!pending || pending.kind === 'cancel') {
+      event.answer = 'cancel'
+      if (params.backendNodeId !== undefined) {
+        cancelOnPage(params.backendNodeId, 'cancelled')
+        return
+      }
+      notice(chooserNotice('cancelled'))
+      void disarm()
+      return
+    }
+
+    if (params.backendNodeId === undefined) {
+      // Nothing to attach files to. The chooser is already suppressed, so the
+      // call resolves as a cancel — say so instead of reporting a fake success.
+      event.answer = 'cancel'
+      notice(chooserNotice('cancelled — chooser had no file input (File System Access API)'))
+      void disarm()
+      return
+    }
+
+    const { backendNodeId } = params
+    void setFiles(backendNodeId, pending.files)
+      .then(() => {
+        event.answer = 'files'
+        event.files = pending.files
+        notice(chooserNotice(`answered with ${pending.files.length} file(s)`))
+        void disarm()
+      })
+      .catch((err: unknown) => {
+        // The chooser is suppressed either way, so failing to attach the files
+        // must still produce an answer — otherwise the page waits forever,
+        // which is the exact hang this feature exists to prevent.
+        event.answer = 'cancel'
+        cancelOnPage(backendNodeId, `files could not be attached (${errText(err)}), cancelled instead`)
+      })
+  })
+
+  return {
+    async arm(next) {
+      armed = next
+      // Interception only suppresses the chooser; what the page sees afterwards
+      // is decided here, not by Chromium's own `cancel` flag.
+      await Page.setInterceptFileChooserDialog(next ? { enabled: true, cancel: false } : { enabled: false })
+    },
+    current: () => armed,
+    recent: () => [...seen],
+    /**
+     * A new document means the click the arm was meant for will never happen.
+     * Leaving it live would answer some later, unrelated chooser — the standing
+     * intercept that one-shot arming exists to avoid.
+     */
+    forget() {
+      if (armed === null) return
+      armed = null
+      void Page.setInterceptFileChooserDialog({ enabled: false }).catch(() => { /* target gone */ })
+    },
+  }
+}
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function chooserNotice(outcome: string): ConsoleMessage {
+  return {
+    ts: Date.now(),
+    level: ConsoleLevel.Warn,
+    source: ConsoleSource.Log,
+    text: `[agent-view] file chooser intercepted, ${outcome}`,
   }
 }
 
@@ -561,8 +847,8 @@ export async function connectToPage(
   const client = await openClient(port, target)
   const { Runtime, Accessibility, Page, DOM, Input } = client as RawCDPClient & {
     Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
-    Page: { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
-    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }> }
+    Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
+    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown> }
     Input: { dispatchMouseEvent: (p: Record<string, unknown>) => Promise<unknown> }
   }
   const cacheKey = `${port}:${target.id}`
@@ -570,6 +856,19 @@ export async function connectToPage(
   // Subscribe BEFORE enable so we catch buffered console/log entries emitted at enable-time.
   const consoleSub = attachConsoleSubscription(client)
   const networkSub = attachNetworkSubscription(client.Network)
+  const jsDialogSub = attachJsDialogSubscription(Page, consoleSub.emit)
+  const fileChooserSub = attachFileChooserSubscription(
+    Page,
+    (backendNodeId, files) => DOM.setFileInputFiles({ backendNodeId, files }).then(() => undefined),
+    async (backendNodeId) => {
+      const { object } = await DOM.resolveNode({ backendNodeId })
+      await Runtime.callFunctionOn({
+        objectId: object.objectId,
+        functionDeclaration: `function() { this.dispatchEvent(new Event('cancel')) }`,
+      })
+    },
+    consoleSub.emit,
+  )
   const onDisconnect = attachDisconnectSubscription(client)
   let documentBackendNodeId = 0
   await bringUpSession(client, target, async () => {
@@ -590,6 +889,7 @@ export async function connectToPage(
 
   Page.frameNavigated(async () => {
     cache.invalidate(cacheKey)
+    fileChooserSub.forget()
     try {
       const { root: newRoot } = await DOM.getDocument({ depth: 0 })
       documentBackendNodeId = newRoot.backendNodeId
@@ -687,6 +987,15 @@ export async function connectToPage(
     enableNetwork: () => networkSub.enable(),
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
 
+    onJsDialog: (handler) => jsDialogSub.add(handler),
+    answerJsDialog: (accept, promptText) => jsDialogSub.answer(accept, promptText),
+    setJsDialogPolicy: (policy) => jsDialogSub.setPolicy(policy),
+    getJsDialogPolicy: () => jsDialogSub.getPolicy(),
+    recentJsDialogs: () => jsDialogSub.recent(),
+    armFileChooser: (arm) => fileChooserSub.arm(arm),
+    fileChooserArm: () => fileChooserSub.current(),
+    recentFileChoosers: () => fileChooserSub.recent(),
+
     async getAccessibilityTree(): Promise<AXNode[]> {
       const cached = cache.get(cacheKey)
       if (cached) return cached
@@ -780,6 +1089,29 @@ export async function connectToPage(
 
     async dragBetweenPositions(from: Point, to: Point, opts?: DragOpts): Promise<void> {
       await dispatchDrag(from, to, opts)
+    },
+
+    async uploadByNodeId(backendNodeId: number, files: string[]): Promise<void> {
+      await DOM.setFileInputFiles({ backendNodeId, files })
+    },
+
+    async uploadBySelector(selector: string, files: string[]): Promise<boolean> {
+      // Addressed by objectId rather than nodeId: `DOM.querySelector` needs a
+      // document nodeId, and the document node is re-numbered on every
+      // navigation. A RemoteObject from the page skips that bookkeeping.
+      const { result, exceptionDetails } = await Runtime.evaluate({
+        expression: `document.querySelector(${JSON.stringify(selector)})`,
+        returnByValue: false,
+      })
+      // A malformed selector throws, and the thrown DOMException comes back as
+      // a perfectly good RemoteObject — without this check it would be passed
+      // to setFileInputFiles as if it were the matched node.
+      if (exceptionDetails) {
+        throw new EvaluationError(`Invalid selector ${JSON.stringify(selector)}`)
+      }
+      if (!result.objectId || result.subtype === 'null') return false
+      await DOM.setFileInputFiles({ objectId: result.objectId, files })
+      return true
     },
 
     async fillByNodeId(backendNodeId: number, value: string): Promise<void> {
