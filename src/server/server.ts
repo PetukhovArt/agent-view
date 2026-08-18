@@ -196,6 +196,20 @@ type CachedSession =
   | { kind: 'page'; session: PageSession }
   | { kind: 'runtime'; session: RuntimeSession }
 
+/**
+ * Console/network/log state, partitioned by **CDP port**. One daemon serves every checkout on
+ * the machine, so parallel worktree slots share it - keeping this state global made slot 9's
+ * `logs` write into slot 3's feed file and mix in slot 3's messages. Port <-> app instance is 1:1,
+ * so the port is the right partition key (the rest of the server already keys caches `port:target`).
+ */
+type PortState = {
+  consoleStream: ConsoleStream
+  networkStream: NetworkStream
+  networkRefs: Map<number, { targetId: string; requestId: string }>
+  networkNextRef: number
+  logRecorder: LogRecorder | null
+}
+
 export class AgentViewServer {
   private server: Server | null = null
   private connections = new Map<string, CachedSession>()
@@ -204,13 +218,9 @@ export class AgentViewServer {
   private sceneCache = new Map<string, SceneNode>()
   private domTextCache = new Map<string, string>()
   private axTreeCache = new AxTreeCache()
-  private consoleStream = new ConsoleStream()
-  private networkStream = new NetworkStream()
-  private networkRefs = new Map<number, { targetId: string; requestId: string }>()
-  private networkNextRef = 1
+  private portStates = new Map<number, PortState>()
   private token = ''
   private activeWatches = new Set<WatchSession>()
-  private logRecorder: LogRecorder | null = null
 
   private readonly handlers = {
     discover: (req: ServerRequest) => this.handleDiscover(req),
@@ -255,9 +265,30 @@ export class AgentViewServer {
     await writeFile(TOKEN_PATH, this.token, { mode: 0o600 })
   }
 
+  /** Per-port state bucket, created on first use. */
+  private stateFor(port: number): PortState {
+    let state = this.portStates.get(port)
+    if (!state) {
+      state = {
+        consoleStream: new ConsoleStream(),
+        networkStream: new NetworkStream(),
+        networkRefs: new Map(),
+        networkNextRef: 1,
+        logRecorder: null,
+      }
+      this.portStates.set(port, state)
+    }
+    return state
+  }
+
+  private isAnyRecording(): boolean {
+    for (const state of this.portStates.values()) if (state.logRecorder) return true
+    return false
+  }
+
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
-    if (this.activeWatches.size > 0 || this.logRecorder !== null) {
+    if (this.activeWatches.size > 0 || this.isAnyRecording()) {
       // Pause idle shutdown while streaming handlers or a log recording are alive —
       // a recording that dies at the 5-min mark loses exactly the long scenario it was for.
       this.idleTimer = null
@@ -375,8 +406,9 @@ export class AgentViewServer {
     if (!cached) return
     this.connections.delete(connKey)
     const targetId = cached.session.target.id
-    this.consoleStream.detach(targetId)
-    this.networkStream.detach(targetId)
+    const state = this.portStates.get(Number(connKey.slice(0, connKey.indexOf(':'))))
+    state?.consoleStream.detach(targetId)
+    state?.networkStream.detach(targetId)
     this.axTreeCache.invalidate(connKey)
     cached.session.close().catch(() => { /* socket already gone */ })
   }
@@ -497,8 +529,9 @@ export class AgentViewServer {
    * mirroring the consoleStream pattern.
    */
   private async ensureNetworkAttached(req: ServerRequest, config: { networkBufferSize?: number; captureBody?: boolean } | null): Promise<void> {
-    if (this.networkStream.attachedCount === 0) {
-      this.networkStream = new NetworkStream({
+    const state = this.stateFor(req.port)
+    if (state.networkStream.attachedCount === 0) {
+      state.networkStream = new NetworkStream({
         capacity: config?.networkBufferSize ?? DEFAULT_NETWORK_BUFFER,
         captureBody: config?.captureBody ?? false,
       })
@@ -508,7 +541,7 @@ export class AgentViewServer {
       if (!NETWORK_PAGE_TARGETS.has(t.type)) continue
       try {
         const session = await this.getPageSession(req, t.id)
-        await this.networkStream.attach(session)
+        await state.networkStream.attach(session)
       } catch { /* a single unreachable target shouldn't abort capture */ }
     }
   }
@@ -1304,6 +1337,7 @@ export class AgentViewServer {
     opts: { targets: TargetInfo[]; allowedTypes: Set<TargetType>; targetId?: string },
   ): Promise<RuntimeSession[]> {
     const sessions: RuntimeSession[] = []
+    const state = this.stateFor(req.port)
     if (process.env.AV_DEBUG_CONSOLE) {
       // eslint-disable-next-line no-console
       console.error(`[av-debug] attachConsoleTargets: targets=${opts.targets.length} explicit=${opts.targetId ?? 'none'} types=${[...opts.allowedTypes].join(',')}`)
@@ -1314,11 +1348,11 @@ export class AgentViewServer {
       if (!RUNTIME_ONLY_TARGETS.has(t.type) && t.type !== TargetType.Page && t.type !== TargetType.Iframe) continue
       try {
         const session = await this.getRuntimeSession(req, t)
-        this.consoleStream.attach(session)
+        state.consoleStream.attach(session)
         sessions.push(session)
         if (process.env.AV_DEBUG_CONSOLE) {
           // eslint-disable-next-line no-console
-          console.error(`[av-debug] attachConsoleTargets: attached ${t.type}:${t.id.slice(0, 8)} (stream now has ${this.consoleStream.attachedCount})`)
+          console.error(`[av-debug] attachConsoleTargets: attached ${t.type}:${t.id.slice(0, 8)} (stream now has ${state.consoleStream.attachedCount})`)
         }
       } catch (err) {
         if (process.env.AV_DEBUG_CONSOLE) {
@@ -1334,10 +1368,11 @@ export class AgentViewServer {
     const cwd = argStr(req.args, 'cwd')
     const config = cwd ? readConfig(resolve(cwd)) : null
     const bufferSize = config?.consoleBufferSize ?? 500
-    if (this.consoleStream.attachedCount === 0 && this.logRecorder === null) {
+    const state = this.stateFor(req.port)
+    if (state.consoleStream.attachedCount === 0 && state.logRecorder === null) {
       // Recreate with config-tuned capacity on first attach. Never while recording — the
       // recorder's subscription lives on the stream instance and would be dropped silently.
-      this.consoleStream = new ConsoleStream({ capacity: bufferSize })
+      state.consoleStream = new ConsoleStream({ capacity: bufferSize })
     }
 
     const targetQuery = argStr(req.args, 'target')
@@ -1354,7 +1389,7 @@ export class AgentViewServer {
     }
 
     if (argBool(req.args, 'clear')) {
-      this.consoleStream.clear(resolvedTargetId)
+      state.consoleStream.clear(resolvedTargetId)
       return { ok: true, data: 'Console buffer cleared' }
     }
 
@@ -1376,7 +1411,7 @@ export class AgentViewServer {
 
     if (follow) {
       const timeoutSec = argNum(req.args, 'timeout') ?? 10
-      const collected: StampedConsoleMessage[] = this.consoleStream.drain({
+      const collected: StampedConsoleMessage[] = state.consoleStream.drain({
         since,
         level: levelFilter,
         targetId: resolvedTargetId,
@@ -1393,7 +1428,7 @@ export class AgentViewServer {
       }
 
       const timedOut = await new Promise<boolean>((resolveFollow) => {
-        const dispose = this.consoleStream.subscribe((msg) => {
+        const dispose = state.consoleStream.subscribe((msg) => {
           if (resolvedTargetId && msg.targetId !== resolvedTargetId) return
           if (levelFilter && !levelFilter.has(msg.level)) return
           if (msg.ts <= seenAt) return
@@ -1418,7 +1453,7 @@ export class AgentViewServer {
       return { ok: true, data: formatConsoleMessages(collected) }
     }
 
-    const messages = this.consoleStream.drain({
+    const messages = state.consoleStream.drain({
       since,
       level: levelFilter,
       targetId: resolvedTargetId,
@@ -1430,6 +1465,7 @@ export class AgentViewServer {
     const cwd = argStr(req.args, 'cwd')
     const config = cwd ? readConfig(resolve(cwd)) : null
     await this.ensureNetworkAttached(req, config)
+    const state = this.stateFor(req.port)
 
     let resolvedTargetId: string | undefined
     const targetQuery = argStr(req.args, 'target') ?? argStr(req.args, 'window')
@@ -1444,11 +1480,11 @@ export class AgentViewServer {
 
     const reqN = argNum(req.args, 'req')
     if (reqN !== undefined) {
-      const ref = this.networkRefs.get(reqN)
+      const ref = state.networkRefs.get(reqN)
       if (!ref) {
         return { ok: false, error: `Invalid req: ${reqN}. Run \`agent-view network\` to get fresh handles.` }
       }
-      const entry = this.networkStream.getEntry(ref.targetId, ref.requestId)
+      const entry = state.networkStream.getEntry(ref.targetId, ref.requestId)
       if (!entry) {
         return { ok: false, error: `Request ${reqN} is no longer buffered (evicted or app restarted).` }
       }
@@ -1456,7 +1492,7 @@ export class AgentViewServer {
     }
 
     if (argBool(req.args, 'clear')) {
-      this.networkStream.clear(resolvedTargetId)
+      state.networkStream.clear(resolvedTargetId)
       return { ok: true, data: 'Network buffer cleared' }
     }
 
@@ -1480,15 +1516,16 @@ export class AgentViewServer {
       return this.followNetwork(req, filter, maxLines, untilPattern)
     }
 
-    const entries = this.networkStream.drain(filter)
-    return { ok: true, data: this.renderNetworkList(entries, maxLines) }
+    const entries = state.networkStream.drain(filter)
+    return { ok: true, data: this.renderNetworkList(req.port, entries, maxLines) }
   }
 
-  private renderNetworkList(entries: StampedNetworkEntry[], maxLines: number): string {
-    const { text, refs, nextRef } = formatNetworkList(entries, { startRef: this.networkNextRef, maxLines })
-    this.networkRefs.clear()
-    for (const r of refs) this.networkRefs.set(r.ref, { targetId: r.targetId, requestId: r.requestId })
-    this.networkNextRef = nextRef
+  private renderNetworkList(port: number, entries: StampedNetworkEntry[], maxLines: number): string {
+    const state = this.stateFor(port)
+    const { text, refs, nextRef } = formatNetworkList(entries, { startRef: state.networkNextRef, maxLines })
+    state.networkRefs.clear()
+    for (const r of refs) state.networkRefs.set(r.ref, { targetId: r.targetId, requestId: r.requestId })
+    state.networkNextRef = nextRef
     return text
   }
 
@@ -1503,16 +1540,17 @@ export class AgentViewServer {
     const matchText = (e: StampedNetworkEntry): string =>
       `${e.method ?? (e.isWebSocket ? 'WS' : e.isEventSource ? 'SSE' : '')} ${e.status ?? e.state} ${e.url}`
 
+    const state = this.stateFor(req.port)
     if (matcher) {
-      const pre = this.networkStream.drain(filter)
+      const pre = state.networkStream.drain(filter)
       const hit = pre.findIndex(e => matcher(matchText(e)))
-      if (hit !== -1) return { ok: true, data: this.renderNetworkList(pre.slice(0, hit + 1), maxLines) }
+      if (hit !== -1) return { ok: true, data: this.renderNetworkList(req.port, pre.slice(0, hit + 1), maxLines) }
     }
 
     const matched = await new Promise<boolean>((resolveFollow) => {
       const dispose = matcher
-        ? this.networkStream.subscribe(() => {
-            const cur = this.networkStream.drain(filter)
+        ? state.networkStream.subscribe(() => {
+            const cur = state.networkStream.drain(filter)
             if (cur.some(e => matcher(matchText(e)))) {
               clearTimeout(timer)
               dispose()
@@ -1531,8 +1569,8 @@ export class AgentViewServer {
       return { ok: false, error: `Timeout: pattern not seen in ${timeoutSec}s` }
     }
 
-    const entries = this.networkStream.drain(filter)
-    return { ok: true, data: this.renderNetworkList(entries, maxLines) }
+    const entries = state.networkStream.drain(filter)
+    return { ok: true, data: this.renderNetworkList(req.port, entries, maxLines) }
   }
 
   /**
@@ -1546,27 +1584,38 @@ export class AgentViewServer {
     const projectDir = cwd ? resolve(cwd) : process.cwd()
     const config = cwd ? readConfig(projectDir) : null
     const explicitFile = argStr(req.args, 'file')
-    // An active recording owns the feed path — only an explicit --file overrides it.
+    // An active recording owns the feed path — only an explicit --file overrides it. "Active"
+    // means *this port's* recording: another slot's recorder must never redirect this feed.
+    const state = this.stateFor(req.port)
     const file = explicitFile
       ? resolveLogFile(projectDir, explicitFile)
-      : this.logRecorder?.file ?? resolveLogFile(projectDir, config?.logFile)
+      : state.logRecorder?.file ?? resolveLogFile(projectDir, config?.logFile)
 
     switch (action) {
       case 'start': return this.startLogRecording(req, config, file)
-      case 'stop': return this.stopLogRecording()
-      case 'status': return { ok: true, data: this.logRecorder ? formatRecorderStatus(this.logRecorder.status()) : formatIdleFeed(file) }
-      case 'clear': return this.clearLogFeed(file)
+      case 'stop': return this.stopLogRecording(req.port)
+      case 'status': return { ok: true, data: state.logRecorder ? formatRecorderStatus(state.logRecorder.status()) : formatIdleFeed(file) }
+      case 'clear': return this.clearLogFeed(req.port, file)
       case 'tail': return this.tailLogFeed(req, file)
       default: return { ok: false, error: `Unknown logs action: ${action}` }
     }
   }
 
   private async startLogRecording(req: ServerRequest, config: AgentViewConfig | null, file: string): Promise<ServerResponse> {
-    if (this.logRecorder) {
-      if (this.logRecorder.file === file) {
-        return { ok: true, data: `Already recording\n${formatRecorderStatus(this.logRecorder.status())}` }
+    const state = this.stateFor(req.port)
+    if (state.logRecorder) {
+      if (state.logRecorder.file === file) {
+        return { ok: true, data: `Already recording\n${formatRecorderStatus(state.logRecorder.status())}` }
       }
-      return { ok: false, error: `Already recording into ${this.logRecorder.file}. Run \`agent-view logs stop\` first.` }
+      return { ok: false, error: `Already recording into ${state.logRecorder.file}. Run \`agent-view logs stop\` first.` }
+    }
+
+    // Two checkouts pointed at one feed file interleave records and truncate each other, which is
+    // exactly the cross-slot corruption port-scoping removes elsewhere — refuse it instead.
+    for (const [otherPort, other] of this.portStates) {
+      if (otherPort !== req.port && other.logRecorder?.file === file) {
+        return { ok: false, error: `Port ${otherPort} is already recording into ${file}. Use a per-slot feed path (--file) or stop that recording first.` }
+      }
     }
 
     const probes = parseProbes(req.args)
@@ -1585,8 +1634,8 @@ export class AgentViewServer {
       resolvedTargetId = match.target.id
     }
 
-    if (this.consoleStream.attachedCount === 0) {
-      this.consoleStream = new ConsoleStream({ capacity: config?.consoleBufferSize ?? 500 })
+    if (state.consoleStream.attachedCount === 0) {
+      state.consoleStream = new ConsoleStream({ capacity: config?.consoleBufferSize ?? 500 })
     }
 
     const allowedTypes = this.resolveConsoleTypes(req, config)
@@ -1603,7 +1652,7 @@ export class AgentViewServer {
         allowedTypes,
         targetId: resolvedTargetId,
       }),
-      subscribe: (handler) => this.consoleStream.subscribe(handler),
+      subscribe: (handler) => state.consoleStream.subscribe(handler),
     })
 
     try {
@@ -1613,24 +1662,26 @@ export class AgentViewServer {
       return { ok: false, error: `Could not start recording into ${file}: ${err instanceof Error ? err.message : String(err)}` }
     }
 
-    this.logRecorder = recorder
+    state.logRecorder = recorder
     this.resetIdleTimer()
     return { ok: true, data: formatRecorderStatus(recorder.status()) }
   }
 
-  private async stopLogRecording(): Promise<ServerResponse> {
-    if (!this.logRecorder) return { ok: true, data: 'Not recording' }
-    const { file, lines } = this.logRecorder.status()
-    this.logRecorder.stop('stop requested')
-    this.logRecorder = null
+  private async stopLogRecording(port: number): Promise<ServerResponse> {
+    const state = this.stateFor(port)
+    if (!state.logRecorder) return { ok: true, data: 'Not recording' }
+    const { file, lines } = state.logRecorder.status()
+    state.logRecorder.stop('stop requested')
+    state.logRecorder = null
     this.resetIdleTimer()
     return { ok: true, data: `Recording stopped — ${lines} lines in ${file}` }
   }
 
-  private async clearLogFeed(file: string): Promise<ServerResponse> {
-    this.consoleStream.clear()
-    if (this.logRecorder?.file === file) {
-      this.logRecorder.clearFeed()
+  private async clearLogFeed(port: number, file: string): Promise<ServerResponse> {
+    const state = this.stateFor(port)
+    state.consoleStream.clear()
+    if (state.logRecorder?.file === file) {
+      state.logRecorder.clearFeed()
       return { ok: true, data: `Feed cleared, recording continues — ${file}` }
     }
     if (!existsSync(file)) {
@@ -1655,6 +1706,7 @@ export class AgentViewServer {
       since = parsed
     }
 
+    const state = this.stateFor(req.port)
     const { lines, scanTruncated } = readFeedLines(file)
     const selected = filterLogLines(lines, {
       grep: argStr(req.args, 'grep'),
@@ -1672,7 +1724,7 @@ export class AgentViewServer {
       dropped > 0 ? `Output cap hit — ${dropped} older matching records omitted.` : null,
       scanTruncated ? `Feed exceeds the scan window — older records are only in ${file}.` : null,
       // Without this, a static feed reads as "the app went quiet" instead of "nobody is recording".
-      this.logRecorder?.file === file ? null : 'Not recording — this feed is static. Run `agent-view logs start`.',
+      state.logRecorder?.file === file ? null : 'Not recording — this feed is static. Run `agent-view logs start`.',
     ].filter((w): w is string => w !== null)
 
     return { ok: true, data: text, warning: warnings.length > 0 ? warnings.join(' ') : undefined }
@@ -1688,12 +1740,17 @@ export class AgentViewServer {
     for (const watch of [...this.activeWatches]) {
       watch.stop(StopReason.ServerShutdown, false)
     }
-    this.logRecorder?.stop('server shutdown')
-    this.logRecorder = null
+    for (const state of this.portStates.values()) {
+      state.logRecorder?.stop('server shutdown')
+      state.logRecorder = null
+    }
     await unlink(TOKEN_PATH).catch(() => {})
 
-    this.consoleStream.detach()
-    this.networkStream.detach()
+    for (const state of this.portStates.values()) {
+      state.consoleStream.detach()
+      state.networkStream.detach()
+    }
+    this.portStates.clear()
     for (const cached of this.connections.values()) {
       try { await cached.session.close() } catch { /* ignore */ }
     }

@@ -239,6 +239,8 @@ Default attached target types: `page`, `shared_worker`, `service_worker` (overri
 
 `console` reads a ring buffer that dies with the server; `logs` records the same messages — page *and* every worker — into one file you can grep later. Reach for it when a bug needs a timeline instead of a snapshot: intermittent failures, long scenarios, anything spanning reloads or worker restarts.
 
+Feeds are scoped to the CDP port (since 0.13.1), so parallel worktrees each record their own app; give each one its own feed path (the default relative `.agent-view/console.log` already does, one per checkout).
+
 ```bash
 agent-view logs start --truncate           # start clean; keeps recording across reloads
 agent-view logs                            # tail last 200 records (alias of `logs tail`)

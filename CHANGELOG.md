@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.1] - 2026-08-18
+
+Parallel checkouts. One daemon serves every checkout on the machine, and `console`, `network`
+and `logs` kept their state globally — so two worktree slots running at once read and wrote
+each other's.
+
+### Fixed
+- **`logs`, `console` and `network` are now scoped to the CDP port.** Previously a `logs` call from one worktree answered with whatever recording already existed: it wrote and truncated the *other* worktree's `.agent-view/console.log` and its tail mixed in messages from the other slot's port. Buffers, `--req` handles, the recorder and the feed path now live in a per-port bucket, so parallel slots (`agent-view` from N worktrees on N CDP ports) no longer see each other. Single-checkout behaviour is unchanged.
+- `logs start` refuses a feed file another port is already recording into, instead of interleaving two apps' records in one file. Use a per-slot path (`--file`, or the default relative `.agent-view/console.log` inside each worktree).
+
 ## [0.13.0] - 2026-08-16
 
 Modal handling. A modal agent-view could not answer used to end a run: the window looked

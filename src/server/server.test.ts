@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs, resolveUploadPath } from './server.js'
+import { AgentViewServer, parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs, resolveUploadPath } from './server.js'
 import { join } from 'node:path'
 import type { PageSession, AXNode, TargetInfo } from '../cdp/types.js'
 import { TargetType } from '../cdp/types.js'
@@ -300,5 +300,30 @@ describe('resolveUploadPath', () => {
   // empty File this validation exists to prevent.
   it('rejects a directory', () => {
     expect(resolveUploadPath(repoRoot, 'src')).toEqual({ error: `Not a file: ${join(repoRoot, 'src')}` })
+  })
+})
+
+// ── per-port state isolation ──────────────────────────────────────────────────
+
+describe('per-port state', () => {
+  // Regression: one daemon serves every checkout, so parallel worktree slots hit the same
+  // process. Before this, `logs` from slot 9 answered with slot 3's recorder — same file,
+  // same console buffer.
+  it('gives each CDP port its own buckets, stable across lookups', () => {
+    const server = new AgentViewServer() as unknown as {
+      stateFor: (port: number) => { logRecorder: unknown; consoleStream: unknown }
+      isAnyRecording: () => boolean
+    }
+    const slot3 = server.stateFor(9879)
+    const slot9 = server.stateFor(9885)
+
+    expect(slot3).not.toBe(slot9)
+    expect(server.stateFor(9879)).toBe(slot3)
+    expect(slot3.consoleStream).not.toBe(slot9.consoleStream)
+
+    expect(server.isAnyRecording()).toBe(false)
+    slot3.logRecorder = { file: 'slot3/.agent-view/console.log' }
+    expect(slot9.logRecorder).toBeNull()
+    expect(server.isAnyRecording()).toBe(true)
   })
 })

@@ -322,7 +322,7 @@ Full form with all optional fields:
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to on first call. Any subset of `["page", "iframe", "shared_worker", "service_worker", "worker"]`. Default `["page", "shared_worker", "service_worker"]` |
 | `captureBody`       | no       | `true` to capture response bodies and request payloads for `agent-view network`. Off by default; opt-in since bodies can carry tokens/PII. WebSocket frame payloads are visible regardless              |
 | `networkBufferSize` | no       | Per-target network ring capacity. Positive integer. Default `200` (smaller than console — entries are heavier)                                                                                         |
-| `logFile`           | no       | Feed file for `agent-view logs`. Relative paths resolve against the project root. Default `.agent-view/console.log` (gitignore it)                                                                     |
+| `logFile`           | no       | Feed file for `agent-view logs`. Relative paths resolve against the project root. Default `.agent-view/console.log` (gitignore it). Keep it per-checkout: two ports recording into one file is refused                                                                     |
 | `logMaxBytes`       | no       | Feed size cap in bytes; on overflow it rotates once to `<file>.prev`. Default `8388608` (8 MB)                                                                                                         |
 
 ---
