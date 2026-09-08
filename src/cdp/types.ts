@@ -49,6 +49,8 @@ export enum MouseButton {
 export type ClickOpts = {
   /** Number of clicks at the same position (1 = single, 2 = double-click). Default 1. */
   clicks?: number
+  /** Mouse button. Default left. `right` also fires `contextmenu`. */
+  button?: MouseButton
 }
 
 export type DragOpts = {
@@ -181,6 +183,17 @@ export type RuntimeSession = {
   enableNetwork: () => Promise<void>
   /** `Network.getResponseBody`. Valid only after `loadingFinished` and before buffer eviction. */
   getResponseBody: (requestId: string) => Promise<{ body: string; base64Encoded: boolean }>
+  /**
+   * Open a coverage window: `Profiler.enable` + `startPreciseCoverage` on first
+   * call, then a discarded take. Idempotent — later calls only reset the counters.
+   */
+  startCoverage: () => Promise<void>
+  /**
+   * `Profiler.takePreciseCoverage`, filtered to functions that actually ran.
+   * **Resets the counters**, so every take opens the next window.
+   * `null` means no window was ever opened on this session.
+   */
+  takeCoverage: () => Promise<CoverageScript[] | null>
   close: () => Promise<void>
 }
 
@@ -220,6 +233,17 @@ export type PageSession = RuntimeSession & {
   fileChooserArm: () => FileChooserArm | null
   /** Choosers intercepted by this session, oldest first, bounded. */
   recentFileChoosers: () => FileChooserEvent[]
+  /**
+   * `DOMDebugger.getEventListeners` on a node, with `scriptId` already resolved
+   * to a URL. `depth` follows CDP: 0 = this node only, -1 = the whole subtree.
+   */
+  getEventListeners: (backendDOMNodeId: number, depth?: number) => Promise<EventListenerInfo[]>
+  /**
+   * Same, addressed by CSS selector — the only way to reach a node the AX tree
+   * never exposes, which therefore has no `[ref=N]`. `null` when the selector
+   * matches nothing or is malformed.
+   */
+  getEventListenersBySelector: (selector: string, depth?: number) => Promise<EventListenerInfo[] | null>
   getAccessibilityTree: () => Promise<AXNode[]>
   /** Same as getAccessibilityTree but also signals whether nodes came from the AX tree cache. */
   getAccessibilityTreeMeta: () => Promise<{ nodes: AXNode[]; fromCache: boolean }>
@@ -390,4 +414,36 @@ export type NetworkFilter = {
   /** Match failed requests (CORS block, connection refused — no HTTP status). The `failed` status token. */
   includeFailed?: boolean
   type?: ReadonlySet<NetworkResourceType>
+}
+
+// ── Reachability ─────────────────────────────────────────────────────────────
+
+/** One executed function in a V8 precise-coverage delta. */
+export type CoverageFunction = {
+  /** Empty for arrows and module top-level — formatters substitute `<anonymous>@offset`. */
+  name: string
+  /** Byte offset of the function in its script. Disambiguates same-named functions. */
+  offset: number
+  count: number
+}
+
+/** Executed functions of one script, since the previous take. */
+export type CoverageScript = {
+  scriptId: string
+  /** Empty for scripts created by `Runtime.evaluate` — those have no URL at all. */
+  url: string
+  functions: CoverageFunction[]
+}
+
+/** One DOM event listener, as reported by `DOMDebugger.getEventListeners`. */
+export type EventListenerInfo = {
+  type: string
+  useCapture: boolean
+  passive: boolean
+  once: boolean
+  scriptId: string
+  /** Resolved from `scriptId`. Empty when the script has no URL (eval'd code). */
+  url: string
+  lineNumber: number
+  columnNumber: number
 }

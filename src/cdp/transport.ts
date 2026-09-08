@@ -30,6 +30,9 @@ import {
   type JsDialogPolicy,
   type FileChooserArm,
   type FileChooserEvent,
+  type CoverageFunction,
+  type CoverageScript,
+  type EventListenerInfo,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
 
@@ -803,6 +806,121 @@ function attachDisconnectSubscription(client: RawCDPClient): (handler: () => voi
   }
 }
 
+type RawScriptCoverage = {
+  scriptId: string
+  url: string
+  functions: Array<{ functionName: string; ranges: Array<{ count: number; startOffset: number }> }>
+}
+
+type ProfilerDomain = {
+  enable: () => Promise<unknown>
+  startPreciseCoverage: (p: Record<string, unknown>) => Promise<unknown>
+  takePreciseCoverage: () => Promise<{ result: RawScriptCoverage[] }>
+}
+
+type CoverageOps = {
+  start: () => Promise<void>
+  take: () => Promise<CoverageScript[] | null>
+}
+
+/**
+ * Coverage is a delta, not a total: `takePreciseCoverage` resets the counters, so
+ * the window between two takes is attributable to exactly what happened in it.
+ * `detailed: false` keeps the granularity at the function — enough to name a
+ * handler, and free of the source-map remapping that byte ranges would need.
+ */
+function attachCoverage(client: RawCDPClient): CoverageOps {
+  const Profiler = client.Profiler as ProfilerDomain
+  let started = false
+
+  return {
+    async start() {
+      if (!started) {
+        await Profiler.enable()
+        await Profiler.startPreciseCoverage({ callCount: true, detailed: false })
+        started = true
+      }
+      await Profiler.takePreciseCoverage() // discarded — this take *is* the clear
+    },
+    async take() {
+      if (!started) return null
+      const { result } = await Profiler.takePreciseCoverage()
+      const scripts: CoverageScript[] = []
+      for (const script of result) {
+        const functions: CoverageFunction[] = []
+        for (const fn of script.functions) {
+          const count = Math.max(0, ...fn.ranges.map((r) => r.count))
+          if (count === 0) continue
+          functions.push({ name: fn.functionName, offset: fn.ranges[0]?.startOffset ?? 0, count })
+        }
+        if (functions.length > 0) scripts.push({ scriptId: script.scriptId, url: script.url, functions })
+      }
+      return scripts
+    },
+  }
+}
+
+type RawEventListener = {
+  type: string
+  useCapture?: boolean
+  passive?: boolean
+  once?: boolean
+  scriptId: string
+  lineNumber?: number
+  columnNumber?: number
+}
+
+type DOMDebuggerDomain = {
+  getEventListeners: (p: Record<string, unknown>) => Promise<{ listeners: RawEventListener[] }>
+}
+
+type DebuggerDomain = {
+  enable: () => Promise<unknown>
+  disable: () => Promise<unknown>
+}
+
+/** Bounds the wait for the `scriptParsed` replay when an id is still missing. */
+const SCRIPT_PARSED_DEADLINE_MS = 1_000
+const SCRIPT_PARSED_POLL_MS = 20
+
+/**
+ * `Debugger.scriptParsed` is replayed for every already-parsed script the moment
+ * `Debugger.enable` lands, and it is the only CDP event carrying scriptId → URL.
+ * The domain is enabled only for the length of that replay: leaving it on keeps
+ * V8 deoptimized for every other command on the session, and nothing here needs
+ * a breakpoint.
+ *
+ * The map accumulates, so ids already known cost nothing and a scan runs only
+ * when one misses. The wait is a gate on the ids actually asked for, not a fixed
+ * pause — a fixed pause is either too short on a large app (missing URLs) or
+ * wasted on every call. An id still missing at the deadline stays unresolved,
+ * which the formatter prints as a raw `scriptId`.
+ */
+function attachScriptUrls(client: RawCDPClient): (wanted: string[]) => Promise<Map<string, string>> {
+  const urls = new Map<string, string>()
+  // Subscribe before any enable, per the transport-wide rule.
+  client.on('Debugger.scriptParsed', ((p: { scriptId: string; url: string }) => {
+    urls.set(p.scriptId, p.url ?? '')
+  }) as () => void)
+
+  const allKnown = (wanted: string[]): boolean => wanted.every((id) => urls.has(id))
+
+  return async (wanted) => {
+    if (allKnown(wanted)) return urls
+    const Debug = client.Debugger as DebuggerDomain
+    try {
+      await Debug.enable()
+      const deadline = Date.now() + SCRIPT_PARSED_DEADLINE_MS
+      while (!allKnown(wanted) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, SCRIPT_PARSED_POLL_MS))
+      }
+    } finally {
+      try { await Debug.disable() } catch { /* target went away mid-scan */ }
+    }
+    return urls
+  }
+}
+
 export async function connectToRuntime(port: number, target: TargetInfo): Promise<RuntimeSession> {
   if (process.env.AV_DEBUG_CONSOLE) {
     // eslint-disable-next-line no-console
@@ -813,6 +931,7 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   const consoleSub = attachConsoleSubscription(client)
   const networkSub = attachNetworkSubscription(client.Network)
   const onDisconnect = attachDisconnectSubscription(client)
+  const coverage = attachCoverage(client)
   await bringUpSession(client, target, async () => {
     await client.Runtime.enable()
     await client.Log.enable()
@@ -826,6 +945,8 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
     onNetwork: (handler) => networkSub.add(handler),
     enableNetwork: () => networkSub.enable(),
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
+    startCoverage: () => coverage.start(),
+    takeCoverage: () => coverage.take(),
     async close() {
       await client.close()
     },
@@ -850,7 +971,9 @@ export async function connectToPage(
     Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
     DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown> }
     Input: { dispatchMouseEvent: (p: Record<string, unknown>) => Promise<unknown> }
+    DOMDebugger: DOMDebuggerDomain
   }
+  const DOMDebugger = (client as RawCDPClient & { DOMDebugger: DOMDebuggerDomain }).DOMDebugger
   const cacheKey = `${port}:${target.id}`
 
   // Subscribe BEFORE enable so we catch buffered console/log entries emitted at enable-time.
@@ -870,6 +993,8 @@ export async function connectToPage(
     consoleSub.emit,
   )
   const onDisconnect = attachDisconnectSubscription(client)
+  const coverage = attachCoverage(client)
+  const scanScriptUrls = attachScriptUrls(client)
   let documentBackendNodeId = 0
   await bringUpSession(client, target, async () => {
     await Page.enable()
@@ -898,15 +1023,16 @@ export async function connectToPage(
 
   async function dispatchClick(x: number, y: number, opts?: ClickOpts): Promise<void> {
     const clicks = Math.max(1, opts?.clicks ?? 1)
+    const button = opts?.button ?? MouseButton.Left
     if (clicks === 1) {
-      const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
-      const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+      const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: 1 })
+      const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: 1 })
       await Promise.all([pressed, released])
       return
     }
     for (let i = 1; i <= clicks; i++) {
-      await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button: 'left', clickCount: i })
-      await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button: 'left', clickCount: i })
+      await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: i })
+      await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: i })
     }
   }
 
@@ -977,6 +1103,22 @@ export async function connectToPage(
     return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY }
   }
 
+  async function listenersOn(objectId: string, depth: number): Promise<EventListenerInfo[]> {
+    const { listeners } = await DOMDebugger.getEventListeners({ objectId, depth })
+    if (listeners.length === 0) return []
+    const urls = await scanScriptUrls(listeners.map((l) => l.scriptId))
+    return listeners.map((l) => ({
+      type: l.type,
+      useCapture: Boolean(l.useCapture),
+      passive: Boolean(l.passive),
+      once: Boolean(l.once),
+      scriptId: l.scriptId,
+      url: urls.get(l.scriptId) ?? '',
+      lineNumber: l.lineNumber ?? 0,
+      columnNumber: l.columnNumber ?? 0,
+    }))
+  }
+
   return {
     target,
 
@@ -986,6 +1128,26 @@ export async function connectToPage(
     onNetwork: (handler) => networkSub.add(handler),
     enableNetwork: () => networkSub.enable(),
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
+    startCoverage: () => coverage.start(),
+    takeCoverage: () => coverage.take(),
+
+    async getEventListeners(backendDOMNodeId, depth = 0): Promise<EventListenerInfo[]> {
+      const { object } = await DOM.resolveNode({ backendNodeId: backendDOMNodeId })
+      return listenersOn(object.objectId, depth)
+    },
+
+    async getEventListenersBySelector(selector, depth = 0): Promise<EventListenerInfo[] | null> {
+      // objectId, not nodeId: `DOM.querySelector` needs a document nodeId, which is
+      // renumbered on every navigation. Same reasoning as `uploadBySelector`.
+      const { result, exceptionDetails } = await Runtime.evaluate({
+        expression: `document.querySelector(${JSON.stringify(selector)})`,
+        returnByValue: false,
+      })
+      // A malformed selector throws a DOMException that arrives as a valid RemoteObject.
+      if (exceptionDetails) return null
+      if (!result.objectId || result.subtype === 'null') return null
+      return listenersOn(result.objectId, depth)
+    },
 
     onJsDialog: (handler) => jsDialogSub.add(handler),
     answerJsDialog: (accept, promptText) => jsDialogSub.answer(accept, promptText),

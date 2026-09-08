@@ -22,6 +22,7 @@ import {
   type TargetInfo,
   type Point,
   type DragOpts,
+  type ClickOpts,
   type FileChooserArm,
 } from '../cdp/types.js'
 import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
@@ -29,6 +30,8 @@ import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console
 import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
 import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
 import { formatDialogStatus, describePolicy, describeArm } from '../inspectors/dialog/index.js'
+import { formatCoverage } from '../inspectors/coverage/index.js'
+import { formatListeners } from '../inspectors/listeners/index.js'
 import { buildTauriArmScript, buildTauriStatusScript, TauriShimResult, type TauriShimStatus } from './tauri-dialog-shim.js'
 import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
@@ -240,6 +243,8 @@ export class AgentViewServer {
     logs: (req: ServerRequest) => this.handleLogs(req),
     upload: (req: ServerRequest) => this.handleUpload(req),
     dialog: (req: ServerRequest) => this.handleDialog(req),
+    coverage: (req: ServerRequest) => this.handleCoverage(req),
+    listeners: (req: ServerRequest) => this.handleListeners(req),
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
@@ -704,8 +709,12 @@ export class AgentViewServer {
     const cacheKey = `${req.port}:${targetId}`
 
     const clicks = argBool(req.args, 'double') ? 2 : 1
-    const clickOpts = clicks > 1 ? { clicks } : undefined
-    const verb = clicks > 1 ? 'Double-clicked' : 'Clicked'
+    const right = argBool(req.args, 'right')
+    const clickOpts: ClickOpts | undefined =
+      clicks > 1 || right
+        ? { ...(clicks > 1 ? { clicks } : {}), ...(right ? { button: MouseButton.Right } : {}) }
+        : undefined
+    const verb = right ? 'Right-clicked' : clicks > 1 ? 'Double-clicked' : 'Clicked'
 
     if (req.args.pos && typeof req.args.pos === 'object') {
       const pos = req.args.pos as Record<string, unknown>
@@ -997,6 +1006,72 @@ export class AgentViewServer {
     } catch {
       return { patched: false, armed: false, fired: [] }
     }
+  }
+
+  /**
+   * Forward reachability. `--clear` opens a coverage window, the next call closes
+   * it and reports what ran inside — so a click can be attributed to the functions
+   * it actually executed. Purchases only positive answers: an empty delta proves
+   * that *this* action did not reach the code, never that nothing can.
+   */
+  private async handleCoverage(req: ServerRequest): Promise<ServerResponse> {
+    const target = await this.resolveTarget(req)
+    const conn = await this.getRuntimeSession(req, target)
+
+    if (argBool(req.args, 'clear')) {
+      await conn.startCoverage()
+      return { ok: true, data: 'Coverage window cleared' }
+    }
+
+    const scripts = await conn.takeCoverage()
+    if (scripts === null) {
+      return {
+        ok: false,
+        error: 'No coverage window open. Run `agent-view coverage --clear` before the action you want to attribute.',
+      }
+    }
+
+    const result = formatCoverage(scripts, {
+      filter: argStr(req.args, 'filter'),
+      file: argStr(req.args, 'file'),
+      all: argBool(req.args, 'all'),
+      maxLines: argNum(req.args, 'maxLines'),
+    })
+    if (argBool(req.args, 'count')) return { ok: true, data: String(result.functions) }
+    return { ok: true, data: result.text }
+  }
+
+  /** Which handlers are wired to a node, and where each was declared. */
+  private async handleListeners(req: ServerRequest): Promise<ServerResponse> {
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const depth = argNum(req.args, 'depth') ?? 0
+
+    const selector = argStr(req.args, 'selector')
+    if (selector) {
+      const listeners = await conn.getEventListenersBySelector(selector, depth)
+      if (listeners === null) return { ok: false, error: `No element matches selector "${selector}"` }
+      return { ok: true, data: formatListeners(`"${selector}"`, listeners) }
+    }
+
+    const filter = argStr(req.args, 'filter')
+    if (filter) {
+      const found = await this.findByFilter(conn, filter, req, targetId)
+      if (!found) return { ok: false, error: `No element found matching "${filter}"` }
+      const listeners = await conn.getEventListeners(found.backendDOMNodeId, depth)
+      return { ok: true, data: formatListeners(`"${found.name}"`, listeners) }
+    }
+
+    const ref = argNum(req.args, 'ref')
+    if (ref === undefined) {
+      return { ok: false, error: 'listeners requires --filter, --ref, or --selector' }
+    }
+    const entry = this.refStore.get(ref)
+    if (!entry) {
+      return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
+    }
+    const listeners = await conn.getEventListeners(entry.backendDOMNodeId, depth)
+    return { ok: true, data: formatListeners(`[ref=${ref}]`, listeners) }
   }
 
   private async handleWait(req: ServerRequest): Promise<ServerResponse> {

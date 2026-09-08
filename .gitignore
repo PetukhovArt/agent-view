@@ -20,6 +20,8 @@ lib-cov
 
 # Coverage directory used by tools like istanbul
 coverage
+# ...but `coverage` is also a command, and its formatter lives in source.
+!src/inspectors/coverage/
 *.lcov
 
 # nyc test coverage
@@ -149,5 +151,4 @@ bench/results.json
 # Personal/dev files
 .claude*
 !.claude-plugin
-CLAUDE.md
 dist/

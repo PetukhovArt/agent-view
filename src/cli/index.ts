@@ -30,6 +30,8 @@ import { runNetwork } from './commands/network.js'
 import { runLogs } from './commands/logs.js'
 import { runWatch } from './commands/watch.js'
 import { runDialog } from './commands/dialog.js'
+import { runCoverage } from './commands/coverage.js'
+import { runListeners } from './commands/listeners.js'
 import { runUpload } from './commands/upload.js'
 import type { AgentViewConfig } from '../config/types.js'
 
@@ -94,6 +96,7 @@ program
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('--double', 'Double-click (fires dblclick handlers)')
+  .option('--right', 'Right-click (fires contextmenu)')
   .action(async (ref, options) => {
     const config = requireConfig()
     await runClick(config, ref, options)
@@ -301,6 +304,35 @@ program
   .action(async (options) => {
     const config = requireConfig()
     await runUpload(config, options)
+  })
+
+program
+  .command('coverage')
+  .description('Which functions ran since the last --clear (V8 precise-coverage delta)')
+  .option('--clear', 'Open a coverage window: reset the counters and start counting')
+  .option('--filter <text>', 'Keep functions whose name — or whose script URL — contains this')
+  .option('--file <text>', 'Keep scripts whose URL contains this')
+  .option('--all', 'Include node_modules, runtime and url-less scripts, hidden by default')
+  .option('--count', 'Print the number of executed functions instead of the list')
+  .option('--max-lines <n>', 'Cap the output', parseMaxLines)
+  .option('-w, --window <id>', 'Target window ID or name')
+  .option('-t, --target <id|name>', 'Target ID or name (page, worker, ...)')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runCoverage(config, options)
+  })
+
+program
+  .command('listeners')
+  .description('Event listeners bound to a node, with the file:line each was declared at')
+  .option('--filter <text>', 'Node by accessible name, as in `click --filter`')
+  .option('--ref <n>', 'Node by ref from `dom`')
+  .option('--selector <css>', 'Node by CSS selector — for nodes the AX tree never exposes')
+  .option('--depth <n>', 'Descend n levels into the subtree (-1 = all). Default 0', parseDepth)
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runListeners(config, options)
   })
 
 const dialog = program

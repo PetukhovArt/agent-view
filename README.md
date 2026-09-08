@@ -154,6 +154,8 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
 | `logs`        | Durable file feed of page + worker console, surviving reloads and worker restarts. `tail --grep/--since/--level`, `clear`, plus re-injecting `--probe` scripts. |
 | `network`     | Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`. Captures page-load traffic. |
+| `coverage`    | Which functions ran since the last `--clear`. Turns "does any action reach this code?" into a positive answer. Filters: `--filter`, `--file`, `--count`. |
+| `listeners`   | Event handlers bound to a node, each with the `file:line` it was declared at.            |
 | `upload`      | Puts files into a file input — no picker opens. `--selector` reaches the hidden inputs that have no ref. |
 | `dialog`      | JS modals are answered automatically so they cannot freeze the run; sets the answer, and pre-answers native file pickers with `arm`. |
 | `wait`        | Block until an element appears (default 10s).                                            |
@@ -375,6 +377,7 @@ Clicks a DOM element by ref ID or coordinates.
 agent-view click 5                  # By ref from dom output
 agent-view click --pos 100,200      # By coordinates (for canvas)
 agent-view click 5 --double         # Double-click (fires dblclick handlers)
+agent-view click 5 --right          # Right-click (fires contextmenu)
 ```
 
 ### `fill`
@@ -585,6 +588,54 @@ agent-view network --clear                       # drop in-memory ring
 **Eager, not lazy — the one asymmetry with `console`.** `network` capture starts when the app launches, so page-load traffic (initial XHR/fetch, auth handshakes, boot 404s) is usually buffered by the time you call it. `console`, by contrast, attaches on its first call and loses anything emitted earlier. This is deliberate: network's value is front-loaded. The one caveat: a very fast app can fire its first request before capture attaches — if boot traffic looks missing, reload and re-check rather than assuming nothing fired.
 
 Sensitive headers (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, …) are redacted by default; `--raw-headers` reveals them. Request/response **bodies** stay off until the project owner sets `"captureBody": true` (bodies can carry tokens/PII). WebSocket frame payloads are visible by default — seeing them is the point — capped per frame. `--follow` and `--until` mirror `console`. `--target` / `--window` scope to one target.
+
+### `coverage`
+
+Reports which JavaScript functions ran since the last `--clear`, grouped by script URL. Answers the one question the DOM and the store cannot: *does any user action actually reach this code?* Built on the V8 precise-coverage delta — `--clear` resets the counters, the next call reads and resets them again.
+
+```bash
+agent-view coverage --clear                     # open a window: counters reset, counting starts
+agent-view coverage                             # what ran since --clear (and reset again)
+agent-view coverage --file "OrderForm"          # only scripts whose URL contains this
+agent-view coverage --filter "onSubmit"         # function name, or script URL, contains this
+agent-view coverage --count                     # just the number of executed functions
+agent-view coverage --all                       # include node_modules / runtime / url-less scripts
+agent-view coverage --max-lines 40              # cap the output, tail `… N more lines`
+agent-view coverage --target bench-worker       # a worker's own coverage window
+```
+
+The workflow is `clear → act → check`, the same shape as `console` and `network`:
+
+```bash
+agent-view coverage --clear   && agent-view click --filter "Save"   && agent-view coverage --file "OrderForm"
+```
+
+**Every read is also a reset.** Two `coverage` calls in a row report different things: the second one covers only what happened between them. That is what makes a single click attributable.
+
+**Only positive answers are cheap.** A function in the output proves that this action executed it. An empty result — `(no code executed since --clear)` — proves only that *this* action did not reach the code, never that nothing can. Exit code stays 0: it is an answer, not a failure.
+
+Granularity is the function, not the line, so no source map is involved: in a dev build the module URL already is the file path. Unnamed functions (arrows, module top level) print as `<anonymous>@<byte-offset>`, which keeps two of them apart in the same file.
+
+`--target` gives a worker its own window — the only way to prove that SharedWorker code ran. Coverage lives in the V8 isolate, so `location.reload()` wipes it: open a new window after a reload. Reading before any `--clear` is a usage error, not an empty result.
+
+By default `node_modules`, runtime bundles (`node:`, `chrome-extension://`), and scripts with no URL at all (`eval`, `new Function`) are hidden, with a `… N scripts hidden (--all to show)` tail. `--count` prints a single integer. `--max-lines <n>` caps the output and appends `… N more lines`, as on `dom` and `network`.
+
+### `listeners`
+
+Lists the event listeners bound to a DOM node, each with the file and line its handler was declared at. Answers "what is wired to this button" without reading the source.
+
+```bash
+agent-view listeners --filter "Save"    # node by accessible name, as in `click --filter`
+agent-view listeners --ref 12           # node by ref from `dom`
+agent-view listeners --selector "#save" # node by CSS — reaches nodes the AX tree never exposes
+agent-view listeners --depth -1         # include the whole subtree (CDP depth; default 0)
+```
+
+Positions are printed 1-based (`file.vue:88:14`), so they paste straight into an editor or a review comment. When the handler's script cannot be resolved to a URL — code injected after the last scan, or `eval`'d code, which has no URL at all — the location falls back to `scriptId:7:88:14`.
+
+A node with no handlers prints `(no listeners on this node)` and exits 0. A `--filter` that matches nothing is an error with the usual `No element found matching "<text>"`.
+
+`--selector` is the escape hatch for a node the AX tree never exposes — a hidden or `aria-hidden` element has no `[ref=N]` at all, so no other flag can address it. A selector matching nothing is an error: `No element matches selector "<css>"`.
 
 ### `watch`
 
