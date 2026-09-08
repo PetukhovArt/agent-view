@@ -8,7 +8,7 @@
     {
       "name": "agent-view",
       "source": "./",
-      "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, read state, and prove which code an action reached."
+      "description": "Visual verification CLI for Electron/Tauri/Chromium apps via Chrome DevTools Protocol. Ships with verify skill for easy and cheap checks against a live app."
     }
   ]
 }
