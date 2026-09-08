@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.14.0] - 2026-09-08
+
+Reachability. A review could not tell "no user action reaches this code" apart from "I did not
+check": every existing command reads what the app *is*, none reads what it *ran*. So a verifier
+looking at a diff could never negate a reachability claim, and the only thing that ever did was
+starting the app by hand.
+
+### Added
+- `agent-view coverage [--clear] [--filter <text>] [--file <text>] [--count] [--all] [--max-lines <n>] [-t <target>]` — which JavaScript functions ran since the last `--clear`, grouped by script URL. Built on the V8 precise-coverage delta: `--clear` resets the counters, the next call reads and resets them again, so exactly one action sits inside the window. Same `clear → act → check` shape as `console` and `network`. Works on workers through `--target` — the only way to prove SharedWorker code ran.
+- `agent-view click --right` — right-click via CDP mouse `button: right`, which makes the renderer fire `contextmenu`. Same code path as the left click, so it works with `<ref>`, `--filter` and `--pos`, and combines with `--double`.
+- `agent-view listeners --filter <text> | --ref <n> | --selector <css> [--depth <n>]` — the event listeners bound to a node, each with the 1-based `file:line` its handler was declared at. Answers "what is wired to this button" without reading the source.
+
+### Notes
+- **Only positive answers are bought.** Showing a path exists costs one run of that path; showing no path exists costs every path. Both commands return a defined value for an empty result (`(no code executed since --clear)`, `(no listeners on this node)`) with exit 0, and neither ever claims unreachability — an empty `coverage` narrows the claim to "*this* action did not reach it".
+- **Every `coverage` read is also a reset.** Two calls in a row report different things. That is what makes one click attributable, but it reads as a bug if you don't expect it.
+- Granularity is the function, not the line, so no source map is involved: in a dev build the module URL already is the file path. Unnamed functions print as `<anonymous>@<byte-offset>`.
+- Coverage lives in the V8 isolate — `location.reload()` wipes it. Reading before any `--clear` is a usage error naming the recovery, not an empty result.
+- `node_modules`, runtime bundles and url-less (`eval`'d) scripts are hidden unless `--all`: a script with no URL cannot be pointed at in a review comment.
+- `listeners --selector` exists for the same reason as `upload --selector`: a hidden or `aria-hidden` node never enters the AX tree, so it has no `[ref=N]` and no other flag can address it. `(no listeners on this node)` is about that node only — a delegated handler on an ancestor needs `--depth`.
+- Out of scope here, planned separately: breakpoints and async call stacks (`trace`), line-level coverage, and reactive-dependency tracking. All three stop the app or need source-map remapping; none of them was needed to answer the reachability question.
+
+### Changed
+- **The `verify` skill is now tiered.** `SKILL.md` had grown to 511 lines, two thirds of it a per-command manual, and all of it loaded on every trigger — a request to take one screenshot also paid for the file-picker section and the WebGL section that opens by telling you to skip it. The body is now 213 lines of routing (command index, cost-ordered tool table, execution discipline, workflow, resilience); flags and output contracts moved to `skills/verify/references/commands.md`, and the design-reference comparison rubric to `skills/verify/references/design-conformance.md`. Both are one level deep, so no reference chains. No rule was dropped: six that were stated in two or three places (stale refs, `--window`, no-blind-sleep, screenshot cost, the eval-first default) now have one home each, and `## Important Notes` is gone because every one of its bullets was a restatement.
+- The skill `description` — which sits in context every turn for everyone who installs the plugin — is down from 748 to 646 characters, keeping the discriminating triggers.
+- The tool-selection table gained the row it was missing: `network --clear` before / `network --url` after, for "did the expected API call fire".
+- Harness-specific wording removed from the skill body: the design-conformance step now names the capability (load an image into context) instead of one harness's tool, and `pnpm` is offered as an example rather than a requirement.
+
+### Internal
+- `Profiler` on `RuntimeSession` (workers have it too), `DOMDebugger` on `PageSession` (only pages do) — the existing interface split already expresses that.
+- scriptId → URL comes from a momentary `Debugger.enable` → replayed `scriptParsed` → `Debugger.disable` scan, gated on the scriptIds actually asked for (not a fixed pause) and skipped entirely when they are already known. `Profiler.getBestEffortCoverage()` was tried first and rejected: once precise coverage is running it returns an empty script list. The `Debugger` domain is never left enabled — that would keep V8 deoptimized for every other command on the session.
+- New `bench/smoke-reach.ts` proves both commands end-to-end over real CDP, including that a later `dom` still works after a scan.
+
 ## [0.13.1] - 2026-08-18
 
 Parallel checkouts. One daemon serves every checkout on the machine, and `console`, `network`
@@ -98,7 +130,7 @@ Documentation-only release. Major README restructure. No code or CLI changes.
 - New mid-document layout: "Manual CLI usage", a "Features" command-summary table, and "Using agent-view with other agents".
 - Reference material moved to the end as an appendix: `Enabling CDP`, `Config`, `Commands` (full flag reference for every CLI command), `Performance`, `Troubleshooting`, `License`.
 - Removed the duplicate "Not just a CDP wrapper" subsection (its content is now covered by "Why agent-view").
-- CHANGELOG: replaced two stale references to the removed `CONTEXT.md` with the current `.claude/self/GLOSSARY.md` path.
+- CHANGELOG: replaced two stale references to the removed `CONTEXT.md` with the current `GLOSSARY.md` path.
 
 ## [0.9.0] - 2026-05-14
 
@@ -328,7 +360,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - `dom --filter` — depth now defaults to unlimited so deep matches aren't truncated
 - `src/cdp/console-stream.ts` — `ConsoleStream` deep module: per-target ring buffer,
   level/since/target filtering, live subscription
-- `.claude/self/GLOSSARY.md` — domain glossary
+- `GLOSSARY.md` — domain glossary
 
 ### Changed
 

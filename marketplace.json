@@ -10,7 +10,7 @@
         "source": "npm",
         "package": "@petukhovart/agent-view"
       },
-      "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. DOM inspection, screenshots, UI interaction, WebGL scene graph."
+      "description": "Visual verification CLI for desktop apps (Electron/Tauri/Browser) via Chrome DevTools Protocol. Inspect DOM, interact with UI, capture screenshots, read state, and prove which code an action reached."
     }
   ]
 }
