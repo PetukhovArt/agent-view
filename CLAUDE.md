@@ -124,3 +124,10 @@ sibling directories; `src/server/` and `src/config/` colocate them next to the s
   `skills/verify/references/commands.md` — **that** is the file to edit when you change CLI surface or output text, and
   agent UX depends on the exact strings in it.
 - `CHANGELOG.md` — canonical for release notes. Every shipped feature lands here.
+
+## Releasing
+
+A version bump landing on `main` *is* the release. Write the `## [x.y.z]` section in `CHANGELOG.md`, run
+`npm version <major|minor|patch>` (the `version` hook syncs `.claude-plugin/plugin.json`), then push.
+`.github/workflows/release.yml` publishes to npm, creates the tag and writes the GitHub release with that
+CHANGELOG section as its body. A missing CHANGELOG section fails the run before `npm publish`.

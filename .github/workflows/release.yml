@@ -1,17 +1,71 @@
 name: Release
 
 on:
+  # A version bump landing on main *is* the release: this workflow tests it,
+  # publishes to npm, tags it and writes the GitHub release. The tag is the
+  # record of what shipped, not the trigger — a tag pushed with GITHUB_TOKEN
+  # starts no workflow, so hanging the release off one would tag and publish
+  # nothing. A tag pushed by hand still works: it re-releases that commit.
   push:
+    branches: [main]
     tags: ['v*']
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
+permissions:
+  contents: write
 
+# Two version bumps in a row must not race for the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # What is this run — a release, or one of the many pushes that is not?
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      release: ${{ steps.decide.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: decide
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              # A tag that disagrees with package.json publishes a version
+              # whose git history is a different commit.
+              tag="${GITHUB_REF_NAME#v}"
+              [ "$version" = "$tag" ] ||
+                { echo "::error::tag $GITHUB_REF_NAME != package.json version $version"; exit 1; }
+              release=true ;;
+            refs/heads/main)
+              # Most pushes to main are not releases. A version nobody has
+              # tagged yet is.
+              if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+                echo "v$version is already released - nothing to do"
+                release=false
+              else
+                echo "v$version is new - releasing"
+                release=true
+              fi ;;
+            *) release=false ;;
+          esac
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
-
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,35 +85,44 @@ jobs:
 
       - run: pnpm test
 
-      - name: Verify tag matches package.json and plugin.json versions
+      # The plugin ships inside the npm package, so its manifest version is
+      # what plugin users see. A drift here is invisible until install.
+      - name: Verify plugin.json version matches
         shell: bash
         run: |
-          PKG_VERSION="$(node -p "require('./package.json').version")"
           PLUGIN_VERSION="$(node -p "require('./.claude-plugin/plugin.json').version")"
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
-            exit 1
-          fi
-          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match .claude-plugin/plugin.json version $PLUGIN_VERSION"
-            exit 1
-          fi
+          [ "$PLUGIN_VERSION" = "$VERSION" ] ||
+            { echo "::error::.claude-plugin/plugin.json is $PLUGIN_VERSION, package.json is $VERSION"; exit 1; }
 
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
+      # Before publishing: an empty section means the bump landed without a
+      # changelog entry, and npm cannot be unpublished.
       - name: Extract release notes from CHANGELOG.md
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           awk -v v="$VERSION" '
             index($0, "## [" v "]") == 1 { f = 1; next }
             f && index($0, "## [") == 1 { exit }
             f
           ' CHANGELOG.md > RELEASE_NOTES.md
+          [ -s RELEASE_NOTES.md ] ||
+            { echo "::error::CHANGELOG.md has no '## [$VERSION]' section"; exit 1; }
+
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Only when the run came from main — a tag push already has one.
+      - name: Tag this version
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/v$VERSION" \
+            -f sha="$GITHUB_SHA"
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.gate.outputs.version }}
+          name: v${{ needs.gate.outputs.version }}
           body_path: RELEASE_NOTES.md
