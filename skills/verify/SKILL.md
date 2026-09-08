@@ -1,468 +1,202 @@
 ---
 name: verify
-description: "Visual + runtime verification of desktop apps via Chrome DevTools Protocol. Use when modifying UI components, fixing visual bugs, testing user interactions, verifying layout, or when any workflow phase needs to inspect the running application — DOM, screenshots, scene graph, runtime state in pages and SharedWorkers/ServiceWorkers, console errors, or reactive-state diffs over time. Triggers on: verify, check UI, test how it looks, visual regression, screenshot, inspect DOM, check store/state, watch state changes, what changed after click, wait until state, read worker, console errors, runtime check, eval in page."
+description: "Visual and runtime verification of a running app over CDP. Use when user looking for: checking a UI change, reproducing a visual bug, driving interactions, or when any workflow phase must inspect the live app — DOM, screenshots, store and worker state, console errors, network calls, or which code an action actually reached, or mention: verify, agent-view, check UI, visual regression"
 allowed-tools: Bash(agent-view *), Read
 ---
 
 # Visual Verification with agent-view
 
-You have access to `agent-view` CLI for inspecting and interacting with desktop applications via Chrome DevTools Protocol.
+`agent-view` inspects and drives a running desktop app over Chrome DevTools Protocol.
 
 ## Prerequisites
 
-The target project must have:
-1. `agent-view.config.json` in project root (run `agent-view init` to generate)
-2. CDP enabled in the app (e.g. `--remote-debugging-port=9876` for Electron — avoid `9222`, it's Chrome's own default and collides when Chrome is open)
-
-If config is missing, run `agent-view init` first.
-
-## Commands Reference
-
-### Discovery & Launch
-```bash
-agent-view launch                      # Start app from config, wait for CDP readiness (all runtimes incl. Tauri)
-agent-view discover                    # List windows (JSON) — get window IDs
-agent-view stop                        # Stop the lazy server
-```
-
-**Port conflict**: if the configured port is held by a non-CDP process (e.g. a stray webpack-dev on the same port), `agent-view launch` exits non-zero with `code: PORT_CONFLICT` and reports the owning PID/process name. Ask the user to either close that process or start the app manually — do not kill foreign processes from the skill.
-
-**Tauri**: launch works the same as Electron, but the wait timeout is 10 min (cargo builds are slow). If you see a port conflict on the Tauri devUrl port, it's almost always a parallel browser-dev — surface the PID and ask the user.
-
-### DOM Inspection
-```bash
-agent-view dom                          # DOM accessibility tree (default window)
-agent-view dom --window <id|name>       # Specific window
-agent-view dom --filter "button"        # Filter by text/role
-agent-view dom --depth 3                # Limit tree depth
-agent-view dom --compact                # Merge single-child chains onto one line (~40-60% fewer tokens)
-agent-view dom --count                      # Count of all visible nodes (single integer line)
-agent-view dom --filter "row" --count       # Count matching nodes — e.g. "does this table have 5 rows?"
-agent-view dom --max-lines 200          # Hard line budget; refs for truncated nodes still stored
-agent-view dom --diff                   # Lines changed since last dom call (+ added / - removed)
-```
-
-`--count` skips tree output and ref mutations — cheapest way to assert "element exists N times" without loading the full tree into context.
-
-### Interaction
-```bash
-agent-view click <ref>                  # Click element by ref from dom output
-agent-view click --filter "Save"        # Find element by text and click
-agent-view click --pos 100,200          # Click by coordinates — CANVAS ONLY, see below
-agent-view click <ref> --double         # Double-click (fires dblclick handlers); works with --filter / --pos too
-agent-view fill <ref> "text"            # Type into input field
-agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
-agent-view drag --from-pos 50,80 --to-pos 200,300  # Drag by coordinates (for canvas / Pixi)
-agent-view drag --from <ref> --to <ref> --steps 25 --hold-ms 60  # Smoother movement, longer hold
-```
-
-`drag` dispatches `mousePressed` → N × `mouseMoved` → `mouseReleased` via CDP. Endpoints can mix
-ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targets always use
-`--from-pos`/`--to-pos` — derive the centroid via `agent-view eval` from the scene graph.
-Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.
-Increase `--steps` for handlers using `globalpointermove` so intermediate frames are not skipped.
-
-**Coordinates are a last resort.** `--pos` / `--from-pos` / `--to-pos` exist for canvas and WebGL,
-where no ref exists. On DOM the correct order is `dom --filter "<text>"` → take the `[ref=N]` →
-`click <ref>`, or `click --filter "<text>"` in one step. A coordinate pair breaks on any layout
-shift, scroll, zoom, or window resize, and it clicks whatever now sits at that point — silently.
-If you reach for `--pos` on a DOM element, first say why the ref was not usable.
-
-### Modals & file pickers (`dialog`, `upload`)
-
-A modal that agent-view cannot answer stops a run dead: the window looks frozen, every
-later command times out, and nothing says why. Two kinds, handled differently.
-
-**JS modals — `alert` / `confirm` / `prompt` / `beforeunload` — are answered for you.**
-Nothing to set up. While agent-view is attached these never block the page: the default
-standing answer is *dismiss*, and each one is recorded. `agent-view dialog` is the
-reliable place to read that record; the console feed carries the same line
-(`[agent-view] confirm auto-dismissed: <message>`) but only from the moment console
-attaches, so a modal answered before your first `console` call reaches `dialog` alone.
-
-```bash
-agent-view dialog                      # standing answer + every modal this window has seen
-agent-view dialog policy accept        # confirm() → true from now on
-agent-view dialog policy accept --text "name"   # prompt() → "name"
-agent-view dialog policy dismiss       # back to the default
-agent-view dialog dismiss              # answer one that is open right now
-agent-view dialog accept --text "x"    # …ditto, accepting
-```
-
-`dialog accept` / `dialog dismiss` exist for a modal that was already open **before**
-agent-view attached — that one produced no event, so no policy applied to it.
-
-**Native file pickers never open — you answer them in advance.** Which mechanism applies
-depends on how the app opens the picker, and `dialog arm` sets up all of them at once,
-so you do not have to know:
-
-```bash
-# The input already exists in the DOM (even hidden) — no picker at all, cheapest path
-agent-view upload --selector "#file-input" --file ./fixtures/a.png
-agent-view upload --selector "#imgs" --file ./a.png --file ./b.png   # multi-select
-agent-view upload --ref 12 --file ./a.png                            # if the AX tree exposes it
-
-# The input is created inside the click handler, or the app calls a native dialog API
-agent-view dialog arm --file ./fixtures/a.png    # then click the button that opens it
-agent-view dialog arm --cancel                   # act as if the user pressed Cancel
-agent-view dialog disarm                         # let real pickers open again
-```
-
-Rules that actually bite:
-
-- **Arm before the click.** A picker cannot be caught once it is open. `arm` is one-shot —
-  it is spent by the first picker and interception turns itself off, so a later click
-  opens a real OS dialog.
-- **Click through `agent-view click`, never `eval "el.click()"`.** Chromium refuses to
-  open a file picker without user activation, and an eval-driven click carries none: the
-  picker is silently dropped and never intercepted.
-- **Hidden inputs have no ref.** `display:none` / `v-show="false"` keeps them out of the
-  AX tree, so `dom` never prints one. Use `--selector`. `upload` has no `--filter` on
-  purpose: an accessible name lands on the label, not on the input behind it.
-- **`beforeunload` is always dismissed**, whatever the policy — accepting it navigates
-  away and loses the state you are checking.
-- Paths are resolved against your cwd and must exist — CDP accepts a bad path silently and
-  the app then reads an empty file.
-- `agent-view dialog` after the fact shows what was intercepted and what was answered.
-
-Known limits: `showOpenFilePicker()` (File System Access API) exposes no input to fill, so
-it can only be cancelled. Electron does not implement `window.prompt` at all. Native
-dialogs opened straight from an Electron **main** process (`dialog.showOpenDialog` behind
-an IPC channel) are out of reach — CDP does not see the main process.
-
-### Waiting (`wait`)
-
-```bash
-agent-view wait --filter "Saved"                    # until the text appears in the AX tree
-agent-view wait --filter "Saved" --timeout 20       # max wait in seconds (default 10)
-agent-view wait --filter "Row 5" --window "Main"    # specific window
-```
-
-Exits as soon as the element appears; exits non-zero on timeout — so `&&` after it is a real gate.
-
-**Never sleep for a fixed time.** No `sleep`, no `timeout`, no `ping -n N 127.0.0.1` as a delay
-(agents reach for `ping` when the harness blocks `sleep` — it is the same mistake in worse
-clothing). A fixed pause is either too short, and you assert against a half-rendered UI, or too
-long, and you burn wall-clock on every step. agent-view has a condition-based wait for every kind
-of signal:
-
-| You are waiting for… | Use |
-|---|---|
-| An element to render | `wait --filter "<text>"` |
-| A store/state value | `watch "<expr>" --until "<expr>"` |
-| A log line | `console --follow --until "<pattern>"` |
-| A request to fire | `network --follow --until "<url>"` |
-
-If none of these fits, poll: `dom --filter X --count` in a loop with an explicit attempt cap, and
-report how many attempts it took.
-
-### Screenshots
-```bash
-agent-view screenshot --scale 0.5              # Recommended: JPEG at half-res (~3× fewer vision tokens)
-agent-view screenshot --scale 0.5 --window <id>  # Specific window
-agent-view screenshot --crop "Sidebar"         # Crop to element bounding box (~1.6k tokens — 12× win)
-agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
-agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not just its heading
-agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
-```
-
-`--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing.
-
-A text filter usually matches the text-bearing node, so cropping on a section title returns a thin strip of that title. `--crop-up <n>` climbs `n` element ancestors before cropping — use `1` (sometimes `2`) to get the surrounding card/section. When a crop comes back text-sized, the command says so on stderr.
-
-### Runtime State (`eval`)
-
-Reads runtime values DOM/screenshot can't reveal — store contents, computed flags, worker internals.
-**Requires `"allowEval": true` in `agent-view.config.json`** — if the call returns "eval is disabled", tell the user to add the flag rather than working around it.
-
-```bash
-agent-view eval "store.state.user.role"                       # default page target
-agent-view eval --window "Settings" "router.currentRoute.path"
-agent-view eval --target sync-worker "self.queue.length"      # SharedWorker / ServiceWorker by id or substring
-agent-view eval --await "fetch('/api/health').then(r => r.status)"
-agent-view eval --json "({ buttons: document.querySelectorAll('button').length })"
-```
-
-When to reach for `eval` instead of `dom`:
-- The truth lives in JS state, not the DOM (Pinia/Vuex/Redux/Zustand store, Vue refs, computed values, app singletons).
-- The target is a worker (`shared_worker`, `service_worker`, `worker`) — DOM doesn't exist there.
-- You need a precise number/string answer, not a tree to scan.
-- Verifying a `window.*` API or globally-exposed object exists. `eval` runs in the page's **main world**, so anything set on `window` directly or exposed via `contextBridge.exposeInMainWorld` is reachable. APIs placed only in an isolated-world preload (without `contextBridge`) will NOT be visible — that is not an agent bug, that is the host app's wiring.
-
-### Reactive State (`watch`)
-
-Streams JSON-patch diffs of an expression over time. Use when you need to see *what changed* between an action and a final state — `eval` shows the snapshot, `watch` shows the trajectory. **Requires `"allowEval": true`.**
-
-```bash
-agent-view watch "store.cart.total"                                # 250ms poll, default 10 changes or 30s
-agent-view watch "appState" --until "appState.status === 'ready'"  # wait-for-condition with diff log
-agent-view watch "store.user" --max-changes 1                      # capture exactly one change after a click
-agent-view watch "appState" --json                                 # NDJSON, machine-readable
-```
-
-When to reach for `watch` instead of `eval`:
-- Debugging "the click did X but state shows Y — what happened in between?"
-- Time-based assertions ("wait until store.status === 'ready'") — `--until` exits cleanly when truthy.
-- Confirming an action triggered the *expected* sequence of mutations, not just the final state.
-
-Output: `init` line (baseline), one line per RFC 6902 op (`replace /path old → new`, `add /items/0 ...`), final `stop` line with reason. Snapshot size cap 256 KB — narrow the expression (`store.x.y`, not `store`) for large objects.
-
-### Console (`console`)
-
-Streams `Runtime.consoleAPICalled` + `Log.entryAdded`. Use to confirm a flow finished without errors, or to surface a specific warning after an interaction.
-
-```bash
-agent-view console                              # buffered messages from auto-attached targets
-agent-view console --level error,warn           # filter
-agent-view console --target sync-worker         # one target (title/URL substring, same fuzzy semantics as eval --target)
-agent-view console --target IJ56KL              # one target (exact id)
-agent-view console --follow --timeout 10        # stream window (use sparingly — 10s of waiting)
-agent-view console --follow --until "ready"     # exit as soon as a message contains "ready"
-agent-view console --follow --until "/error/i"  # exit on regex match (case-insensitive)
-agent-view console --clear                      # baseline before an interaction
-agent-view console --since "2026-04-26T10:00:00Z"
-```
-
-`--until` requires `--follow`. Exits immediately when a message matches (substring or `/regex/flags`). On timeout without match exits non-zero.
-
-Standard pattern for "did this action error?":
-```bash
-agent-view console --clear
-agent-view click --filter "Save"
-agent-view wait --filter "Saved"
-agent-view console --level error                # expect "(no console messages)"
-```
-
-Default attached target types: `page`, `shared_worker`, `service_worker` (override via `consoleTargets` in config).
-
-### Log feed (`logs`)
-
-`console` reads a ring buffer that dies with the server; `logs` records the same messages — page *and* every worker — into one file you can grep later. Reach for it when a bug needs a timeline instead of a snapshot: intermittent failures, long scenarios, anything spanning reloads or worker restarts.
-
-Feeds are scoped to the CDP port (since 0.13.1), so parallel worktrees each record their own app; give each one its own feed path (the default relative `.agent-view/console.log` already does, one per checkout).
-
-```bash
-agent-view logs start --truncate           # start clean; keeps recording across reloads
-agent-view logs                            # tail last 200 records (alias of `logs tail`)
-agent-view logs tail --grep "ws closed"    # substring or /regex/
-agent-view logs tail --since -2m           # -30s | -5m | -2h | 09:31 | 09:31:02.500 | ISO
-agent-view logs tail --level error,warn -n 50
-agent-view logs clear                      # truncate feed + drop console buffer (baseline)
-agent-view logs status                     # attached targets, feed size, tick count
-agent-view logs stop
-```
-
-Feed format — one record per line, always `HH:MM:SS.mmm [level] [type:id8] text`, local time, embedded newlines escaped as `\n`. That makes external `grep`/`awk` safe on it; a wrapped stack or JSON payload never breaks line-oriented filtering.
-
-Default file `.agent-view/console.log` in the project root (override with `logFile` in config or `--file`). Caps at 8 MB, then rotates once to `<file>.prev` (`logMaxBytes` to change). Recording suspends the server's 5-min idle shutdown, so a long scenario keeps writing.
-
-Standard pattern for "it fails once every N runs":
-```bash
-agent-view logs start --truncate
-# … drive the scenario, reload, retry as many times as needed …
-agent-view logs tail --level error,warn
-agent-view logs tail --grep "/socket|retry/" --since -5m
-agent-view logs stop
-```
-
-**Probes** (`--probe <file.js>[@target]`, requires `allowEval`) inject JS that logs into the same feed — use it when the evidence you need isn't logged by the app (wrap a method, count events, dump a scheduler). The probe is re-injected automatically whenever its context is gone: page reload, worker restart. Write it idempotent and let it report via plain `console.log`.
-
-```bash
-agent-view logs start --probe ./probes/orchestrator.js@shared_worker --probe ./probes/audio.js@index.html
-```
-
-### Network (`network`)
-
-Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Use to confirm an expected API call fired, diagnose a silent 404 / CORS block / missing auth header, or verify "button disabled until the network completes".
-
-```bash
-agent-view network                              # recent requests, newest at the bottom
-agent-view network --req 3                       # expand one: headers, timing, body / WS frame log
-agent-view network --status 4xx,5xx              # only failures (class or exact code, e.g. 404)
-agent-view network --method POST                 # mutations among reads
-agent-view network --type xhr,fetch              # drop document/image/font noise
-agent-view network --url "*/api/save*"           # URL substring or * glob
-agent-view network --follow --until "/api/save"  # stream until a matching request fires
-agent-view network --clear                       # baseline before an interaction
-```
-
-**Eager, unlike `console`.** `network` captures from app launch, so page-load traffic (initial XHR/fetch, auth handshakes, boot 404s) is usually already buffered by the time you call it — in most cases you don't need to reload. `console` is the opposite (lazy: attaches on first call, loses earlier output). Call this asymmetry out so it isn't mistaken for a bug. Caveat: for very fast apps the earliest request can fire before capture attaches. If boot traffic looks missing, don't conclude "no request fired" — reload (`agent-view eval "location.reload()"`) and re-check before deciding.
-
-`[req=N]` handles are reallocated on every list call (like `dom` refs) — expand from the most recent list. Sensitive headers are redacted by default (`--raw-headers` reveals them). Response/request **bodies** require `"captureBody": true` in config; WebSocket frame payloads are visible by default.
-
-Standard pattern for "did the save call fire and succeed?":
-```bash
-agent-view network --clear
-agent-view click --filter "Save"
-agent-view wait --filter "Saved"
-agent-view network --url "*/api/save*"          # expect one POST with status 200
-```
-
-### Targets (`targets`)
-
-When `--window` doesn't show what you expected, or you need a worker target id for `eval`/`console`:
-
-```bash
-agent-view targets                                       # everything connectable
-agent-view targets --type shared_worker,service_worker   # filter
-agent-view targets --json                                # machine-readable
-```
-
-You usually don't need this — `eval --target <substring>` and `--window <name>` both do fuzzy matching. Reach for `targets` when the substring is ambiguous.
-
-`targets` prints ids truncated to 8 chars, and `--target` / `--window` accept that printed handle (case-insensitive id prefix, ≥4 chars) as well as a full id or a title/URL substring. An ambiguous prefix is reported as ambiguous rather than resolved to an arbitrary target. Worker targets often share a blank title, so the printed id prefix is the reliable handle for them.
-
-### Scene / Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
-
-These commands read the scene graph from canvas-based rendering engines. Skip this section if the project has no `webgl` field in config.
-
-```bash
-agent-view scene                        # Scene graph from configured engine
-agent-view scene --filter "player"      # Filter by object name/type
-agent-view scene --verbose              # Extended props (scale, alpha, rotation)
-agent-view scene --diff                 # Changes since last call
-agent-view scene --compact              # Merge single-child chains onto one line (reduces output)
-agent-view snap                         # DOM + Scene combined
-agent-view snap --scale 0.5             # DOM + Scene + Screenshot (path appended as === Screenshot === section)
-```
+The target project needs `agent-view.config.json` in its root (`agent-view init` writes one) and CDP enabled in the
+app — e.g. `--remote-debugging-port=9876` for Electron. Avoid `9222`: it is Chrome's own default and collides when
+Chrome is open. The server is lazy: it starts on the first call and shuts down after 5 min idle.
+
+## Commands
+
+Flags, output contracts and per-command failure modes live in **[`references/commands.md`](references/commands.md)** —
+read it before your first call in a session.
+
+| Commands                             | What they cover                                                |
+|--------------------------------------|----------------------------------------------------------------|
+| `launch` `discover` `stop` `targets` | start the app; list windows and worker targets                 |
+| `dom`                                | accessibility tree — filter, count, diff, depth cap            |
+| `click` `fill` `drag`                | interaction by ref, by text, or by coordinate                  |
+| `wait`                               | block until an element appears; non-zero on timeout            |
+| `dialog` `upload`                    | JS modals and native file pickers                              |
+| `screenshot`                         | full window, scaled, or cropped to one element                 |
+| `eval` `watch`                       | state now / state trajectory over time (both need `allowEval`) |
+| `console` `logs`                     | message ring buffer / durable file feed that survives reloads  |
+| `network`                            | requests, headers, timing, bodies, WebSocket frames            |
+| `coverage` `listeners`               | which functions ran; what handler is bound to a node           |
+| `scene` `snap`                       | canvas / WebGL scene graph (only when `webgl` is configured)   |
+
+Every command takes `--window <id|name>`. Refs (`[ref=N]`) are session-scoped — after HMR or navigation, re-run `dom`
+for fresh ones.
 
 ## Picking the right tool
 
 Verifications cost very different amounts. Pick the cheapest tool that can actually answer the question:
 
-| The question is about… | Use | Why |
-|---|---|---|
-| Element existence / text / role | `dom --filter` | Cheapest, structured, no vision tokens |
-| Count of matching elements | `dom --filter X --count` | Single integer, no tree output, no ref mutations |
-| App state, store contents, computed values | `eval "expr"` | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable |
-| Does `window.X` / a globally-exposed API exist? | `eval "typeof window.X"` | DOM doesn't show JS globals; only authoritative check |
-| An element that has not rendered yet | `wait --filter "<text>"` | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause |
-| State *trajectory* — what changed during/after an action | `watch "expr" --until …` or `--max-changes 1` | `eval` shows the final snapshot only; `watch` shows the diffs in order |
-| Worker logic (SharedWorker / ServiceWorker) | `eval --target <name>` | Workers have no DOM at all |
-| Did the last action throw or warn? | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM |
-| What happened over a long / flaky / reload-spanning run | `logs start` … `logs tail --grep`/`--since` | Durable one-line-per-record timeline of page + workers; `console` loses it on idle shutdown |
-| Layout/visual of a specific element | `screenshot --crop "<element>"` | ~1.6k tokens (1 tile) — crops to bounding box, massive token win |
-| Layout, spacing, full-window visual regression | `screenshot --scale 0.5` | The only tool that sees pixels — but expensive (~6k tokens), use last |
-| Canvas/WebGL scene contents | `scene --diff` | DOM is empty for canvas apps |
-| What DOM nodes changed after an interaction | `dom --diff` | Returns only `+`/`-` lines; much cheaper than re-reading the full tree |
-| Selecting a file for an input that exists in the DOM | `upload --selector` | No picker opens at all; works on hidden inputs, which have no ref |
-| Selecting a file when the input appears only mid-click | `dialog arm --file` then `click` | The only way — the input does not exist before the click and is gone after |
-| The window stopped responding after a click | `dialog` | Shows whether a modal was answered, and what the app was told |
+| The question is about…                                           | Use                                                          | Why                                                                                         |
+|------------------------------------------------------------------|--------------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| Element existence / text / role                                  | `dom --filter`                                               | Cheapest, structured, no vision tokens                                                      |
+| Count of matching elements                                       | `dom --filter X --count`                                     | Single integer, no tree output, no ref mutations                                            |
+| App state, store contents, computed values                       | `eval "expr"`                                                | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable        |
+| Does `window.X` / a globally-exposed API exist?                  | `eval "typeof window.X"`                                     | DOM doesn't show JS globals; only authoritative check                                       |
+| An element that has not rendered yet                             | `wait --filter "<text>"`                                     | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause             |
+| State *trajectory* — what changed during/after an action         | `watch "expr" --until …` or `--max-changes 1`                | `eval` shows the final snapshot only; `watch` shows the diffs in order                      |
+| Worker logic (SharedWorker / ServiceWorker)                      | `eval --target <name>`                                       | Workers have no DOM at all                                                                  |
+| Did the last action throw or warn?                               | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM                                                |
+| Did an expected API call fire, and with what status?             | `network --clear` before, `network --url "<glob>"` after     | Captures eagerly from launch; the DOM shows the result, not the call                        |
+| What happened over a long / flaky / reload-spanning run          | `logs start` … `logs tail --grep`/`--since`                  | Durable one-line-per-record timeline of page + workers; `console` loses it on idle shutdown |
+| Layout/visual of a specific element                              | `screenshot --crop "<element>"`                              | ~1.6k tokens (1 tile) — crops to bounding box, massive token win                            |
+| Layout, spacing, full-window visual regression                   | `screenshot --scale 0.5`                                     | The only tool that sees pixels — but expensive (~6k tokens), use last                       |
+| Canvas/WebGL scene contents                                      | `scene --diff`                                               | DOM is empty for canvas apps                                                                |
+| What DOM nodes changed after an interaction                      | `dom --diff`                                                 | Returns only `+`/`-` lines; much cheaper than re-reading the full tree                      |
+| Selecting a file for an input that exists in the DOM             | `upload --selector`                                          | No picker opens at all; works on hidden inputs, which have no ref                           |
+| Selecting a file when the input appears only mid-click           | `dialog arm --file` then `click`                             | The only way — the input does not exist before the click and is gone after                  |
+| Does any user action reach this code?                            | `coverage --clear` before, `coverage --file X` after         | The only tool that answers it; a diff cannot                                                |
+| What handler is bound to this element, and where is it declared? | `listeners --filter "<text>"`                                | Gives `file:line` without reading the source                                                |
+| The window stopped responding after a click                      | `dialog`                                                     | Shows whether a modal was answered, and what the app was told                               |
 
-When two tools could answer the same question, prefer the one higher up the table. A common mistake is screenshotting to check "is the count = 5?" when `eval "store.counter"` returns the number directly for ~50 tokens.
+When two tools could answer the same question, prefer the one higher up the table.
 
-## Verification Workflow
+## Execution discipline (read first, every run)
 
-### Execution discipline (read first, every run)
-
-A run can produce one of three outcomes per step: **pass**, **fail**, **requires_visual_review**. There is no fourth bucket called "actually fine, here's why". A failed `Expected:` line is FAIL.
+A run produces one of three outcomes per step: **pass**, **fail**, **requires_visual_review**. There is no fourth bucket
+called "actually fine, here's why". A failed `Expected:` line is FAIL.
 
 **How to run the commands themselves:**
 
-- **Never discard output.** No `>/dev/null`, no `2>&1` to nowhere, no `| head -1` on a command whose
-  failure you have not yet read. Every agent-view command prints either the evidence or the reason
-  it failed; a suppressed `click` that matched nothing looks exactly like a successful one.
+- **Never discard output.** No `>/dev/null`, no `2>&1` to nowhere, no `| head -1` on a command whose failure you have
+  not yet read. Every agent-view command prints either the evidence or the reason it failed; a suppressed `click` that
+  matched nothing looks exactly like a successful one.
 - **Chain with `&&`, not newlines.** Newline-separated commands keep running after a failure, so a
   broken first step is followed by three steps acting on the wrong state. `&&` stops at the first
   non-zero exit.
 - **One action, then one check.** `click` is not evidence. The evidence is the `dom --diff`,
-  `dom --filter … --count`, `eval`, or `console --level error` you run after it. A block of three
-  clicks in a row with no check between them proves nothing about any of them.
-- **Call the `agent-view` binary.** Install it once in the target project
-  (`pnpm add -D @petukhovart/agent-view`) and call `agent-view …` or `pnpm exec agent-view …`.
-  Do not prefix every call with `npx <package>`: it re-resolves the package on each invocation and
-  falls outside this skill's `allowed-tools`, so each call needs a fresh permission prompt.
+  `dom --filter … --count`, `eval`, or `console --level error` you run after it. Three clicks in a row with no check
+  between them prove nothing about any of them.
+- **Never sleep for a fixed time.** No `sleep`, no `timeout`, no `ping -n N 127.0.0.1` as a delay (agents reach for
+  `ping` when the harness blocks `sleep` — the same mistake in worse clothing). A fixed pause is either too short, and
+  you assert against a half-rendered UI, or too long, and you burn wall-clock on every step. There is a condition-based
+  wait for every kind of signal:
 
-These heuristics catch real bugs. Skipping them is how a run silently passes while the bug sits in plain sight in the same data:
+  | You are waiting for… | Use |
+    |---|---|
+  | An element to render | `wait --filter "<text>"` |
+  | A store/state value | `watch "<expr>" --until "<expr>"` |
+  | A log line | `console --follow --until "<pattern>"` |
+  | A request to fire | `network --follow --until "<url>"` |
 
-1. **A failed expectation is FAIL.** If output disagrees with what the step expected, mark `fail` and continue. Do not soften the expectation. Do not invent prose explanations inline ("label reuse", "convention", "arithmetic off"). Justifications belong in the bug report after the run, never in the per-step log.
+  If none of these fits, poll `dom --filter X --count` with an explicit attempt cap and report how many attempts it
+  took.
+- **Call the `agent-view` binary.** Install it once in the target project (`pnpm add -D @petukhovart/agent-view`, or
+  your package manager's equivalent) and call
+  `agent-view …` / `pnpm exec agent-view …`. Prefixing every call with `npx <package>` re-resolves the package on each
+  invocation, and in permission-gated harnesses each call then needs a fresh approval prompt.
 
-2. **UI-vs-model mismatch is the bug, not noise.** When a count or hierarchy check returns `match: false`:
-   - Default hypothesis: the UI renderer is wrong.
-   - Before considering "the filter matched something extra in some side panel", query bounding boxes and ancestor chains of the matched elements. Two matches at the same x-coordinate in adjacent y rows = sibling rows in one list = renderer bug.
-   - Do not dismiss DOM/model divergence with "scene-graph is the source of truth". The model is one representation; the bug may live in the gap between model and UI.
+These heuristics catch real bugs. Skipping them is how a run silently passes while the bug sits in plain sight in the
+same data:
 
-3. **Defensive eval reads.** Every `node.field` read (e.g. `transform.x`, `transform.width`) must be sentinel-checked before being used in arithmetic. A renamed field silently returns `NaN`/`null`, which fail-passes downstream comparisons. Add `isFinite(value)` / `value !== undefined` guards inline.
+1. **A failed expectation is FAIL.** If output disagrees with what the step expected, mark `fail` and continue. Do not
+   soften the expectation. Do not invent prose explanations inline ("label reuse",
+   "convention", "arithmetic off"). Justifications belong in the bug report after the run, never in the per-step log.
 
-4. **No hardcoded literal IDs.** A hardcoded node-ID prefix that no longer matches the current scene degrades the whole check to a silent no-op. Verify at least one expected ID exists; if not, derive IDs by role at runtime and proceed with the corrected lookup, and say the plan needs an ID refresh.
+2. **UI-vs-model mismatch is the bug, not noise.** When a count or hierarchy check returns
+   `match: false`, the default hypothesis is that the UI renderer is wrong. Before reaching for "the filter matched
+   something extra in a side panel", query the bounding boxes and ancestor chains of the matched elements — two matches
+   at the same x in adjacent y rows are sibling rows in one list, i.e. a renderer bug. The model is one representation,
+   not the source of truth; the bug may live in the gap between model and UI.
 
-5. **Reload checkpoint is not optional.** If the feature mutated persisted structure, run one: `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift is a real bug, not a "fixed-up on save".
+3. **Defensive eval reads.** Sentinel-check every `node.field` read (`transform.x`,
+   `transform.width`) before using it in arithmetic. A renamed field silently returns `NaN`/`null`, which fail-passes
+   downstream comparisons. Add `isFinite(value)` / `value !== undefined` guards inline.
 
-6. **Invariants run first or fail closed.** When the plan states invariants, execute those steps before the action-specific checks. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep running the remaining steps, tag them as "trust-impaired until invariant restored".
+4. **No hardcoded literal IDs.** A hardcoded node-ID prefix that no longer matches the current scene degrades the whole
+   check to a silent no-op. Verify at least one expected ID exists; if not, derive IDs by role at runtime, proceed with
+   the corrected lookup, and say the plan needs an ID refresh.
 
-7. **Never claim a `window.*` API is missing without `eval`.** Before reporting "API not exposed" / "global X doesn't exist" / "the host doesn't expose Y", you MUST run `agent-view eval "typeof window.X"` and report the literal result (`"undefined"` / `"object"` / `"function"`). DOM scraping cannot answer this question — globals are not in the AX tree. If `eval` returns `"undefined"`, the API really is absent from the main world; if it returns anything else, the API is reachable and your earlier conclusion was wrong. No exceptions, no "I checked the source code instead".
+5. **Reload checkpoint is not optional.** If the feature mutated persisted structure, run one:
+   `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift
+   is a real bug, not a "fixed-up on save".
 
-### Ad-hoc Mode (standalone)
+6. **Invariants run first or fail closed.** When the plan states invariants, execute those steps before the
+   action-specific checks. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep
+   running the remaining steps, tagged "trust-impaired until invariant restored".
+
+7. **Never claim a `window.*` API is missing without `eval`.** Before reporting "API not exposed" /
+   "global X doesn't exist" / "the host doesn't expose Y", run `agent-view eval "typeof window.X"`
+   and report the literal result (`"undefined"` / `"object"` / `"function"`). DOM scraping cannot answer this — globals
+   are not in the AX tree. If it returns `"undefined"` the API really is absent from the main world; anything else means
+   the API is reachable and your earlier conclusion was wrong. No exceptions, no "I checked the source code instead".
+
+## Verification Workflow
+
+Run the whole thing inline — **no subagent**. Resolve the window id once with `agent-view discover`
+if you need `--window`.
+
+### Ad-hoc mode (standalone)
 
 After making code changes:
 
-1. **Determine affected areas** from git diff
-2. **Ensure app is running**: `agent-view launch` or `agent-view discover`
-3. **Inspect DOM**: `agent-view dom --filter "<area>" --depth 2` — check structure matches expectations
-4. **Interact if needed**: `agent-view click`/`fill` → `agent-view dom --filter` to verify state changed
-5. **For canvas apps**: `agent-view scene --diff` to see what changed
-6. **For non-DOM truth** (store, computed values, worker state): `agent-view eval` — much cheaper than reading the DOM tree to infer state
-7. **After any interaction that could fail silently**: `agent-view console --level error` — catches uncaught exceptions, network failures, framework warnings
-8. **Screenshot only for final visual confirm**: `agent-view screenshot --scale 0.5` — captures layout/styling that DOM can't reveal
+1. **Determine affected areas** from `git diff` — every changed file that renders or drives UI needs at least one check.
+2. **Ensure the app is running**: `agent-view launch` (or `agent-view discover`).
+3. **Inspect DOM**: `agent-view dom --filter "<area>" --depth 2` — structure matches expectations.
+4. **Interact**: `agent-view click`/`fill` → `agent-view dom --filter` to verify the state changed.
+5. **For canvas apps**: `agent-view scene --diff`.
+6. **For non-DOM truth** (store, computed values, worker state): `agent-view eval`.
+7. **Before claiming code is unreachable**: `agent-view coverage --clear` → the action →
+   `agent-view coverage --file "<file>"`. Reading the diff is not evidence either way; an empty result narrows the claim
+   to "this action does not reach it".
+8. **After any interaction that could fail silently**: `agent-view console --level error` — catches uncaught exceptions,
+   network failures, framework warnings.
+9. **Screenshot last, for visual confirm only**: `agent-view screenshot --scale 0.5`.
 
-### Scenario Execution Mode (from plan)
+### Scenario mode (from a plan)
 
-When UI scenarios are pre-generated (e.g., from a plan file with `## UI Scenarios` section):
-
-1. **Read scenario steps** with symbolic refs (`$var` notation)
-2. **Resolve each $var**: `agent-view dom --filter "<text>" --depth 3` → map to ref ID
-3. **Execute steps** sequentially: fill, click, dom --filter (verify expected outcome)
-4. **Screenshot**: `agent-view screenshot --scale 0.5` — only on FAIL and at E2E scenario end, not every step
-5. **Report per-scenario**: PASS / FAIL with reason and evidence
-
-This mode works with any workflow that generates plan files with UI scenarios.
+When UI scenarios are pre-generated (e.g. a plan file with a `## UI Scenarios` section): read the steps, resolve each
+symbolic `$var` via `agent-view dom --filter "<text>" --depth 3` to a ref, execute the steps in order, and verify each
+expected outcome with `dom --filter`. Screenshot only on FAIL and at the end of an E2E scenario, never per step.
 
 ### Reporting
 
-Run the whole thing inline — **no subagent**. Resolve the window id once with `agent-view discover` if you need `--window`.
+One line per step, so the report stays machine-readable:
 
-Report a tight summary: passed / failed / visual-review counts, one line per failure, invariant violations called out separately. Don't paste raw stdout unless asked. After 2–3 consecutive failures, stop and distinguish "the plan is stale" (hardcoded IDs no longer match the current UI) from "the feature is broken" (invariants violated on a current scene) — they need opposite fixes.
+```
+<step label> | pass | fail | requires_visual_review — <evidence command and its result>
+```
 
-### Design Conformance (inline)
+Close with passed / failed / visual-review counts, and call out invariant violations separately. Do not paste raw stdout
+unless asked.
 
-When you are given `(label, screenshot command, expected reference path)` rows — from a plan, or from the developer directly — execute them yourself, no subagent.
-
-For each row:
-1. Run the screenshot command (capture the saved file path from stdout).
-2. `Read` both the captured image and the `expected_path`. If `expected_path` doesn't exist or is unreadable, mark the pair `skipped (expected_missing)` and move on.
-3. Compare visually for: layout (relative position, alignment), sizing, color (dominant color family), typography (weight/size broadly), content presence (anything missing or extra), decorations (borders, shadows, dashed/solid lines, icons).
-4. Report each pair as `match` / `minor_mismatch` / `major_mismatch` with a one-sentence deviation. Major = missing/wrong component, broken layout, wrong color family, wrong text content. Minor = <10px spacing drift, slight color shade, small decoration difference.
-
-Tolerance default: a designer's code-review level — flag what they'd notice, ignore anti-aliasing noise. Don't speculate about CSS causes — describe what looks different and let the parent / user decide.
+**Design conformance** — when you are handed `(label, screenshot command, expected reference path)`
+rows, follow [`references/design-conformance.md`](references/design-conformance.md).
 
 ## Resilience
 
-- **Stale refs:** After HMR, navigation, or state change — re-run `dom` for fresh refs before interacting
-- **Element not found:** `agent-view wait --filter "<text>" --timeout 5` (covers the render delay after HMR). If it times out — report FAIL. Do not insert a blind pause and retry.
-- **CDP disconnect:** Run `agent-view discover` to check. If no windows — `agent-view launch` (auto-starts Electron/Browser/Tauri). On `PORT_CONFLICT` — surface PID/process and ask user.
-- **`CDP_TIMEOUT` error:** the command hit the server-side deadline; cached CDP sessions for that port were dropped, so retry once. Repeated timeouts mean the app's DevTools endpoint is wedged — restart the app.
-- **Max retries per command:** 2. After that — SKIP scenario step with warning
-
-## Important Notes
-
-- **Refs are session-scoped** — after HMR or navigation, run `dom` again for fresh refs
-- **Multiple windows**: use `--window <id>` from `discover` output when titles overlap
-- **Multiwindow**: all commands support `--window` flag
-- **Output format**: plain text (DOM, scene), JSON (discover only), file path (screenshot)
-- **Lazy server**: auto-starts on first call, shuts down after 5min idle
+- **Element not found:** `agent-view wait --filter "<text>" --timeout 5` covers the render delay after HMR. If it times
+  out — report FAIL.
+- **Stale refs:** re-run `dom` after HMR, navigation, or a state change before interacting again.
+- **CDP disconnect:** `agent-view discover` to check. If no windows — `agent-view launch`. On
+  `PORT_CONFLICT` the CLI reports the owning PID and process name; surface it and ask the user to free the port. Never
+  kill a foreign process from this skill.
+- **`CDP_TIMEOUT`:** the command hit the server-side deadline and cached sessions for that port were dropped, so retry
+  once. Repeated timeouts mean the app's DevTools endpoint is wedged — restart it.
+- **Retry budget: 2 per command**, then SKIP the step with a warning. Two covers a transient CDP drop; a third repeat
+  means the app or the plan is wrong, not the call. After two or three consecutive failures, stop and distinguish "the
+  plan is stale" (hardcoded IDs no longer match the UI) from "the feature is broken" (invariants violated on a current
+  scene) — they need opposite fixes.
 
 ## Token Optimization
 
-Vision tokens dominate cost. One full-res screenshot ≈ 19k tokens (1920×1080, 12 tiles).
+Vision tokens dominate cost: a full-res screenshot is ≈19k tokens (1920×1080, 12 tiles), `--scale 0.5`
+≈6k (4 tiles), `--scale 0.25` and `--crop` ≈1.6k (1 tile). A text answer is ~50. So `--depth` and
+`--filter` on `dom`, and `--count` where a number is the whole answer, cost near nothing by comparison.
 
-| Technique | Savings |
-|---|---|
-| `agent-view eval "expr"` for state checks | Returns one value (~50 tokens) instead of a DOM/screenshot |
-| `agent-view dom --filter "row" --count` | Single integer answer — zero tree tokens |
-| `agent-view dom --filter X --depth 2` | Narrow tree to relevant subtree, cap depth |
-| `agent-view screenshot --scale 0.5` | ~3× fewer vision tokens (4 tiles) |
-| `agent-view screenshot --scale 0.25` | ~12× fewer vision tokens (1 tile, ~1.6k tokens) |
-| `agent-view screenshot --crop "<element>"` | ~12× fewer in best case (1 tile) — crops to element bounding box |
-| DOM/eval-first: screenshot only for final visual confirm | Eliminates most screenshot calls |
-
-**Default rule**: if the answer is a value → `eval`; if the answer is "is element X visible/correct?" → `agent-view dom --filter`; if you need pixels for a specific section → `screenshot --crop "<element>"` (one tile); only call `screenshot --scale 0.5` for full-window visual proof.
+**Default rule**: the answer is a value → `eval`; the answer is "is element X visible/correct?" →
+`dom --filter`; you need pixels for one section → `screenshot --crop "<element>"`; only call
+`screenshot --scale 0.5` for full-window visual proof.
