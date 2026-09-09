@@ -8,7 +8,7 @@
     {
       "name": "agent-view",
       "source": "./",
-      "description": "Visual verification CLI for Electron/Tauri/Chromium apps via Chrome DevTools Protocol. Ships with verify skill for easy and cheap checks against a live app."
+      "description": "Visual verification CLI for Electron/Tauri/Chromium apps via Chrome DevTools Protocol. Ships with verify skill for easy and cheap checks against a live app, including heap-snapshot memory-leak debugging."
     }
   ]
 }

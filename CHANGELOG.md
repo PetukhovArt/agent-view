@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.15.0] - 2026-09-09
 
 Memory. Every command so far reads what the app is or what it ran; none reads what it keeps.
 "Does opening this dialog ten times leak?" had no answer short of the DevTools Memory panel by
