@@ -18,6 +18,7 @@ listing call — always expand from the most recent one.
 - [Log feed](#log-feed-logs) — `logs`
 - [Network](#network-network) — `network`
 - [Reachability](#reachability-coverage-listeners) — `coverage`, `listeners`
+- [Memory](#memory-heap) — `heap`
 - [Targets](#targets-targets) — `targets`
 - [Scene / canvas / WebGL](#scene--canvas--webgl-only-when-webgl-is-configured-in-agent-viewconfigjson) — `scene`, `snap`
 
@@ -328,6 +329,31 @@ agent-view listeners --depth -1         # whole subtree (CDP depth; default 0)
 ```
 
 Positions are 1-based (`file.vue:88:14`) and paste straight into a review comment. `(no listeners on this node)` means the node itself has none — the handler may still be delegated from an ancestor, so try `--depth -1` from a parent before concluding anything. An unresolvable script falls back to `scriptId:7:88:14`. Reach for `--selector` only when the node has no `[ref=N]` — hidden and `aria-hidden` elements never enter the AX tree.
+
+### Memory (`heap`)
+
+Named V8 heap snapshots, compared by class. The method (baseline → repeat the action ×10 → target → diff, then retainers) and how to read the output live in [`memory-leaks.md`](memory-leaks.md); this is the flag reference.
+
+```bash
+agent-view heap take --name baseline            # full GC, then snapshot; default names are s1, s2, …
+agent-view heap take --name target -t worker    # a worker's own heap
+agent-view heap diff                            # the two most recent snapshots
+agent-view heap diff baseline target            # by name
+agent-view heap diff --detached                 # detached DOM nodes only
+agent-view heap diff --filter "OrderRow"        # class name contains this
+agent-view heap summary                         # classes of the latest snapshot by size
+agent-view heap retainers "Detached <div class=\"row\">"   # who holds the instances, one hop up
+agent-view heap list                            # snapshots the server holds
+agent-view heap clear                           # drop them
+```
+
+`take` prints one line: `Snapshot "target" (page:Orders): 184,203 nodes, 41.2 MB, 240 detached DOM nodes (960 KB)`. The JSON never leaves the server; only the class table and the graph are kept, and they go away when the server idles out (5 min) or on `clear`.
+
+`diff` prints a header with the node, byte and detached deltas, then one row per class whose count or size changed, largest size growth first: `class  Δcount  Δsize  count`. Class names are V8's: JS objects by constructor (`OrderRowVM`), DOM nodes by tag and attributes (`<div class="row">`, `Detached <canvas>`), everything else by kind (`(string)`, `(closure)`, `(compiled code)`). Two snapshots with nothing changed print `(no class changed between "a" and "b")`, exit 0. `diff` before two snapshots exist is an error naming the recovery.
+
+`retainers <class>` prints `retainer  instances` rows: `Array []` means the instances are elements of an `Array`, `RowRegistry .el` means they are the `.el` property of a `RowRegistry`. Distinct instances are counted, not edges; weak edges and the class's own instances are excluded. A class with no instances prints `(no instances of "X" in "s")`, exit 0. Quote the class name: it contains spaces and angle brackets.
+
+`--max-lines <n>` caps `summary`, `diff` and `retainers` with the usual `… N more lines` tail.
 
 ### Targets (`targets`)
 

@@ -31,6 +31,7 @@ read it before your first call in a session.
 | `console` `logs`                     | message ring buffer / durable file feed that survives reloads  |
 | `network`                            | requests, headers, timing, bodies, WebSocket frames            |
 | `coverage` `listeners`               | which functions ran; what handler is bound to a node           |
+| `heap`                               | what grew between two heap snapshots, and what retains it      |
 | `scene` `snap`                       | canvas / WebGL scene graph (only when `webgl` is configured)   |
 
 Every command takes `--window <id|name>`. Refs (`[ref=N]`) are session-scoped — after HMR or navigation, re-run `dom`
@@ -60,6 +61,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Selecting a file when the input appears only mid-click           | `dialog arm --file` then `click`                             | The only way — the input does not exist before the click and is gone after                  |
 | Does any user action reach this code?                            | `coverage --clear` before, `coverage --file X` after         | The only tool that answers it; a diff cannot                                                |
 | What handler is bound to this element, and where is it declared? | `listeners --filter "<text>"`                                | Gives `file:line` without reading the source                                                |
+| Does repeating this action leak memory, and what holds it?       | `heap take` → act ×10 → `heap take` → `heap diff`            | The only tool that sees the heap; method in [`references/memory-leaks.md`](references/memory-leaks.md) |
 | The window stopped responding after a click                      | `dialog`                                                     | Shows whether a modal was answered, and what the app was told                               |
 
 When two tools could answer the same question, prefer the one higher up the table.

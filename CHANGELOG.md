@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+Memory. Every command so far reads what the app is or what it ran; none reads what it keeps.
+"Does opening this dialog ten times leak?" had no answer short of the DevTools Memory panel by
+hand, and the `.heapsnapshot` behind it is far too large to ever put in front of an agent.
+
+### Added
+- `agent-view heap take|summary|diff|retainers|list|clear` — named V8 heap snapshots compared by class. `take` runs a full GC, parses the snapshot inside the server and keeps only the class table and the typed-array graph, so nothing heavy crosses to the CLI. `diff a b` prints the node / byte / detached-DOM deltas and one row per class that changed, largest size growth first; `--detached` and `--filter` narrow it. `retainers <class>` names what holds the instances one hop up (`Array []`, `RowRegistry .el`), counting distinct instances and ignoring weak edges, with V8's `(object elements)` backing stores folded into their owner. Works on workers through `--target`.
+- `skills/verify/references/memory-leaks.md` — the method (baseline → repeat ×10 → target → diff → retainers → final), how to read a diff, and a table of what each diff shape usually means. Loaded on demand from the tool-selection table, not on every trigger.
+- `bench/smoke-heap.ts` — plants 200 detached `<div>`s in the bench app and checks that the diff and the retainers name them and the `Array` holding them, and that releasing the array frees them.
+
+### Notes
+- Own implementation, no dependency. `chrome-devtools-mcp` gets the same feature by vendoring the whole `devtools-frontend` repository as a submodule and bundling its 180 KB heap-snapshot worker; that engine's retained sizes, dominator trees and full retaining paths are deliberately not reproduced here. The one named hop is enough to point at the map, list or closure at fault, and for anything deeper the DevTools Memory panel on the same CDP port shows the same class names.
+- Class names are V8's, not normalised: DOM nodes print as `<div class="row">` and `Detached <canvas>`, so an element with a unique `id` becomes its own class, as in DevTools. Quote them on the command line.
+- Snapshots live in the lazy server and go away when it idles out. The three-snapshot method fits comfortably inside that window; there is no on-disk store.
+- The snapshot is parsed from one joined string, so heaps above roughly 500 MB (V8's string ceiling) are out of reach. Duplicate-string scans and the DevTools "retained by event handlers / console / context" filters are not offered; `--detached` is the one categorised filter.
+
 ## [0.14.0] - 2026-09-08
 
 Reachability. A review could not tell "no user action reaches this code" apart from "I did not

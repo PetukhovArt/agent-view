@@ -156,6 +156,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | `network`     | Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`. Captures page-load traffic. |
 | `coverage`    | Which functions ran since the last `--clear`. Turns "does any action reach this code?" into a positive answer. Filters: `--filter`, `--file`, `--count`. |
 | `listeners`   | Event handlers bound to a node, each with the `file:line` it was declared at.            |
+| `heap`        | Named heap snapshots diffed by class: what grew after repeating an action, how many are detached DOM nodes, and what retains them. |
 | `upload`      | Puts files into a file input — no picker opens. `--selector` reaches the hidden inputs that have no ref. |
 | `dialog`      | JS modals are answered automatically so they cannot freeze the run; sets the answer, and pre-answers native file pickers with `arm`. |
 | `wait`        | Block until an element appears (default 10s).                                            |
@@ -636,6 +637,33 @@ Positions are printed 1-based (`file.vue:88:14`), so they paste straight into an
 A node with no handlers prints `(no listeners on this node)` and exits 0. A `--filter` that matches nothing is an error with the usual `No element found matching "<text>"`.
 
 `--selector` is the escape hatch for a node the AX tree never exposes — a hidden or `aria-hidden` element has no `[ref=N]` at all, so no other flag can address it. A selector matching nothing is an error: `No element matches selector "<css>"`.
+
+### `heap`
+
+Takes named V8 heap snapshots and compares them by class. Answers "does repeating this action leak memory, and what holds the leaked objects?" without the multi-hundred-MB `.heapsnapshot` ever reaching the agent: the server parses it and keeps only the class table and the graph.
+
+```bash
+agent-view heap take --name baseline            # full GC, then snapshot
+# … repeat the suspected action ~10 times with click / fill / eval …
+agent-view heap take --name target
+agent-view heap diff baseline target            # per-class growth, largest first
+agent-view heap diff --detached                 # detached DOM nodes only
+agent-view heap retainers "Detached <div class=\"row\">"   # who holds them, one hop up
+agent-view heap summary --filter "OrderRow"     # one snapshot's classes by size
+agent-view heap list                            # snapshots the server holds
+agent-view heap clear
+```
+
+```
+baseline → target (page:Orders): +3,201 nodes, +2.4 MB, detached +240 (+960 KB)
+class                          Δcount     Δsize   count
+Detached <div class="row">       +240  +960 KB     252
+OrderRowVM                        +10   +12 KB      10
+```
+
+A `Δcount` that is a multiple of the repetition count is the leak; `+3` is noise. `retainers` names the object and property holding the instances (`Array []`, `RowRegistry .el`), counting distinct instances and skipping weak edges. One hop only: retained sizes, dominators and full retaining paths are not computed, and for those the app's own DevTools Memory panel shows the same class names on the same CDP port.
+
+Snapshots live in the lazy server and vanish when it idles out (5 min) or on `clear`. `--target <worker>` snapshots a worker's own heap. The full method, with a table of what each diff shape usually means, is in [`skills/verify/references/memory-leaks.md`](skills/verify/references/memory-leaks.md).
 
 ### `watch`
 
