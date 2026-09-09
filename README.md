@@ -31,7 +31,7 @@ Works with any agent that can run shell commands. There's a Claude Code plugin i
 
 - Reads state inside `SharedWorker`, `ServiceWorker`, and dedicated workers. Half of a modern app's state lives there, and most browser-automation tools don't follow it.
 - Every command takes `--window <id>`. Settings, tray, and detached windows in Electron and Tauri apps work the same as the main window.
-- Electron, Tauri (WebView2 and WebKit), and plain Chromium. One CLI, same commands.
+- Electron, Tauri on Windows (WebView2), and plain Chromium. One CLI, same commands. Tauri on macOS/Linux embeds WebKit, which has no Chrome DevTools Protocol, so it is out of reach.
 - `click`, `fill`, and `drag` fire real CDP input events. Vue `v-model`, React controlled inputs, and native fields actually accept the value; synthetic DOM events fail silently there.
 - `watch` emits RFC-6902 JSON-patches of any JS expression between two events. Answers "what mutated after the click?" without parsing screenshots.
 - `dom` returns the accessibility tree with `[ref=N]` handles. `--compact` cuts deep trees by 40–60%; `--diff`, `--count`, and `--max-lines` keep output bounded. `screenshot --crop` and WebP scaling do the same for vision tokens.
@@ -86,7 +86,7 @@ In `package.json`, wrap the dev script with [`cross-env`](https://www.npmjs.com/
 }
 ```
 
-Then `npm run dev` as usual. Devtools must be enabled in `tauri.conf.json` (default in `tauri dev`; for release builds, enable the `devtools` Cargo feature). macOS/Linux WebKit use different env vars; see [Enabling CDP](#enabling-cdp).
+Then `npm run dev` as usual. Devtools must be enabled in `tauri.conf.json` (default in `tauri dev`; for release builds, enable the `devtools` Cargo feature). Windows only: on macOS/Linux Tauri embeds WebKit, which speaks the WebKit Remote Inspector protocol, not CDP, so agent-view cannot attach there.
 </details>
 
 <details>
@@ -267,7 +267,7 @@ npx electron-vite dev -- --remote-debugging-port=9876
 
 | Runtime              | Setup                                      |
 |----------------------|--------------------------------------------|
-| **Tauri**            | CDP via devtools configuration             |
+| **Tauri (Windows)**  | `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, see above. WebKit builds (macOS/Linux) are not supported |
 | **Any Chromium app** | `--remote-debugging-port=9876` launch flag |
 
 ### Verify CDP is working
