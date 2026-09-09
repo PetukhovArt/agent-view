@@ -122,6 +122,28 @@ _Avoid_: Handler, Callback, Subscriber
 A momentary enable of the `Debugger` domain for the sake of the one CDP source of the `scriptId` → URL correspondence. The domain does not stay on: with it, V8 holds the code deoptimized for every other command on the session.
 _Avoid_: Script Map, Debugger Scan
 
+## Memory
+
+**Heap Snapshot**
+A named, GC-first capture of one target's V8 heap, kept in the server as a class table and a typed-array graph. Compared to another by class; never shown raw.
+_Avoid_: Memory Dump, Profile
+
+**Detached DOM Node**
+A DOM node out of the document but still referenced from JS, so it cannot be collected. V8 marks it in the snapshot; here it prints as its own class, `Detached <tag …>`.
+_Avoid_: Orphan Node, Zombie Element, Leaked Element
+
+**Heap Class**
+The grouping unit of every `heap` view, as V8 names it: JS objects by constructor, DOM nodes by tag and attributes, everything else by kind in parentheses. A Detached DOM Node is its own Heap Class.
+_Avoid_: Type, Constructor, Bucket
+
+**Retainer**
+The object and the edge (property or index) through which an instance is kept alive, one hop up the graph, strong edges only. Not a retaining path: the hop after it is not computed.
+_Avoid_: Owner, Parent, Reference Holder
+
+**Backing Store**
+A V8-internal node (`(object elements)`, `system / OrderedHashMap`) that holds a collection's items on behalf of the `Array` or `Map` a developer wrote. Never shown as a Retainer: edges out of it are attributed to its owner.
+_Avoid_: Internal Node, Hidden Node
+
 ## Server
 
 **Lazy Server**

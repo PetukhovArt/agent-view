@@ -1,4 +1,5 @@
 import type { CoverageScript } from '../../cdp/types.js'
+import { capLines } from '../format.js'
 
 export type CoverageOptions = {
   /** Substring matched against the function name or the script URL. */
@@ -73,9 +74,5 @@ export function formatCoverage(scripts: CoverageScript[], options: CoverageOptio
     lines.push(`… ${hidden} script${hidden === 1 ? '' : 's'} hidden (--all to show)`)
   }
 
-  const { maxLines } = options
-  const text = maxLines !== undefined && lines.length > maxLines
-    ? [...lines.slice(0, maxLines - 1), `… ${lines.length - (maxLines - 1)} more lines`].join('\n')
-    : lines.join('\n')
-  return { text, functions: total }
+  return { text: capLines(lines, options.maxLines), functions: total }
 }

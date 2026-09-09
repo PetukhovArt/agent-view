@@ -14,12 +14,13 @@ The published binary is `dist/cli/index.js` (`bin: agent-view`).
 
 <important if="you are running or changing the bench harness">
 
-Bench harness lives in `bench/` with its own Electron app under `bench/app/`. Four entry points:
+Bench harness lives in `bench/` with its own Electron app under `bench/app/`. Five entry points:
 
 ```bash
 npx tsx bench/smoke-devtools.ts   # end-to-end CDP / console / SharedWorker smoke
 npx tsx bench/smoke-dialogs.ts    # modals: JS dialog auto-answer, upload, file-chooser arm
 npx tsx bench/smoke-reach.ts      # coverage delta + listeners over real CDP
+npx tsx bench/smoke-heap.ts       # heap snapshot diff + retainers against a planted detached-DOM leak
 npx tsx bench/run.ts              # token / latency benchmark across scenarios
 ```
 
@@ -68,6 +69,8 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
       JSON-patch diffs; pairs with `inspectors/watch/`.
     - **`RefStore`** (`server/ref-store.ts`) — allocates the `[ref=N]` handles printed by `dom`/`scene`. `dom --count`
       and `dom --diff` deliberately bypass it (no mutation / ref-normalised compare).
+    - **Heap snapshots** — named, insertion-ordered, parsed on `heap take` and held as typed arrays until `heap clear`
+      or idle shutdown. The raw `.heapsnapshot` JSON never leaves the server.
     - **Token auth** at `~/.agent-view/token`, idle shutdown, 1 MB request cap.
 
 4. **`src/cli/`** — thin shells. `cli/index.ts` registers commander commands; `cli/commands/*.ts` opens a TCP socket to
@@ -77,7 +80,9 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
    `listSupportedTargets` + `connectToPage`. Add new runtimes by registering in `adapters/registry.ts`.
 
 6. **`src/inspectors/`** — pure formatters (DOM tree → compact text, scene graph extractors). `scene/` is
-   engine-pluggable (currently PixiJS via `window.__PIXI_DEVTOOLS__`).
+   engine-pluggable (currently PixiJS via `window.__PIXI_DEVTOOLS__`). `heap/` is the one that also parses: it turns
+   the `.heapsnapshot` JSON into the typed-array graph the server keeps, then formats views of it. `format.ts` holds
+   the helpers every inspector prints with (`capLines`, `formatBytes`).
 
 <important if="you are changing what a command may execute, capture, or store">
 

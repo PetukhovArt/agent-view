@@ -860,6 +860,24 @@ function attachCoverage(client: RawCDPClient): CoverageOps {
   }
 }
 
+type HeapProfilerDomain = {
+  takeHeapSnapshot: (p: Record<string, unknown>) => Promise<unknown>
+  addHeapSnapshotChunk: (cb: (p: { chunk: string }) => void) => () => void
+}
+
+/** Chunks arrive before the command resolves, so subscribing first and joining after is the whole protocol. */
+async function takeHeapSnapshotImpl(client: RawCDPClient): Promise<string> {
+  const HeapProfiler = client.HeapProfiler as HeapProfilerDomain
+  const chunks: string[] = []
+  const unsubscribe = HeapProfiler.addHeapSnapshotChunk(({ chunk }) => { chunks.push(chunk) })
+  try {
+    await HeapProfiler.takeHeapSnapshot({ reportProgress: false, captureNumericValue: false })
+  } finally {
+    unsubscribe()
+  }
+  return chunks.join('')
+}
+
 type RawEventListener = {
   type: string
   useCapture?: boolean
@@ -947,6 +965,7 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
     startCoverage: () => coverage.start(),
     takeCoverage: () => coverage.take(),
+    takeHeapSnapshot: () => takeHeapSnapshotImpl(client),
     async close() {
       await client.close()
     },
@@ -1130,6 +1149,7 @@ export async function connectToPage(
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
     startCoverage: () => coverage.start(),
     takeCoverage: () => coverage.take(),
+    takeHeapSnapshot: () => takeHeapSnapshotImpl(client),
 
     async getEventListeners(backendDOMNodeId, depth = 0): Promise<EventListenerInfo[]> {
       const { object } = await DOM.resolveNode({ backendNodeId: backendDOMNodeId })

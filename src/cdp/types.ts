@@ -194,6 +194,11 @@ export type RuntimeSession = {
    * `null` means no window was ever opened on this session.
    */
   takeCoverage: () => Promise<CoverageScript[] | null>
+  /**
+   * `HeapProfiler.takeHeapSnapshot`, chunks joined into one `.heapsnapshot` JSON
+   * string. V8 runs a full GC first, so the result holds live objects only.
+   */
+  takeHeapSnapshot: () => Promise<string>
   close: () => Promise<void>
 }
 

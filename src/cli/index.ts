@@ -32,6 +32,7 @@ import { runWatch } from './commands/watch.js'
 import { runDialog } from './commands/dialog.js'
 import { runCoverage } from './commands/coverage.js'
 import { runListeners } from './commands/listeners.js'
+import { runHeap } from './commands/heap.js'
 import { runUpload } from './commands/upload.js'
 import type { AgentViewConfig } from '../config/types.js'
 
@@ -320,6 +321,74 @@ program
   .action(async (options) => {
     const config = requireConfig()
     await runCoverage(config, options)
+  })
+
+const heap = program
+  .command('heap')
+  .description('Heap snapshots: what grew between two named snapshots, and what retains it')
+
+heap
+  .command('take')
+  .description('Take a V8 heap snapshot and keep its class summary under a name (default s1, s2, …)')
+  .option('--name <name>', 'Snapshot name, e.g. baseline / target / final')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .option('-t, --target <id|name>', 'Target ID or name (page, worker, ...)')
+  .action(async (options) => {
+    const config = requireConfig()
+    await runHeap(config, 'take', options)
+  })
+
+heap
+  .command('summary')
+  .description('Classes of one snapshot by size (default: the most recent)')
+  .option('--name <name>', 'Snapshot to read')
+  .option('--filter <text>', 'Keep classes whose name contains this')
+  .option('--detached', 'Detached DOM nodes only')
+  .option('--max-lines <n>', 'Cap the output', parseMaxLines)
+  .action(async (options) => {
+    const config = requireConfig()
+    await runHeap(config, 'summary', options)
+  })
+
+heap
+  .command('diff [a] [b]')
+  .description('Per-class growth from a to b (default: the two most recent snapshots)')
+  .option('--filter <text>', 'Keep classes whose name contains this')
+  .option('--detached', 'Detached DOM nodes only')
+  .option('--max-lines <n>', 'Cap the output', parseMaxLines)
+  .action(async (a: string | undefined, b: string | undefined, options) => {
+    if ((a === undefined) !== (b === undefined)) {
+      console.error('heap diff takes two snapshot names or none (the two most recent)')
+      process.exit(1)
+    }
+    const config = requireConfig()
+    await runHeap(config, 'diff', { ...options, names: a && b ? [a, b] : undefined })
+  })
+
+heap
+  .command('retainers <class>')
+  .description('What holds the instances of a class, one hop up (class name as printed by diff)')
+  .option('--name <name>', 'Snapshot to read (default: the most recent)')
+  .option('--max-lines <n>', 'Cap the output', parseMaxLines)
+  .action(async (cls: string, options) => {
+    const config = requireConfig()
+    await runHeap(config, 'retainers', { ...options, class: cls })
+  })
+
+heap
+  .command('list')
+  .description('Snapshots held by the server')
+  .action(async () => {
+    const config = requireConfig()
+    await runHeap(config, 'list', {})
+  })
+
+heap
+  .command('clear')
+  .description('Drop every snapshot')
+  .action(async () => {
+    const config = requireConfig()
+    await runHeap(config, 'clear', {})
   })
 
 program

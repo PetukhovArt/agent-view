@@ -32,6 +32,8 @@ import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/in
 import { formatDialogStatus, describePolicy, describeArm } from '../inspectors/dialog/index.js'
 import { formatCoverage } from '../inspectors/coverage/index.js'
 import { formatListeners } from '../inspectors/listeners/index.js'
+import { parseHeapSnapshot, describeSnapshot, formatSummary, formatDiff, formatRetainers, formatList, type HeapSnapshot } from '../inspectors/heap/index.js'
+import { formatBytes } from '../inspectors/format.js'
 import { buildTauriArmScript, buildTauriStatusScript, TauriShimResult, type TauriShimStatus } from './tauri-dialog-shim.js'
 import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
@@ -220,6 +222,8 @@ export class AgentViewServer {
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private sceneCache = new Map<string, SceneNode>()
   private domTextCache = new Map<string, string>()
+  /** Named, insertion-ordered; dropped with the server. Raw JSON is never kept, only the parsed graph. */
+  private heapSnapshots = new Map<string, HeapSnapshot>()
   private axTreeCache = new AxTreeCache()
   private portStates = new Map<number, PortState>()
   private token = ''
@@ -245,6 +249,7 @@ export class AgentViewServer {
     dialog: (req: ServerRequest) => this.handleDialog(req),
     coverage: (req: ServerRequest) => this.handleCoverage(req),
     listeners: (req: ServerRequest) => this.handleListeners(req),
+    heap: (req: ServerRequest) => this.handleHeap(req),
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
@@ -1039,6 +1044,82 @@ export class AgentViewServer {
     })
     if (argBool(req.args, 'count')) return { ok: true, data: String(result.functions) }
     return { ok: true, data: result.text }
+  }
+
+  /**
+   * Memory growth between named snapshots. `take` parses the snapshot inside
+   * the server and keeps only the graph, so the multi-hundred-MB JSON never
+   * reaches the CLI. `diff` without names compares the two most recent.
+   */
+  private async handleHeap(req: ServerRequest): Promise<ServerResponse> {
+    const action = argStr(req.args, 'action')
+    const listOptions = () => ({
+      filter: argStr(req.args, 'filter'),
+      detached: argBool(req.args, 'detached'),
+      maxLines: argNum(req.args, 'maxLines'),
+    })
+
+    switch (action) {
+      case 'take': {
+        const target = await this.resolveTarget(req)
+        const conn = await this.getRuntimeSession(req, target)
+        const name = argStr(req.args, 'name') ?? this.freeHeapSnapshotName()
+        const json = await conn.takeHeapSnapshot()
+        const label = `${target.type}:${target.title || target.url}`
+        const snapshot = parseHeapSnapshot(json, name, label)
+        // Re-taking a name moves it to the end: "most recent" is insertion order, and `diff` defaults to the last two.
+        this.heapSnapshots.delete(name)
+        this.heapSnapshots.set(name, snapshot)
+        return { ok: true, data: describeSnapshot(snapshot) }
+      }
+      case 'summary':
+        return { ok: true, data: formatSummary(this.pickHeapSnapshot(argStr(req.args, 'name')), listOptions()) }
+      case 'diff': {
+        const names = argStrArray(req.args, 'names') ?? [...this.heapSnapshots.keys()].slice(-2)
+        if (names.length < 2) {
+          return { ok: false, error: 'heap diff needs two snapshots. Run `agent-view heap take` twice, or name them: `heap diff <a> <b>`.' }
+        }
+        const [a, b] = names.map((n) => this.pickHeapSnapshot(n))
+        return { ok: true, data: formatDiff(a, b, listOptions()) }
+      }
+      case 'retainers': {
+        const cls = argStr(req.args, 'class')
+        if (!cls) return { ok: false, error: 'heap retainers requires a class name, as printed by `heap diff`' }
+        const snapshot = this.pickHeapSnapshot(argStr(req.args, 'name'))
+        return { ok: true, data: formatRetainers(snapshot, cls, listOptions()) }
+      }
+      case 'list':
+        return { ok: true, data: formatList([...this.heapSnapshots.values()]) }
+      case 'clear': {
+        const n = this.heapSnapshots.size
+        this.heapSnapshots.clear()
+        return { ok: true, data: `Dropped ${n} heap snapshot${n === 1 ? '' : 's'}` }
+      }
+      default:
+        return { ok: false, error: `Unknown heap action: ${action}` }
+    }
+  }
+
+  /** `s1`, `s2`, … skipping names already taken by hand. */
+  private freeHeapSnapshotName(): string {
+    for (let i = this.heapSnapshots.size + 1; ; i++) {
+      if (!this.heapSnapshots.has(`s${i}`)) return `s${i}`
+    }
+  }
+
+  /** Named snapshot, or the most recent one. Throws the user-facing error; the dispatcher turns it into `{ ok: false }`. */
+  private pickHeapSnapshot(name: string | undefined): HeapSnapshot {
+    if (name === undefined) {
+      const last = [...this.heapSnapshots.values()].at(-1)
+      if (!last) throw new Error('No heap snapshots taken. Run `agent-view heap take` first.')
+      return last
+    }
+    const found = this.heapSnapshots.get(name)
+    if (!found) {
+      const taken = [...this.heapSnapshots.keys()].map(k => `"${k}"`).join(', ') || 'none'
+      throw new Error(`No heap snapshot named "${name}". Taken: ${taken}.`)
+    }
+    return found
   }
 
   /** Which handlers are wired to a node, and where each was declared. */
@@ -1995,12 +2076,6 @@ function formatIdleFeed(file: string): string {
     `size       ${formatBytes(stats.size)}, last write ${localStamp(stats.mtimeMs)}`,
     'start with `agent-view logs start` — `logs tail` still reads the existing feed',
   ].join('\n')
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function formatElapsed(ms: number): string {
