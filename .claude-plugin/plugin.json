@@ -1,7 +1,7 @@
 {
   "name": "agent-view",
   "description": "Visual verification CLI for Electron/Tauri/Chromium apps via Chrome DevTools Protocol. Ships with verify skill for easy and cheap checks against a live app, including heap-snapshot memory-leak debugging.",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "keywords": [
     "cdp",
     "electron",
