@@ -59,7 +59,25 @@ export type DragOpts = {
   button?: MouseButton
   /** Pause between `mousePressed` and the first `mouseMoved`, in ms. Some libs require >100ms. */
   holdMs?: number
+  /** `auto` (default): HTML5 drag if Chromium starts one, else pointer. `html5`: fail if it does not. `pointer`: never intercept. */
+  mode?: DragMode
+  /** HTML5 only: finish with `dragCancel` instead of `drop`. */
+  cancel?: boolean
+  /** HTML5 only: override `dragOperationsMask` (diagnostics). */
+  mask?: number
 }
+
+export type DragMode = 'auto' | 'html5' | 'pointer'
+
+/** CDP `Input.DragData`, as delivered by `Input.dragIntercepted`. */
+export type DragData = {
+  items: Array<{ mimeType: string; data: string }>
+  dragOperationsMask: number
+}
+
+export type DragResult =
+  | { path: 'html5'; ended: 'drop' | 'dragCancel'; data: DragData }
+  | { path: 'pointer'; warning?: string }
 
 export type Point = { x: number; y: number }
 
@@ -266,8 +284,8 @@ export type PageSession = RuntimeSession & {
    * the text line, not the container it lives in.
    */
   getBoxRect: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean; ancestorLevels?: number }) => Promise<ScreenshotClip>
-  /** CDP-level mouse drag: press → N × move → release. */
-  dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<void>
+  /** CDP-level drag. Reports whether Chromium turned it into an HTML5 drag and what payload it carried. */
+  dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<DragResult>
 }
 
 export type AXNode = {

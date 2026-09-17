@@ -771,14 +771,21 @@ export class AgentViewServer {
       steps: argNum(req.args, 'steps'),
       button: parseMouseButton(argStr(req.args, 'button')),
       holdMs: argNum(req.args, 'holdMs'),
+      mode: argStr(req.args, 'mode') as DragOpts['mode'],
+      cancel: argBool(req.args, 'cancel'),
+      mask: argNum(req.args, 'mask'),
     }
 
-    await conn.dragBetweenPositions(from.point, to.point, opts)
+    const result = await conn.dragBetweenPositions(from.point, to.point, opts)
     this.axTreeCache.invalidate(cacheKey)
-    return {
-      ok: true,
-      data: `Dragged (${from.point.x.toFixed(0)}, ${from.point.y.toFixed(0)}) → (${to.point.x.toFixed(0)}, ${to.point.y.toFixed(0)})`,
+    const head = `Dragged (${from.point.x.toFixed(0)}, ${from.point.y.toFixed(0)}) → (${to.point.x.toFixed(0)}, ${to.point.y.toFixed(0)})`
+    if (result.path === 'pointer') {
+      const warning = result.warning ? `\n  warning: ${result.warning}` : ''
+      return { ok: true, data: `${head} via pointer${warning}` }
     }
+    const items = result.data.items.map(i => `  ${i.mimeType}: ${JSON.stringify(i.data.length > 200 ? i.data.slice(0, 200) + '…' : i.data)}`)
+    const summary = `${head} via html5 ${result.ended} (dragOperationsMask=${result.data.dragOperationsMask})`
+    return { ok: true, data: [summary, ...items].join('\n') }
   }
 
   private async resolveDragPoint(

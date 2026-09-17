@@ -23,6 +23,8 @@ import {
   type ConsoleMessage,
   type EvaluateOpts,
   type DragOpts,
+  type DragData,
+  type DragResult,
   type ClickOpts,
   type Point,
   type NetworkEvent,
@@ -156,6 +158,13 @@ type NetworkSubscription = {
   add: (handler: (ev: NetworkEvent) => void) => () => void
   enable: () => Promise<void>
   getResponseBody: (requestId: string) => Promise<{ body: string; base64Encoded: boolean }>
+}
+
+type InputDomain = {
+  dispatchMouseEvent: (p: Record<string, unknown>) => Promise<unknown>
+  dispatchDragEvent: (p: Record<string, unknown>) => Promise<unknown>
+  setInterceptDrags: (p: { enabled: boolean }) => Promise<unknown>
+  dragIntercepted: (cb: (p: { data: DragData }) => void) => () => void
 }
 
 type RawCDPClient = {
@@ -972,6 +981,10 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   }
 }
 
+const DRAG_INTERCEPT_TIMEOUT_MS = 1000
+const DRAG_NOT_INTERCEPTED =
+  'no HTML5 drag started (Input.dragIntercepted not fired within 1 s): the element at --from is not draggable, or a control (input/select/button) under the cursor swallowed dragstart'
+
 export async function connectToPage(
   port: number,
   target: TargetInfo,
@@ -989,7 +1002,7 @@ export async function connectToPage(
     Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
     Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
     DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown> }
-    Input: { dispatchMouseEvent: (p: Record<string, unknown>) => Promise<unknown> }
+    Input: InputDomain
     DOMDebugger: DOMDebuggerDomain
   }
   const DOMDebugger = (client as RawCDPClient & { DOMDebugger: DOMDebuggerDomain }).DOMDebugger
@@ -1055,22 +1068,62 @@ export async function connectToPage(
     }
   }
 
-  async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<void> {
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+  async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<DragResult> {
     const steps = Math.max(0, opts?.steps ?? 10)
     const button = opts?.button ?? MouseButton.Left
     const holdMs = Math.max(0, opts?.holdMs ?? 0)
-
-    await Input.dispatchMouseEvent({ type: 'mousePressed', x: from.x, y: from.y, button, clickCount: 1 })
-    if (holdMs > 0) await new Promise(r => setTimeout(r, holdMs))
-
-    for (let i = 1; i <= steps; i++) {
+    const mode = opts?.mode ?? 'auto'
+    const at = (i: number): Point => {
       const t = i / (steps + 1)
-      const x = from.x + (to.x - from.x) * t
-      const y = from.y + (to.y - from.y) * t
-      await Input.dispatchMouseEvent({ type: 'mouseMoved', x, y, button })
+      return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }
     }
-    await Input.dispatchMouseEvent({ type: 'mouseMoved', x: to.x, y: to.y, button })
-    await Input.dispatchMouseEvent({ type: 'mouseReleased', x: to.x, y: to.y, button, clickCount: 1 })
+
+    // With interception on, Chromium reports a starting HTML5 drag as `Input.dragIntercepted`
+    // instead of showing the native drag image; after that only `dispatchDragEvent` reaches the page.
+    let intercepted: DragData | undefined
+    const unsub = mode === 'pointer' ? undefined : Input.dragIntercepted(({ data }) => { intercepted = data })
+    if (unsub) await Input.setInterceptDrags({ enabled: true })
+    try {
+      await Input.dispatchMouseEvent({ type: 'mouseMoved', x: from.x, y: from.y })
+      await Input.dispatchMouseEvent({ type: 'mousePressed', x: from.x, y: from.y, button, clickCount: 1 })
+      if (holdMs > 0) await sleep(holdMs)
+
+      // Chromium starts an HTML5 drag only after several mouseMoved past its threshold; the
+      // pause between them is what lets the renderer process each one.
+      let i = 1
+      for (; i <= steps + 1 && !intercepted; i++) {
+        const p = at(i)
+        await Input.dispatchMouseEvent({ type: 'mouseMoved', x: p.x, y: p.y, button })
+        if (unsub) await sleep(20)
+      }
+      if (unsub && !intercepted) {
+        const deadline = Date.now() + DRAG_INTERCEPT_TIMEOUT_MS
+        while (!intercepted && Date.now() < deadline) await sleep(50)
+      }
+
+      if (intercepted) {
+        const data = opts?.mask === undefined ? intercepted : { ...intercepted, dragOperationsMask: opts.mask }
+        const ended = opts?.cancel ? 'dragCancel' : 'drop'
+        await Input.dispatchDragEvent({ type: 'dragEnter', x: at(i - 1).x, y: at(i - 1).y, data })
+        for (; i <= steps + 1; i++) {
+          const p = at(i)
+          await Input.dispatchDragEvent({ type: 'dragOver', x: p.x, y: p.y, data })
+          await sleep(20)
+        }
+        await Input.dispatchDragEvent({ type: ended, x: to.x, y: to.y, data })
+        await Input.dispatchMouseEvent({ type: 'mouseReleased', x: to.x, y: to.y, button, clickCount: 1 })
+        return { path: 'html5', ended, data }
+      }
+
+      await Input.dispatchMouseEvent({ type: 'mouseReleased', x: to.x, y: to.y, button, clickCount: 1 })
+      if (mode === 'html5') throw new Error(DRAG_NOT_INTERCEPTED)
+      return { path: 'pointer', warning: unsub ? DRAG_NOT_INTERCEPTED : undefined }
+    } finally {
+      unsub?.()
+      if (unsub) await Input.setInterceptDrags({ enabled: false })
+    }
   }
 
   async function scrollNodeIntoView(backendNodeId: number): Promise<void> {
@@ -1269,8 +1322,8 @@ export async function connectToPage(
       return resolveBoxRect(nodeId, opts?.scrollIntoView ?? true)
     },
 
-    async dragBetweenPositions(from: Point, to: Point, opts?: DragOpts): Promise<void> {
-      await dispatchDrag(from, to, opts)
+    async dragBetweenPositions(from: Point, to: Point, opts?: DragOpts): Promise<DragResult> {
+      return dispatchDrag(from, to, opts)
     },
 
     async uploadByNodeId(backendNodeId: number, files: string[]): Promise<void> {

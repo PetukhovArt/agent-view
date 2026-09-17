@@ -148,7 +148,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 |---------------|-----------------------------------------------------------------------------------------|
 | `dom`         | Accessibility tree with `[ref=N]` handles. Flags: `--filter`, `--compact`, `--count`, `--max-lines`, `--diff`. |
 | `screenshot`  | PNG, or scaled WebP, or `--crop <element>` for one element only. Cuts vision tokens.    |
-| `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native and HTML5/pointer DnD. |
+| `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native; `drag` does HTML5 DnD through `Input.dragIntercepted` and pointer DnD through mouse events. |
 | `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
@@ -391,16 +391,37 @@ agent-view fill 3 "hello@example.com"
 
 ### `drag`
 
-HTML5 / pointer-driven drag-and-drop via CDP `Input.dispatchMouseEvent` (`mousePressed` → N × `mouseMoved` → `mouseReleased`). Real mouse events, not synthesized JS events; works with `vue-draggable-resizable`, `react-grid-layout`, gridstack, kanban boards, file drop zones, map pin drags, resize handles.
+Drag-and-drop over CDP. Two paths, picked automatically:
+
+- **HTML5** (`draggable=true`, `dragstart`/`dragover`/`drop`). Plain mouse events never start one in Chromium: `dragstart` does not fire, `dataTransfer` stays empty, `drop` never arrives. So `drag` enables `Input.setInterceptDrags`, presses and moves, and when Chromium reports `Input.dragIntercepted` it finishes the gesture with `Input.dispatchDragEvent` (`dragEnter` → N × `dragOver` → `drop`), carrying the app's real `dataTransfer` payload. The same mechanism Puppeteer uses.
+- **Pointer** (`mousedown`/`mousemove`/`mouseup`, pointer events). Used when no `dragIntercepted` arrives within 1 s: `vue-draggable-resizable`, `react-grid-layout`, gridstack, canvas, resize handles.
 
 ```bash
 agent-view drag --from 42 --to 88                   # ref → ref
 agent-view drag --from-pos 86,792 --to-pos 640,200  # coord → coord (canvas, custom DnD)
 agent-view drag --from 42 --to-pos 640,200          # mixed
 agent-view drag --from 5 --to 9 --steps 20 --hold-ms 150
+agent-view drag --from-pos 385,303 --to-pos 1250,589 --cancel   # HTML5: dragCancel instead of drop (Esc mid-drag)
+agent-view drag --from-pos 385,303 --to-pos 1250,589 --html5    # fail instead of falling back to pointer
+agent-view drag --from-pos 385,303 --to-pos 1250,589 --pointer  # never intercept
 ```
 
-`--steps` (default 10) controls intermediate `mouseMoved` events so libraries that throttle on movement deltas still see continuous motion. `--hold-ms` inserts a pause between press and the first move (some libs require >100ms for touch-style activation). `--button` accepts `left|right|middle`.
+The output names the path and, for HTML5, the intercepted MIME types and data — check that the payload is the app's (`application/json`, a custom type), not a text selection:
+
+```
+Dragged (385, 303) → (1250, 589) via html5 drop (dragOperationsMask=3)
+  text/plain: "1:hr:4100@UInt16"
+  application/json: "[{\"id\":\"1:hr:4100@UInt16\",\"name\":\"Float HiLo\",...}]"
+```
+
+```
+Dragged (485, 140) → (1250, 589) via pointer
+  warning: no HTML5 drag started (Input.dragIntercepted not fired within 1 s): the element at --from is not draggable, or a control (input/select/button) under the cursor swallowed dragstart
+```
+
+Pitfalls of the HTML5 path: start on a cell without a control — an `<input>`, `<select>` or `<button>` under the cursor swallows `dragstart` even inside a `draggable` row; Chromium needs several `mouseMoved` past its drag threshold, so `--steps 0` will not start one. `--mask <n>` overrides `dragOperationsMask` on the dispatched events — diagnostics for `effectAllowed` / `dropEffect` mismatches, which the browser enforces only on a real drag.
+
+`--steps` (default 10) controls intermediate `mouseMoved` / `dragOver` events so libraries that throttle on movement deltas still see continuous motion. `--hold-ms` inserts a pause between press and the first move (some libs require >100ms for touch-style activation). `--button` accepts `left|right|middle`.
 
 ### `upload`
 

@@ -105,7 +105,7 @@ program
 
 program
   .command('drag')
-  .description('Drag from one point to another via CDP mouse events (HTML5/pointer DnD)')
+  .description('Drag from one point to another via CDP: HTML5 DnD when the source is draggable, pointer drag otherwise')
   .option('--from <ref>', 'Source element by ref from `dom`')
   .option('--to <ref>', 'Target element by ref from `dom`')
   .option('--from-pos <x,y>', 'Source coordinates (canvas, custom DnD)')
@@ -113,6 +113,10 @@ program
   .option('--steps <n>', 'Intermediate mouseMoved events (default 10)')
   .option('--button <name>', 'Mouse button: left|right|middle (default left)')
   .option('--hold-ms <n>', 'Pause between press and first move, ms (default 0)')
+  .option('--html5', 'Fail unless Chromium starts an HTML5 drag')
+  .option('--pointer', 'Mouse events only, never intercept HTML5 drags')
+  .option('--cancel', 'HTML5: end with dragCancel instead of drop')
+  .option('--mask <n>', 'HTML5: override dragOperationsMask (diagnostics)')
   .option('-w, --window <id>', 'Target window ID or name')
   .action(async (options) => {
     const config = requireConfig()

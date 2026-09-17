@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
 
-const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
+const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
   vi.hoisted(() => {
     const callOrder: string[] = []
 
@@ -34,6 +34,14 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       callOrder.push(`Input.${type}`)
       return Promise.resolve({})
     })
+
+    // Captures the `Input.dragIntercepted` listener so a test can fire it mid-drag.
+    const dragHook: { fire?: (params: { data: unknown }) => void } = {}
+    const mockDispatchDrag = vi.fn().mockImplementation(({ type }: { type: string }) => {
+      callOrder.push(`Drag.${type}`)
+      return Promise.resolve({})
+    })
+    const mockSetInterceptDrags = vi.fn().mockResolvedValue({})
 
     const mockCaptureScreenshot = vi.fn().mockResolvedValue({ data: '' })
     const mockGetLayoutMetrics = vi.fn().mockResolvedValue({
@@ -83,7 +91,15 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
         getDocument: vi.fn().mockResolvedValue({ root: { backendNodeId: 1 } }),
         setFileInputFiles: mockSetFileInputFiles,
       },
-      Input: { dispatchMouseEvent: mockDispatchMouse },
+      Input: {
+        dispatchMouseEvent: mockDispatchMouse,
+        dispatchDragEvent: mockDispatchDrag,
+        setInterceptDrags: mockSetInterceptDrags,
+        dragIntercepted: vi.fn().mockImplementation((cb: (params: { data: unknown }) => void) => {
+          dragHook.fire = cb
+          return () => { dragHook.fire = undefined }
+        }),
+      },
       Network: {
         enable: vi.fn().mockResolvedValue({}),
         getResponseBody: vi.fn().mockResolvedValue({ body: '', base64Encoded: false }),
@@ -102,7 +118,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       close: vi.fn().mockResolvedValue({}),
     })
 
-    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
+    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
   })
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
@@ -270,35 +286,31 @@ describe('clickByNodeId', () => {
   })
 })
 
-describe('dragBetweenPositions', () => {
+describe('dragBetweenPositions (pointer mode)', () => {
   beforeEach(() => {
     callOrder.length = 0
     mockDispatchMouse.mockClear()
+    mockSetInterceptDrags.mockClear()
   })
+  const pointer = { mode: 'pointer' as const }
 
-  it('emits press → moves → release in order', async () => {
+  it('emits hover → press → moves → release in order and never intercepts', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 50 }, { steps: 4 })
+    const result = await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 50 }, { steps: 4, ...pointer })
 
     const types = mockDispatchMouse.mock.calls.map((c) => c[0].type)
-    expect(types[0]).toBe('mousePressed')
+    expect(types[0]).toBe('mouseMoved')
+    expect(types[1]).toBe('mousePressed')
     expect(types[types.length - 1]).toBe('mouseReleased')
-    // 4 intermediate + 1 final move = 5 mouseMoved events
-    const moves = types.filter((t) => t === 'mouseMoved')
-    expect(moves).toHaveLength(5)
-  })
-
-  it('default steps = 10 produces 11 mouseMoved events (10 interior + 1 final)', async () => {
-    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 })
-
-    const moves = mockDispatchMouse.mock.calls.filter((c) => c[0].type === 'mouseMoved')
-    expect(moves).toHaveLength(11)
+    // 4 intermediate + 1 final move = 5 mouseMoved events after the press
+    expect(types.slice(2).filter((t) => t === 'mouseMoved')).toHaveLength(5)
+    expect(mockSetInterceptDrags).not.toHaveBeenCalled()
+    expect(result).toEqual({ path: 'pointer' })
   })
 
   it('final mouseReleased lands exactly at the destination', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.dragBetweenPositions({ x: 10, y: 20 }, { x: 200, y: 300 }, { steps: 3 })
+    await conn.dragBetweenPositions({ x: 10, y: 20 }, { x: 200, y: 300 }, { steps: 3, ...pointer })
 
     const release = mockDispatchMouse.mock.calls.find((c) => c[0].type === 'mouseReleased')
     expect(release?.[0].x).toBe(200)
@@ -307,25 +319,115 @@ describe('dragBetweenPositions', () => {
 
   it('intermediate moves interpolate linearly between from and to', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 100 }, { steps: 3 })
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 100 }, { steps: 3, ...pointer })
 
     const moves = mockDispatchMouse.mock.calls
       .filter((c) => c[0].type === 'mouseMoved')
+      .slice(1)
       .map((c) => ({ x: c[0].x, y: c[0].y }))
 
     // steps=3 → t = 1/4, 2/4, 3/4, then final at 1
-    expect(moves[0]).toEqual({ x: 25, y: 25 })
-    expect(moves[1]).toEqual({ x: 50, y: 50 })
-    expect(moves[2]).toEqual({ x: 75, y: 75 })
-    expect(moves[3]).toEqual({ x: 100, y: 100 })
+    expect(moves).toEqual([{ x: 25, y: 25 }, { x: 50, y: 50 }, { x: 75, y: 75 }, { x: 100, y: 100 }])
   })
 
-  it('passes button option through to all dispatched events', async () => {
+  it('passes button option through to press, moves and release', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 50, y: 50 }, { steps: 2, button: 'right' as never })
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 50, y: 50 }, { steps: 2, button: 'right' as never, ...pointer })
 
-    const buttons = new Set(mockDispatchMouse.mock.calls.map((c) => c[0].button))
+    const buttons = new Set(mockDispatchMouse.mock.calls.slice(1).map((c) => c[0].button))
     expect(buttons).toEqual(new Set(['right']))
+  })
+})
+
+describe('dragBetweenPositions (HTML5 auto-detect)', () => {
+  const data = { items: [{ mimeType: 'text/plain', data: 'hr4100' }], dragOperationsMask: 1 }
+
+  beforeEach(() => {
+    callOrder.length = 0
+    mockDispatchMouse.mockReset().mockResolvedValue({})
+    mockDispatchDrag.mockClear()
+    mockSetInterceptDrags.mockClear()
+  })
+
+  // Chromium fires dragIntercepted from inside a mouseMoved, not synchronously with the press.
+  function interceptOnMove(n: number) {
+    let moves = 0
+    mockDispatchMouse.mockImplementation(({ type }: { type: string }) => {
+      if (type === 'mouseMoved' && ++moves === n) dragHook.fire?.({ data })
+      return Promise.resolve({})
+    })
+  }
+
+  it('dragIntercepted after a move → switches to dragEnter/dragOver/drop and stops mouse moves', async () => {
+    interceptOnMove(3)
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const result = await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 }, { steps: 4 })
+
+    expect(result).toEqual({ path: 'html5', ended: 'drop', data })
+    const dragTypes = mockDispatchDrag.mock.calls.map((c) => c[0].type)
+    expect(dragTypes[0]).toBe('dragEnter')
+    expect(dragTypes[dragTypes.length - 1]).toBe('drop')
+    expect(dragTypes.filter((t) => t === 'dragOver').length).toBeGreaterThan(0)
+    // hover + 2 moves before the intercepting one, none after
+    expect(mockDispatchMouse.mock.calls.filter((c) => c[0].type === 'mouseMoved')).toHaveLength(3)
+    const drop = mockDispatchDrag.mock.calls.find((c) => c[0].type === 'drop')?.[0]
+    expect(drop).toMatchObject({ x: 100, y: 0, data })
+    expect(mockSetInterceptDrags.mock.calls.map((c) => c[0].enabled)).toEqual([true, false])
+    expect(mockDispatchMouse.mock.calls.at(-1)?.[0].type).toBe('mouseReleased')
+  })
+
+  it('--cancel ends the HTML5 drag with dragCancel, not drop', async () => {
+    interceptOnMove(2)
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const result = await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 }, { steps: 2, cancel: true })
+
+    expect(result).toMatchObject({ path: 'html5', ended: 'dragCancel' })
+    const dragTypes = mockDispatchDrag.mock.calls.map((c) => c[0].type)
+    expect(dragTypes.at(-1)).toBe('dragCancel')
+    expect(dragTypes).not.toContain('drop')
+  })
+
+  it('--mask overrides dragOperationsMask on every drag event', async () => {
+    interceptOnMove(2)
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 }, { steps: 1, mask: 4 })
+
+    const masks = new Set(mockDispatchDrag.mock.calls.map((c) => c[0].data.dragOperationsMask))
+    expect(masks).toEqual(new Set([4]))
+  })
+
+  it('dragIntercepted never fires → pointer drag completes with a warning and interception is switched off', async () => {
+    vi.useFakeTimers()
+    try {
+      const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+      const pending = conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 }, { steps: 2 })
+      await vi.runAllTimersAsync()
+      const result = await pending
+
+      expect(result.path).toBe('pointer')
+      expect((result as { warning?: string }).warning).toMatch(/not draggable/)
+      expect(mockDispatchDrag).not.toHaveBeenCalled()
+      expect(mockDispatchMouse.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'mouseReleased', x: 100 })
+      expect(mockSetInterceptDrags.mock.calls.map((c) => c[0].enabled)).toEqual([true, false])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('mode html5 + no dragIntercepted → rejects with the not-draggable error after releasing the mouse', async () => {
+    vi.useFakeTimers()
+    try {
+      const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+      const pending = conn.dragBetweenPositions({ x: 0, y: 0 }, { x: 100, y: 0 }, { steps: 1, mode: 'html5' })
+      pending.catch(() => {})
+      await vi.runAllTimersAsync()
+
+      await expect(pending).rejects.toThrow(/not draggable/)
+      expect(mockDispatchMouse.mock.calls.at(-1)?.[0].type).toBe('mouseReleased')
+      expect(mockSetInterceptDrags.mock.calls.at(-1)?.[0]).toEqual({ enabled: false })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

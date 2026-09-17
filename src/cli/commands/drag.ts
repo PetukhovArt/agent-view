@@ -9,6 +9,10 @@ export type DragOptions = {
   steps?: string
   button?: string
   holdMs?: string
+  html5?: boolean
+  pointer?: boolean
+  cancel?: boolean
+  mask?: string
   window?: string
 }
 
@@ -42,6 +46,21 @@ export async function runDrag(config: AgentViewConfig, options: DragOptions): Pr
     args.holdMs = n
   }
 
+  if (options.html5 && options.pointer) {
+    console.error('--html5 and --pointer are mutually exclusive')
+    process.exit(1)
+  }
+  if (options.html5) args.mode = 'html5'
+  if (options.pointer) args.mode = 'pointer'
+  if (options.cancel) args.cancel = true
+  if (options.mask !== undefined) {
+    const n = parseInt(options.mask, 10)
+    if (isNaN(n) || n < 0) {
+      console.error(`Invalid --mask: "${options.mask}"`)
+      process.exit(1)
+    }
+    args.mask = n
+  }
   if (options.window) args.window = options.window
 
   const response = await sendCommand({

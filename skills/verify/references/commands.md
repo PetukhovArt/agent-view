@@ -59,9 +59,16 @@ agent-view fill <ref> "text"            # Type into input field
 agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
 agent-view drag --from-pos 50,80 --to-pos 200,300  # Drag by coordinates (for canvas / Pixi)
 agent-view drag --from <ref> --to <ref> --steps 25 --hold-ms 60  # Smoother movement, longer hold
+agent-view drag --from-pos 385,303 --to-pos 1250,589 --cancel  # HTML5: dragCancel instead of drop
+agent-view drag --from-pos 385,303 --to-pos 1250,589 --html5   # Fail unless an HTML5 drag started
 ```
 
-`drag` dispatches `mousePressed` → N × `mouseMoved` → `mouseReleased` via CDP. Endpoints can mix
+`drag` presses and moves via CDP; if Chromium starts an HTML5 drag (`draggable=true`) it takes it
+over with `Input.dispatchDragEvent` and drops with the app's real `dataTransfer`, otherwise it is a
+plain pointer drag. The first output line says which: `via html5 drop` followed by one line per
+MIME type (`application/json: "..."`) — check the payload is the app's, not a text selection — or
+`via pointer` with a warning when no HTML5 drag started. Start HTML5 drags on a cell without a
+control: an input/select/button under the cursor swallows `dragstart`. Endpoints can mix
 ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targets always use
 `--from-pos`/`--to-pos` — derive the centroid via `agent-view eval` from the scene graph.
 Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.

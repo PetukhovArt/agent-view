@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `agent-view drag` now performs real HTML5 drag-and-drop. Mouse events alone never start one in Chromium — `dragstart` does not fire and `drop` never arrives — so the README's "HTML5/pointer DnD" claim was false and verifiers were passing on synthetic DOM events. `drag` enables `Input.setInterceptDrags`, presses and moves, and when `Input.dragIntercepted` arrives it finishes with `Input.dispatchDragEvent` (`dragEnter` → `dragOver` × N → `drop`) carrying the app's real `dataTransfer`. No event within 1 s → the pointer drag completes as before, with a warning. Output names the path and, for HTML5, each intercepted MIME type with its data, so a verifier can see the drag carried the app's payload.
+- New flags: `--cancel` (end with `dragCancel`), `--html5` (fail instead of falling back), `--pointer` (never intercept), `--mask <n>` (override `dragOperationsMask`, for `effectAllowed`/`dropEffect` diagnostics).
+- `drag` now hovers the source before pressing, on both paths.
+
 ## [0.15.0] - 2026-09-09
 
 Memory. Every command so far reads what the app is or what it ran; none reads what it keeps.
