@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.17.0] - 2026-09-23
 
 ### Added
 - Test ids. `dom` prints `[testid=…]` next to the ref of every accessibility-tree node that carries one. Unnamed wrappers with a test id are now printed too, because component libraries put the id on the wrapper. Test ids are often set through props, so the live DOM is the only place to read them. `click`, `fill`, `wait` and `screenshot` take `--testid <id>`. A test id survives HMR, navigation and copy changes; a ref and a text filter do not. The new config field `testIdAttribute` names the attribute. Without it, `data-testid`, `data-test-id`, `data-test`, `data-qa` and `data-cy` are all read.
