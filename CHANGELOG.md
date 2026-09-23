@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- The plugin ships the `act-decider` agent: a Sonnet subagent at low effort that drives one scenario through `act` from a goal and a done condition, and saves it for `act replay`. Before, it lived only in a local `~/.claude/agents`.
+
 ## [0.17.0] - 2026-09-23
 
 ### Added

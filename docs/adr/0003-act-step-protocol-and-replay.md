@@ -18,7 +18,7 @@ A server-side **Act Session** per CDP port, driven over the CLI:
 - Done is checked by agent-view, never taken from the model.
 - The run is recorded by test id, else role + name — never by row number — and `act save` / `start --save` writes it as JSON. `act replay` re-runs it inside the server with no model: each step waits only for its own control, then acts. Exit 0 DONE, 1 FAIL (until never came, or a control stayed disabled or covered), 3 STALE (a control is gone — re-record), 2 when the replay could not run.
 
-The **Decider** — whatever turns a table into `op n [text]` — is not part of agent-view. The first one is a Claude Code subagent (`act-decider`); later a dedicated calibrator can take its place without changing the protocol.
+The **Decider** — whatever turns a table into `op n [text]` — is not part of agent-view. The first one is a Claude Code subagent shipped with the plugin (`agents/act-decider.md`); later a dedicated calibrator can take its place without changing the protocol.
 
 ## Alternatives
 
