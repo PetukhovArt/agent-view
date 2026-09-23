@@ -104,9 +104,8 @@ called "actually fine, here's why". A failed `Expected:` line is FAIL.
 These heuristics catch real bugs. Skipping them is how a run silently passes while the bug sits in plain sight in the
 same data:
 
-1. **A failed expectation is FAIL.** If output disagrees with what the step expected, mark `fail` and continue. Do not
-   soften the expectation. Do not invent prose explanations inline ("label reuse",
-   "convention", "arithmetic off"). Justifications belong in the bug report after the run, never in the per-step log.
+1. **A failed expectation is FAIL.** If output disagrees with what the step expected, mark `fail` and continue, with
+   the expectation unchanged. Explanations belong in the bug report after the run, not in the per-step log.
 
 2. **UI-vs-model mismatch is the bug, not noise.** When a count or hierarchy check returns
    `match: false`, the default hypothesis is that the UI renderer is wrong. Before reaching for "the filter matched
@@ -134,7 +133,7 @@ same data:
    "global X doesn't exist" / "the host doesn't expose Y", run `agent-view eval "typeof window.X"`
    and report the literal result (`"undefined"` / `"object"` / `"function"`). DOM scraping cannot answer this — globals
    are not in the AX tree. If it returns `"undefined"` the API really is absent from the main world; anything else means
-   the API is reachable and your earlier conclusion was wrong. No exceptions, no "I checked the source code instead".
+   the API is reachable and your earlier conclusion was wrong.
 
 ## Verification Workflow
 
@@ -143,20 +142,10 @@ if you need `--window`.
 
 ### Ad-hoc mode (standalone)
 
-After making code changes:
-
-1. **Determine affected areas** from `git diff` — every changed file that renders or drives UI needs at least one check.
-2. **Ensure the app is running**: `agent-view launch` (or `agent-view discover`).
-3. **Inspect DOM**: `agent-view dom --filter "<area>" --depth 2` — structure matches expectations.
-4. **Interact**: `agent-view click`/`fill` → `agent-view dom --filter` to verify the state changed.
-5. **For canvas apps**: `agent-view scene --diff`.
-6. **For non-DOM truth** (store, computed values, worker state): `agent-view eval`.
-7. **Before claiming code is unreachable**: `agent-view coverage --clear` → the action →
-   `agent-view coverage --file "<file>"`. Reading the diff is not evidence either way; an empty result narrows the claim
-   to "this action does not reach it".
-8. **After any interaction that could fail silently**: `agent-view console --level error` — catches uncaught exceptions,
-   network failures, framework warnings.
-9. **Screenshot last, for visual confirm only**: `agent-view screenshot --scale 0.5`.
+After code changes, every file in `git diff` that renders or drives UI gets at least one check, picked from the table
+above (`agent-view launch` or `discover` first if the app is not up). After an interaction that could fail silently,
+read `console --level error`. A screenshot comes last, as visual confirmation only. "Unreachable" is claimed only from
+`coverage`, never from reading the diff; an empty result means "this action does not reach it".
 
 ### Scenario mode (from a plan)
 
