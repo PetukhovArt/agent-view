@@ -13,10 +13,10 @@ A cheap model can pick "which control next" if every call answers with a small n
 
 A server-side **Act Session** per CDP port, driven over the CLI:
 
-- `act start --until-testid <id>` prints a **Control Table** — visible interactive controls, numbered, with role, name, value, states and test id; password values masked.
+- `act start --until-testid <id>` (or `--until-selector`, exactly one — a run without a done condition is refused) prints a **Control Table** — visible interactive controls and named `alert`/`status` notices, numbered, with role, name, value, states and test id; password values masked.
 - Each **Act Step** (`act click|type|select|drag|scroll|do …`) is one CLI call that re-snapshots, maps row n from the last printed table (stale guard: same node, else unique role|name|testid match, else BLOCKED), hit-tests, acts, settles by polling instead of sleeping, checks the until condition, and prints DONE or the next table.
 - Done is checked by agent-view, never taken from the model.
-- The run is recorded by test id, else role + name — never by row number — and `act save` / `start --save` writes it as JSON. `act replay` re-runs it inside the server with no model: each step waits only for its own control, then acts. Exit 0 DONE, 1 FAIL (until never came), 3 STALE (a control is gone — re-record).
+- The run is recorded by test id, else role + name — never by row number — and `act save` / `start --save` writes it as JSON. `act replay` re-runs it inside the server with no model: each step waits only for its own control, then acts. Exit 0 DONE, 1 FAIL (until never came, or a control stayed disabled or covered), 3 STALE (a control is gone — re-record), 2 when the replay could not run.
 
 The **Decider** — whatever turns a table into `op n [text]` — is not part of agent-view. The first one is a Claude Code subagent (`act-decider`); later a dedicated calibrator can take its place without changing the protocol.
 
@@ -31,5 +31,5 @@ The **Decider** — whatever turns a table into `op n [text]` — is not part of
 - Measured on the same two scenarios: a Sonnet 5 decider (`effort: low`) 9.7 s / $0.044 for the widget; replay 0.6–1.2 s widget, 1.8–2.0 s login (0.1–0.2 s of it ours, the rest the app), $0.
 - Harness overhead dominates a subagent decider: an auto-mode permission classifier added 2–4 s per Bash call; Haiku 4.5 cannot turn thinking off (~3 s per turn). The decider definition therefore pins Sonnet at low effort.
 - A recording captures the state it started from: fields already filled and toggles already open are not replayed. STALE is the signal to re-record, not a bug to patch in the script.
-- Pointer-only elements (a `div` with a pointer handler and no role) join the table as `item` rows only when they carry a test id and `cursor: pointer`; untagged ones stay invisible to a decider.
+- Pointer-only elements (a `div` with a pointer handler and no role) join the table as `item` rows only when they carry a test id and `cursor: pointer` and do not sit inside a control (`cursor` is inherited); untagged ones stay invisible to a decider.
 - New state on the server (`PortState.act`) and a second server port option (`AGENT_VIEW_SERVER_PORT`, with a per-port token file) so a dev build can run beside the installed one.

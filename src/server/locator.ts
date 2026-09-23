@@ -16,12 +16,13 @@ export type Locator = { css: string; label: string }
 
 export function locatorFromArgs(args: Record<string, unknown>): Locator | undefined {
   const { testid, selector, testIdAttribute } = args
-  if (typeof testid === 'string') {
-    const value = `"${testid.replace(/["\\]/g, '\\$&')}"`
-    const attributes = testIdAttributes(typeof testIdAttribute === 'string' ? testIdAttribute : undefined)
-    return { css: attributes.map(attr => `[${attr}=${value}]`).join(','), label: `testid "${testid}"` }
-  }
+  if (typeof testid === 'string') return testIdLocator(testid, typeof testIdAttribute === 'string' ? testIdAttribute : undefined)
   return typeof selector === 'string' ? { css: selector, label: `selector "${selector}"` } : undefined
+}
+
+export function testIdLocator(testid: string, testIdAttribute: string | undefined): Locator {
+  const value = `"${testid.replace(/["\\]/g, '\\$&')}"`
+  return { css: testIdAttributes(testIdAttribute).map(attr => `[${attr}=${value}]`).join(','), label: `testid "${testid}"` }
 }
 
 /**

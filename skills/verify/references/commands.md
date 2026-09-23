@@ -174,7 +174,8 @@ agent-view wait --testid order-saved                # until an element with this
 agent-view wait --selector ".toast.success"         # until a selector match is visible
 ```
 
-Exits as soon as the element appears; exits non-zero on timeout — so `&&` after it is a real gate.
+Exactly one of `--filter`, `--testid`, `--selector`. Exits as soon as the element appears; exits
+non-zero on timeout — so `&&` after it is a real gate.
 A mounted but hidden match (`v-show`, `display:none`, `visibility:hidden`) does not end a
 `--testid` / `--selector` wait. On timeout the error says whether nothing matched or every match
 was hidden.
@@ -186,12 +187,13 @@ wait fits, poll `dom --filter X --count` with an explicit attempt cap and report
 ### Step protocol (`act`)
 
 For a driver that only ever answers `op n [text]`. Each call acts, waits for the UI to settle,
-checks the done condition, and prints a fresh numbered control table.
+checks the done condition, and prints a fresh numbered control table. The done condition is
+agent-view's to check, never the driver's: `act start` needs exactly one of `--until-testid`,
+`--until-selector`.
 
 ```bash
 agent-view act start --until-testid workspace-root   # new session for this CDP port; prints the table
 agent-view act start --until-selector ".dashboard" --max-steps 20   # budget, default 30
-agent-view act start                    # no until: DONE never fires, the driver decides when to stop
 agent-view act table                    # re-snapshot, print the table
 agent-view act click 3                  # row numbers refer to the LAST printed table
 agent-view act type 1 "admin"           # fill
@@ -205,15 +207,16 @@ agent-view act drag 7 center left       # … near the viewport's left edge; edg
 agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
 agent-view act save login               # writes ~/.agent-view/scratch/login.json, prints the path
 agent-view act start --until-testid x --save login   # same, written automatically on DONE (one turn fewer)
-AGENT_VIEW_SECRET=… agent-view act replay login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE
+AGENT_VIEW_SECRET=… agent-view act replay login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
 ```
 
 Table — interactive controls visible in the viewport, renumbered from 1 on every print, capped at
-150 rows (`… N more below — act scroll down`). A wrapper that boxes a control of its own role
+150 rows (`… N more below — act scroll down`). Named `alert` / `status` nodes (a snackbar) are listed
+too, so the driver sees why a form came back. A field wrapper that boxes a field of its own role
 (Vuetify `v-field` around its input) is folded into the inner one. After the AX rows come `item`
 rows: elements with no interactive role but a test id and computed `cursor: pointer` (a
-`<div @pointerdown>` widget-bar entry), so they can be clicked or dragged. Password values print as
-`••••`, or `empty`:
+`<div @pointerdown>` widget-bar entry), so they can be clicked or dragged; one inside a control is
+that control. Password values print as `••••`, or `empty`:
 
 ```
 act step 2/30 · 14 controls · until testid "workspace-root"
@@ -228,25 +231,41 @@ First line of an op's output:
 | Line | Meaning |
 |---|---|
 | `✓ click [3] button "Войти" · 240ms` | acted and settled; the new table follows |
+| `✓ click [3] button "Войти" · window reloaded · 900ms` | the window reloaded under the action (login); settled on the new document |
 | `✓ drag [7] item "ГИС" testid=nav__widgetbar__item-GisWidget → testid=video-panel right · 310ms` | dragged: `→` names the target and edge |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
 | `BLOCKED: [3] button "Войти" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
 | `BLOCKED: [3] covered by div.overlay testid=spinner` | something else receives the click; fresh table follows, nothing was done |
 | `BLOCKED: step budget 30 exhausted` | `--max-steps` reached |
 
-Errors (non-zero exit): `` run `agent-view act start` first ``, `not a native select — click it`,
-`[n] is a <role>, not a text field` (`type` on a non-text row),
-`act drag <n> [to] [edge] — edge is one of left|right|top|bottom|center`.
+`act wait` runs even after the budget is spent. Errors (non-zero exit):
+
+- `` run `agent-view act start` first ``, `act start --until-testid <id> | --until-selector <css> — exactly one`
+- `No row [n] in the last table (1-N)`
+- `[n] is a <role>, not a text field — pick a textbox/combobox row` (`type` on a non-text row);
+  `No input or textarea at or inside the element` (`type` on a native `<select>` — use `select`)
+- `not a native select — click it`, `No option "x" in [n]`
+- `act do: "…" — each step is click|type|select <n> [text]` (checked before any step runs; a
+  failing step prints the `✓` lines of the ones before it)
+- `act scroll <up|down>`, `act drag <n> [to] [edge] — edge is one of left|right|top|bottom|center`
+
 The saved script names each control by test id, else role + name — never by row number — and
 stores no password. `act replay` runs it inside the server: each step waits (50 ms polls, 10 s cap)
 only for its own control to be on screen, enabled and uncovered, then acts; a window reload
-mid-run is ridden over. Its one line:
+mid-run is ridden over. Its one line, ending in the total time:
 
 | Line | Exit | Meaning |
 |---|---|---|
-| `DONE: replay login · 2 steps · 1.8s (steps 0.1s, then waiting for testid "x")` | 0 | until met |
-| `FAIL: replay login — steps ran, testid "x" not visible after 15s` | 1 | the app did not answer — likely a bug |
-| `STALE: step 2/2 click button "Войти" — not on screen, enabled and uncovered within 10s` | 3 | the script no longer fits the app — re-record it |
+| `DONE: replay login · 2 steps in 0.1s, then testid "x" · 1.8s` | 0 | until met; the steps took 0.1 s, the app the rest |
+| `FAIL: replay login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | the app did not answer — likely a bug |
+| `FAIL: step 2/2 click button "Войти" testid=login-btn — still disabled after 10s · 10.4s` | 1 | the control is there but stayed `disabled` / `covered by …` — likely a bug |
+| `STALE: step 2/2 click button "Войти" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
+| `STALE: step 3/3 drag target testid=video-panel not found · 10.5s` | 3 | same, for a drop target |
+| `STALE: step 1/2 select combobox "Период" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
+| `STALE: step 2/3 click button "Закрыть" — <CDP error> · 0.4s` | 3 | the control vanished between finding and acting |
+
+Exit 2, message on stderr: the replay could not run — `No saved script "x"`, `"x" types a password —
+set AGENT_VIEW_SECRET`, `"x" has no done condition`.
 
 ### Screenshots
 ```bash
@@ -260,7 +279,7 @@ agent-view screenshot --selector ".chart"      # Crop to the first visible selec
 agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
 ```
 
-`--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing. `--testid` / `--selector` crop the same way and take `--crop-up`, but a miss exits 1 instead: an exact address that misses is a wrong address, and a full-window capture would spend ~19k tokens on it.
+`--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing. `--testid` / `--selector` crop the same way and take `--crop-up`, but a miss exits 1 instead: an exact address that misses is a wrong address, and a full-window capture would spend ~19k tokens on it. Pass at most one of `--crop`, `--testid`, `--selector`.
 
 A text filter usually matches the text-bearing node, so cropping on a section title returns a thin strip of that title. `--crop-up <n>` climbs `n` element ancestors before cropping — use `1` (sometimes `2`) to get the surrounding card/section. When a crop comes back text-sized, the command says so on stderr.
 

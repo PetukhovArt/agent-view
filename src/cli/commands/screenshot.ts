@@ -11,6 +11,11 @@ type ScreenshotOptions = {
 }
 
 export async function runScreenshot(config: AgentViewConfig, options: ScreenshotOptions): Promise<void> {
+  const crops = [options.crop, options.testid, options.selector].filter(f => f !== undefined)
+  if (crops.length > 1) {
+    console.error('Usage: agent-view screenshot [--crop <filter> | --testid <id> | --selector <css>] — at most one')
+    process.exit(1)
+  }
   const args: Record<string, unknown> = { testIdAttribute: config.testIdAttribute }
   if (options.window) args.window = options.window
   if (options.testid !== undefined) args.testid = options.testid

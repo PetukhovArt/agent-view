@@ -24,7 +24,8 @@ read it before your first call in a session.
 | `launch` `discover` `stop` `targets` | start the app; list windows and worker targets                 |
 | `dom`                                | accessibility tree — filter, count, diff, depth cap            |
 | `click` `fill` `drag`                | interaction by ref, text or coordinate; `click` `fill` also by test id or selector |
-| `wait`                               | block until an element appears; non-zero on timeout            |
+| `wait`                               | block until text, a test id or a selector appears; non-zero on timeout |
+| `act`                                | step protocol for a cheap driver: numbered control table, done check, replay |
 | `dialog` `upload`                    | JS modals and native file pickers                              |
 | `screenshot`                         | full window, scaled, or cropped to one element                 |
 | `eval` `watch`                       | state now / state trajectory over time (both need `allowEval`) |
@@ -49,6 +50,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Does `window.X` / a globally-exposed API exist?                  | `eval "typeof window.X"`                                     | DOM doesn't show JS globals; only authoritative check                                       |
 | Acting on an element `dom` shows with `[testid=…]`               | `click` / `fill` / `wait --testid <id>`                      | Survives HMR, navigation and copy changes; a ref and a text filter do not                   |
 | An element that has not rendered yet                             | `wait --filter "<text>"`                                     | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause             |
+| A multi-step UI scenario with a known end state (login, a form)  | `act start --until-testid <id>` … `act replay <name>`        | One call per step with a small table; the done check and the replay need no model           |
 | State *trajectory* — what changed during/after an action         | `watch "expr" --until …` or `--max-changes 1`                | `eval` shows the final snapshot only; `watch` shows the diffs in order                      |
 | Worker logic (SharedWorker / ServiceWorker)                      | `eval --target <name>`                                       | Workers have no DOM at all                                                                  |
 | Did the last action throw or warn?                               | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM                                                |

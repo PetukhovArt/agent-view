@@ -197,7 +197,7 @@ Whatever turns a Control Table into the next Act Step (`op n [text]`). Outside a
 _Avoid_: Driver, Solver, Agent
 
 **Replay**
-A saved Act Session re-run inside the server with no Decider. Ends DONE, FAIL (the app did not reach the done condition) or STALE (a recorded control is gone — the recording no longer fits the app).
+A saved Act Session re-run inside the server with no Decider. Ends DONE, FAIL (the app did not reach the done condition, or a recorded control stayed disabled or covered) or STALE (a recorded control is gone — the recording no longer fits the app).
 _Avoid_: Script Run, Playback
 
 **requires_visual_review**

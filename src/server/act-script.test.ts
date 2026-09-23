@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { edgePoint } from './act-session.js'
+import { edgePoint } from './act-script.js'
 
 describe('edgePoint', () => {
   it('drops inside the right edge strip, not the replace-zone centre', () => {

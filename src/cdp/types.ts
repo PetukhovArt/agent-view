@@ -21,12 +21,15 @@ export type TargetInfo = {
   url: string
 }
 
-export type ScreenshotClip = {
+/** CSS px, viewport-relative. */
+export type Rect = {
   x: number
   y: number
   width: number
   height: number
 }
+
+export type ScreenshotClip = Rect
 
 export type ScreenshotOpts = {
   /** Scale factor (0 < scale ≤ 1), applied in-process after the capture. */
@@ -309,7 +312,7 @@ export type PageSession = RuntimeSession & {
 }
 
 export type LayoutNode = {
-  rect: ScreenshotClip
+  rect: Rect
   tag: string
   attributes: Record<string, string>
   /** Computed `cursor`. */

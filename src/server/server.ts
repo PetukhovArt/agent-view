@@ -1,7 +1,7 @@
 import { createServer, type Server, type Socket } from 'node:net'
 import { writeFile, unlink } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
@@ -41,8 +41,8 @@ import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
 import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
-import { SERVER_PORT, TOKEN_DIR, TOKEN_PATH } from './port.js'
-import { ReloadedAfterAction, isDeadSocket, runAct, type ActSession } from './act-session.js'
+import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
+import { runAct, type ActSession } from './act-session.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -260,7 +260,7 @@ export class AgentViewServer {
 
   async start(): Promise<void> {
     installCDPErrorGuard()
-    mkdirSync(TOKEN_DIR, { recursive: true })
+    mkdirSync(AGENT_VIEW_DIR, { recursive: true })
     this.token = randomBytes(32).toString('hex')
 
     // Publish the token only after winning the port. A server that loses the bind race
@@ -771,32 +771,17 @@ export class AgentViewServer {
   }
 
   private async handleAct(req: ServerRequest): Promise<ServerResponse> {
-    const run = async (args: Record<string, unknown> = req.args) => {
-      const { targetId } = await this.resolveWindow(req)
-      const conn = await this.getPageSession(req, targetId)
-      const cacheKey = `${req.port}:${targetId}`
-      const reconnect = async () => {
+    const { targetId } = await this.resolveWindow(req)
+    const cacheKey = `${req.port}:${targetId}`
+    return runAct(this.stateFor(req.port), req.args, {
+      conn: await this.getPageSession(req, targetId),
+      invalidateAxCache: () => this.axTreeCache.invalidate(cacheKey),
+      // A login that reloads the window kills the cached socket before its disconnect event lands.
+      reconnect: async () => {
         this.dropSessionsForPort(req.port)
         return this.getPageSession(req, (await this.resolveWindow(req)).targetId)
-      }
-      return runAct(this.stateFor(req.port), args, { conn, invalidateAxCache: () => this.axTreeCache.invalidate(cacheKey), reconnect })
-    }
-    try {
-      return await run()
-    } catch (err) {
-      // A login that reloads the window kills the cached socket before its disconnect
-      // event lands. Observing ops are safe to repeat on a fresh one; an action is not,
-      // unless it is known to have gone out — then settle on the new document instead.
-      if (err instanceof ReloadedAfterAction) {
-        this.dropSessionsForPort(req.port)
-        const settled = await run({ ...req.args, op: 'wait' })
-        if (!settled.ok) return settled
-        return { ok: true, data: String(settled.data).replace(/^✓ wait · \d+ms/, `✓ ${err.done} · window reloaded`) }
-      }
-      if (!isDeadSocket(err) || !['start', 'table', 'wait'].includes(String(req.args.op))) throw err
-      this.dropSessionsForPort(req.port)
-      return run()
-    }
+      },
+    })
   }
 
   private async handleDrag(req: ServerRequest): Promise<ServerResponse> {
@@ -1287,8 +1272,11 @@ export class AgentViewServer {
       cropNode = found.backendDOMNodeId
     } else if (cropFilter !== undefined) {
       const found = await this.findByFilter(conn, cropFilter, req, targetId)
-      if (found) cropNode = found.backendDOMNodeId
-      else warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
+      if (found) {
+        cropNode = found.backendDOMNodeId
+      } else {
+        warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
+      }
     }
 
     if (cropNode !== undefined) {

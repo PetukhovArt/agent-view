@@ -37,6 +37,23 @@ describe('extractControls + formatControlTable', () => {
     ])
     expect(extractControls(nodes, snap, ATTRS).map(c => c.name)).toEqual(['Seen'])
   })
+
+  it('folds a field wrapper into its input but keeps a parent treeitem', () => {
+    const big = { x: 0, y: 0, width: 300, height: 100 }
+    const nodes = [ax(1, 'combobox', 'Камера'), ax(2, 'combobox', ''), ax(3, 'treeitem', 'Группа'), ax(4, 'treeitem', 'Камера 1')]
+    const snap = layout([[1, { rect: big }], [2, {}], [3, { rect: { ...big, y: 200 } }], [4, { rect: { ...onScreen, y: 210 } }]])
+    expect(extractControls(nodes, snap, ATTRS).map(c => c.backendDOMNodeId)).toEqual([2, 3, 4])
+  })
+
+  it('lists a tagged pointer div as an item, but not a tagged span inside a button', () => {
+    const nodes = [ax(1, 'button', 'Сохранить')]
+    const snap = layout([
+      [1, { rect: { x: 0, y: 0, width: 200, height: 40 }, cursor: 'pointer' }],
+      [2, { rect: { x: 10, y: 10, width: 50, height: 20 }, cursor: 'pointer', attributes: { 'data-testid': 'save-label' } }],
+      [3, { rect: { x: 0, y: 100, width: 60, height: 60 }, cursor: 'pointer', attributes: { 'data-testid': 'widget-gis', title: 'ГИС' } }],
+    ])
+    expect(extractControls(nodes, snap, ATTRS).map(c => `${c.role} ${c.name}`)).toEqual(['button Сохранить', 'item ГИС'])
+  })
 })
 
 describe('resolveRow', () => {

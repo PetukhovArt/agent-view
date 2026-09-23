@@ -10,8 +10,9 @@ type WaitOptions = {
 }
 
 export async function runWait(config: AgentViewConfig, options: WaitOptions): Promise<void> {
-  if (!options.filter && !options.testid && !options.selector) {
-    console.error('Usage: agent-view wait --filter <text> | --testid <id> | --selector <css> [--timeout <seconds>]')
+  const ways = [options.filter, options.testid, options.selector].filter(f => f !== undefined)
+  if (ways.length !== 1) {
+    console.error('Usage: agent-view wait --filter <text> | --testid <id> | --selector <css> [--timeout <seconds>] — exactly one')
     process.exit(1)
   }
 

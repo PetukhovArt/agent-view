@@ -50,4 +50,6 @@ export type ServerResponse = {
   code?: ServerErrorCode
   /** Non-fatal warning — emit to stderr on the CLI side, still print data. */
   warning?: string
+  /** CLI exit code for data that is a verdict (`act replay`: 0 DONE, 1 FAIL, 3 STALE). */
+  exitCode?: number
 }

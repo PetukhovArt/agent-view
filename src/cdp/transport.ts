@@ -75,6 +75,21 @@ export class CDPTimeoutError extends Error {
   }
 }
 
+/** The socket died under a call — typically the window reloaded (login, logout). A fresh session works. */
+export const isDeadSocket = (err: unknown): boolean =>
+  err instanceof Error && /WebSocket (is not open|connection closed)/.test(err.message)
+
+/** Snapshot rects and screenshots are device pixels; everything else here is CSS pixels. */
+const devicePixelRatio = (metrics: { layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number } }): number =>
+  metrics.layoutViewport.clientWidth / metrics.cssLayoutViewport.clientWidth
+
+/** A DOMSnapshot attribute list — [name, value, name, value, …], each an index into `strings` — as a record. */
+function snapshotAttributes(pairs: number[], strings: string[]): Record<string, string> {
+  const attributes: Record<string, string> = {}
+  for (let a = 0; a < pairs.length; a += 2) attributes[strings[pairs[a]]] = strings[pairs[a + 1]]
+  return attributes
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -1270,14 +1285,12 @@ export async function connectToPage(
       })
       if (probe.result.value !== true) return ids
 
-      const wanted = new Set(attributes)
       const { documents, strings } = await DOMSnapshot.captureSnapshot({ computedStyles: [] })
       for (const { nodes } of documents) {
         const backendIds = nodes.backendNodeId ?? []
         nodes.attributes?.forEach((pairs, n) => {
-          // `pairs` is [name, value, name, value, …], each an index into `strings`.
-          const at = pairs.findIndex((name, i) => i % 2 === 0 && wanted.has(strings[name]))
-          const value = at === -1 ? '' : strings[pairs[at + 1]]
+          const own = snapshotAttributes(pairs, strings)
+          const value = attributes.map(a => own[a]).find(Boolean)
           if (value) ids.set(backendIds[n], value)
         })
       }
@@ -1335,8 +1348,7 @@ export async function connectToPage(
       if (opts?.clip === undefined && scale >= 1) return { buffer: png, format: 'png' }
 
       // The capture is in device pixels, clip rects are in CSS pixels.
-      const { layoutViewport, cssLayoutViewport } = await Page.getLayoutMetrics()
-      const dpr = layoutViewport.clientWidth / cssLayoutViewport.clientWidth
+      const dpr = devicePixelRatio(await Page.getLayoutMetrics())
       const clip = opts?.clip
       const rect = clip && { x: clip.x * dpr, y: clip.y * dpr, width: clip.width * dpr, height: clip.height * dpr }
       return { buffer: cropScalePng(png, rect, Math.min(scale, 1)), format: 'png' }
@@ -1412,21 +1424,20 @@ export async function connectToPage(
     },
 
     async getLayoutSnapshot(): Promise<LayoutSnapshot> {
-      const [{ documents, strings }, { layoutViewport, cssLayoutViewport }] = await Promise.all([
+      const [{ documents, strings }, metrics] = await Promise.all([
         DOMSnapshot.captureSnapshot({ computedStyles: ['cursor'] }),
         Page.getLayoutMetrics(),
       ])
-      // Snapshot bounds are device pixels. At an OS scale of 125% a button at CSS y=517
-      // lands at 646 and falls off a 644 CSS-px viewport unless scaled back.
-      const dpr = layoutViewport.clientWidth / cssLayoutViewport.clientWidth
+      // At an OS scale of 125% a button at CSS y=517 lands at 646 and falls off
+      // a 644 CSS-px viewport unless scaled back.
+      const dpr = devicePixelRatio(metrics)
+      const { cssLayoutViewport } = metrics
       const nodes = new Map<number, LayoutNode>()
       for (const doc of documents) {
         const backendIds = doc.nodes.backendNodeId ?? []
         doc.layout.nodeIndex.forEach((n, i) => {
           const [x, y, width, height] = doc.layout.bounds[i]
-          const pairs = doc.nodes.attributes?.[n] ?? []
-          const attributes: Record<string, string> = {}
-          for (let a = 0; a < pairs.length; a += 2) attributes[strings[pairs[a]]] = strings[pairs[a + 1]]
+          const attributes = snapshotAttributes(doc.nodes.attributes?.[n] ?? [], strings)
           nodes.set(backendIds[n], {
             // Bounds are document-relative; the table wants what is on screen now.
             rect: {
@@ -1446,7 +1457,12 @@ export async function connectToPage(
 
     async hitTest(backendNodeId: number, testIdAttributes: readonly string[]): Promise<string | null> {
       const { x, y } = await resolveBoxCenter(backendNodeId, true)
-      const hit = await DOM.getNodeForLocation({ x: Math.round(x), y: Math.round(y) })
+      // A centre still off-screen after the scroll (a clipped overflow box) has nothing to hit.
+      const hit = await DOM.getNodeForLocation({ x: Math.round(x), y: Math.round(y) }).catch((err: unknown) => {
+        if (isDeadSocket(err)) throw err
+        return null
+      })
+      if (!hit) return 'the viewport edge — its centre is off-screen'
       if (hit.backendNodeId === backendNodeId) return null
       const [target, other] = await Promise.all([
         DOM.resolveNode({ backendNodeId }),

@@ -1,93 +1,131 @@
-import { readFile } from 'node:fs/promises'
 import type { PageSession } from '../cdp/types.js'
+import { isDeadSocket } from '../cdp/transport.js'
 import type { ServerResponse } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
-import { findByLocator, locatorFromArgs } from './locator.js'
-import { edgePoint, isDeadSocket, scriptPath, viewportBox, type ActDeps, type ActScript, type StepTarget } from './act-session.js'
+import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator } from './locator.js'
+import { edgePoint, readScript, viewportBox, type StepTarget } from './act-script.js'
 
 const POLL_MS = 50
 const STEP_TIMEOUT_MS = 10_000
 const UNTIL_TIMEOUT_MS = 15_000
+const EXIT_DONE = 0
+const EXIT_FAIL = 1
+const EXIT_STALE = 3
+
+/** What an act run needs from the server. */
+export type ActDeps = {
+  /** Replaced by `reconnect` when the window reloads under a step. */
+  conn: PageSession
+  invalidateAxCache: () => void
+  /** Fresh session after the window reloaded under us. */
+  reconnect: () => Promise<PageSession>
+}
 
 /**
  * A saved `act` run, executed with no model and no settle: each step waits only until
  * its own target is on screen, enabled and uncovered, then acts. First line of the
- * result: `DONE` (until met), `FAIL` (steps ran, until never came — a bug) or `STALE`
- * (a step's control is gone — the script no longer fits the app).
+ * result: `DONE` (until met), `FAIL` (the app did not answer: until never came, or a
+ * control stayed disabled or covered — a bug) or `STALE` (a step's control is gone —
+ * the script no longer fits the app).
  */
 export async function replay(
-  name: string,
-  secret: string | undefined,
-  testIdAttributes: readonly string[],
-  testIdAttribute: string | undefined,
+  { name, secret, testIdAttribute }: { name: string; secret?: string; testIdAttribute?: string },
   deps: ActDeps,
 ): Promise<ServerResponse> {
-  let script: ActScript
-  try {
-    script = JSON.parse(await readFile(scriptPath(name), 'utf8')) as ActScript
-  } catch {
-    return { ok: false, error: `No saved script "${name}" — record one with act start … act save ${name}` }
-  }
+  const script = await readScript(name)
+  if (!script) return { ok: false, error: `No saved script "${name}" — record one with act start … --save ${name}` }
   if (script.steps.some(s => 'isPassword' in s && s.isPassword) && !secret) {
     return { ok: false, error: `"${name}" types a password — set AGENT_VIEW_SECRET` }
   }
+  const until = locatorFromArgs({ ...script.until, testIdAttribute })
+  if (!until) return { ok: false, error: `"${name}" has no done condition — re-record it with act start --until-testid …` }
+  const attributes = testIdAttributes(testIdAttribute)
 
   const t0 = Date.now()
-  let conn = deps.conn
+  const elapsed = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`
+  const verdict = (exitCode: number, line: string): ServerResponse => ({ ok: true, data: `${line} · ${elapsed()}`, exitCode })
   /** Polls until `probe` yields a value or time runs out; rides over the window reloading. */
   const poll = async <T>(probe: (c: PageSession) => Promise<T | undefined>, timeoutMs: number): Promise<T | undefined> => {
     const end = Date.now() + timeoutMs
     for (;;) {
       try {
-        const value = await probe(conn)
+        const value = await probe(deps.conn)
         if (value !== undefined) return value
       } catch (err) {
         if (!isDeadSocket(err)) throw err
-        conn = await deps.reconnect().catch(() => conn)
+        // Between documents the window is not there yet; the next poll tries again.
+        deps.conn = await deps.reconnect().catch(() => deps.conn)
       }
       if (Date.now() > end) return undefined
       await new Promise(r => setTimeout(r, POLL_MS))
     }
   }
-  const find = (target: StepTarget, needsEnabled: boolean) => poll(async (c): Promise<Control | undefined> => {
-    deps.invalidateAxCache()
-    const [ax, layout] = await Promise.all([c.getAccessibilityTree(), c.getLayoutSnapshot()])
-    const hit = extractControls(ax, layout, testIdAttributes).find(ctl =>
-      target.testid ? ctl.testid === target.testid : ctl.role === target.role && ctl.name === target.name)
-    if (!hit || (needsEnabled && hit.states.includes('disabled'))) return undefined
-    return await c.hitTest(hit.backendDOMNodeId, testIdAttributes) ? undefined : hit
-  }, STEP_TIMEOUT_MS)
+  /** The control, or why it is not usable yet: absent, or present but disabled / covered. */
+  const find = async (target: StepTarget, { isEnabledRequired }: { isEnabledRequired: boolean }) => {
+    let seen: string | undefined
+    const control = await poll(async (c): Promise<Control | undefined> => {
+      deps.invalidateAxCache()
+      const [ax, layout] = await Promise.all([c.getAccessibilityTree(), c.getLayoutSnapshot()])
+      const hit = extractControls(ax, layout, attributes).find(ctl =>
+        target.testid ? ctl.testid === target.testid : ctl.role === target.role && ctl.name === target.name)
+      seen = undefined
+      if (!hit) return undefined
+      if (isEnabledRequired && hit.states.includes('disabled')) {
+        seen = 'disabled'
+        return undefined
+      }
+      let covering: string | null
+      try {
+        covering = await c.hitTest(hit.backendDOMNodeId, attributes)
+      } catch (err) {
+        if (isDeadSocket(err)) throw err
+        return undefined // detached between the snapshot and the hit test: look again
+      }
+      if (covering) seen = `covered by ${covering}`
+      return covering ? undefined : hit
+    }, STEP_TIMEOUT_MS)
+    return { control, seen }
+  }
   const findTestId = (testid: string) => poll(async (c) => {
-    const found = await findByLocator(c, locatorFromArgs({ testid, testIdAttribute })!)
+    const found = await findByLocator(c, testIdLocator(testid, testIdAttribute))
     return 'error' in found ? undefined : found
   }, STEP_TIMEOUT_MS)
-  const elapsed = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`
   const describe = (t: StepTarget) => (t.name ? `${t.role} "${t.name}"` : t.role) + (t.testid ? ` testid=${t.testid}` : '')
 
   for (const [i, step] of script.steps.entries()) {
+    const at = `step ${i + 1}/${script.steps.length}`
     if (step.op === 'scroll') {
-      await conn.scrollViewport(step.direction)
+      await poll(async c => { await c.scrollViewport(step.direction); return true }, STEP_TIMEOUT_MS)
       continue
     }
-    const control = await find(step.target, step.op !== 'drag')
+    const { control, seen } = await find(step.target, { isEnabledRequired: step.op !== 'drag' })
     if (!control) {
-      return { ok: true, data: `STALE: step ${i + 1}/${script.steps.length} ${step.op} ${describe(step.target)} — not on screen, enabled and uncovered within ${STEP_TIMEOUT_MS / 1000}s · ${elapsed()}` }
+      // Present but unusable is the app misbehaving; absent is the script out of date.
+      return seen
+        ? verdict(EXIT_FAIL, `FAIL: ${at} ${step.op} ${describe(step.target)} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
+        : verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describe(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
     }
     try {
       if (step.op !== 'drag') {
-        if (step.op === 'click') await conn.clickByNodeId(control.backendDOMNodeId)
-        else if (step.op === 'type') await conn.fillByNodeId(control.backendDOMNodeId, step.isPassword ? secret! : step.value ?? '')
-        else await conn.selectOption(control.backendDOMNodeId, step.value ?? '')
+        if (step.op === 'click') {
+          await deps.conn.clickByNodeId(control.backendDOMNodeId)
+        } else if (step.op === 'type') {
+          await deps.conn.fillByNodeId(control.backendDOMNodeId, step.isPassword ? secret! : step.value ?? '')
+        } else {
+          const outcome = await deps.conn.selectOption(control.backendDOMNodeId, step.value ?? '')
+          const reason = outcome === 'no-option' ? `no option "${step.value}"` : 'not a native select'
+          if (outcome !== 'ok') return verdict(EXIT_STALE, `STALE: ${at} select ${describe(step.target)} — ${reason}`)
+        }
       } else {
         const to = step.to
-        const dest = !to ? undefined : 'role' in to ? await find(to, false) : await findTestId(to.testid)
+        const dest = !to ? undefined : 'role' in to ? (await find(to, { isEnabledRequired: false })).control : await findTestId(to.testid)
         if (to && !dest) {
           const label = 'role' in to ? describe(to) : `testid=${to.testid}`
-          return { ok: true, data: `STALE: step ${i + 1}/${script.steps.length} drag target ${label} not found · ${elapsed()}` }
+          return verdict(EXIT_STALE, `STALE: ${at} drag target ${label} not found`)
         }
-        const from = await conn.getBoxCenter(control.backendDOMNodeId)
-        const box = dest ? await conn.getBoxRect(dest.backendDOMNodeId, { scrollIntoView: false }) : await viewportBox(conn)
-        await conn.dragBetweenPositions(from, edgePoint(box, step.edge), { mode: 'pointer' })
+        const from = await deps.conn.getBoxCenter(control.backendDOMNodeId)
+        const box = dest ? await deps.conn.getBoxRect(dest.backendDOMNodeId, { scrollIntoView: false }) : await viewportBox(deps.conn)
+        await deps.conn.dragBetweenPositions(from, edgePoint(box, step.edge), { mode: 'pointer' })
       }
     } catch (err) {
       // The window reloaded under the action (login, logout): it went out; the next poll reconnects.
@@ -95,20 +133,15 @@ export async function replay(
       // that toggled shut): the app is not in the state the script was recorded in.
       if (!isDeadSocket(err)) {
         const reason = err instanceof Error ? err.message : String(err)
-        return { ok: true, data: `STALE: step ${i + 1}/${script.steps.length} ${step.op} ${describe(step.target)} — ${reason} · ${elapsed()}` }
+        return verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describe(step.target)} — ${reason}`)
       }
     }
   }
 
   // Split the total: our steps vs the app answering them (auth, reload) — only the first is ours to speed up.
   const stepsTime = elapsed()
-  const until = locatorFromArgs({ ...script.until, testIdAttribute })
-  if (!until) return { ok: true, data: `DONE: replay ${name} · ${script.steps.length} steps · ${elapsed()} (no until saved)` }
   const isMet = await poll(async c => ('error' in await findByLocator(c, until) ? undefined : true), UNTIL_TIMEOUT_MS)
-  return {
-    ok: true,
-    data: isMet
-      ? `DONE: replay ${name} · ${script.steps.length} steps · ${elapsed()} (steps ${stepsTime}, then waiting for ${until.label})`
-      : `FAIL: replay ${name} — steps ran, ${until.label} not visible after ${UNTIL_TIMEOUT_MS / 1000}s · ${elapsed()}`,
-  }
+  return isMet
+    ? verdict(EXIT_DONE, `DONE: replay ${name} · ${script.steps.length} steps in ${stepsTime}, then ${until.label}`)
+    : verdict(EXIT_FAIL, `FAIL: replay ${name} — steps ran, ${until.label} not visible after ${UNTIL_TIMEOUT_MS / 1000}s`)
 }
