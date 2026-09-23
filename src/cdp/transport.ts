@@ -940,6 +940,7 @@ type DebuggerDomain = {
 }
 
 const SCROLL_VIEWPORT_FRACTION = 0.8
+const WHEEL_ACK_MS = 1_000
 
 /** Bounds the wait for the `scriptParsed` replay when an id is still missing. */
 const SCRIPT_PARSED_DEADLINE_MS = 1_000
@@ -1457,13 +1458,13 @@ export async function connectToPage(
 
     async hitTest(backendNodeId: number, testIdAttributes: readonly string[]): Promise<string | null> {
       const { x, y } = await resolveBoxCenter(backendNodeId, true)
-      // A centre still off-screen after the scroll (a clipped overflow box) has nothing to hit.
+      // getNodeForLocation throws on some points of visible controls (a search input, a
+      // drag handle). No answer is not a cover: let the action go.
       const hit = await DOM.getNodeForLocation({ x: Math.round(x), y: Math.round(y) }).catch((err: unknown) => {
         if (isDeadSocket(err)) throw err
         return null
       })
-      if (!hit) return 'the viewport edge — its centre is off-screen'
-      if (hit.backendNodeId === backendNodeId) return null
+      if (!hit || hit.backendNodeId === backendNodeId) return null
       const [target, other] = await Promise.all([
         DOM.resolveNode({ backendNodeId }),
         DOM.resolveNode({ backendNodeId: hit.backendNodeId }),
@@ -1506,12 +1507,18 @@ export async function connectToPage(
     async scrollViewport(direction: 'up' | 'down'): Promise<void> {
       const { cssLayoutViewport } = await Page.getLayoutMetrics()
       const deltaY = Math.round(cssLayoutViewport.clientHeight * SCROLL_VIEWPORT_FRACTION) * (direction === 'down' ? 1 : -1)
-      await Input.dispatchMouseEvent({
+      // The wheel's ack sometimes never comes (1 in ~5 on the bench app) and held the call
+      // for the full 45 s deadline. The event is delivered either way; the caller's settle
+      // loop sees the scroll, so wait for the ack only briefly.
+      const wheel = Input.dispatchMouseEvent({
         type: 'mouseWheel',
         x: Math.round(cssLayoutViewport.clientWidth / 2),
         y: Math.round(cssLayoutViewport.clientHeight / 2),
         deltaX: 0,
         deltaY,
+      })
+      await withTimeout(wheel, WHEEL_ACK_MS, 'mouseWheel').catch((err: unknown) => {
+        if (!(err instanceof CDPTimeoutError)) throw err
       })
     },
 
