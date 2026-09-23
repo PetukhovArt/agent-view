@@ -241,6 +241,7 @@ First line of an op's output:
 `act wait` runs even after the budget is spent. Errors (non-zero exit):
 
 - `` run `agent-view act start` first ``, `act start --until-testid <id> | --until-selector <css> — exactly one`
+- `` this act run is DONE — `agent-view act start` for a new one `` (any step after DONE; `table` / `wait` still work)
 - `No row [n] in the last table (1-N)`
 - `[n] is a <role>, not a text field — pick a textbox/combobox row` (`type` on a non-text row);
   `No input or textarea at or inside the element` (`type` on a native `<select>` — use `select`)

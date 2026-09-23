@@ -50,6 +50,8 @@ export type ActSession = {
   startedAt: number
   /** Script name to write on DONE (`act start --save`). */
   saveAs?: string
+  /** DONE was printed: the recording is complete and takes no more steps. */
+  isDone: boolean
 }
 
 /** One act call: the port's session and this request's handles on the server. */
@@ -86,6 +88,7 @@ export async function runAct(
   if (op === 'table') return tableOrDone(run)
   if (op === 'save') return save(session, str(args, 'name'))
   if (op === 'wait') return finishStep(run, { before: tableKey(await snapshot(run)), done: 'wait', quietPolls: Infinity })
+  if (session.isDone) return { ok: false, error: 'this act run is DONE — `agent-view act start` for a new one' }
   if (session.steps.length >= session.maxSteps) {
     return { ok: true, data: `BLOCKED: step budget ${session.maxSteps} exhausted\n${await printTable(run)}` }
   }
@@ -109,6 +112,7 @@ function createSession(args: Record<string, unknown>): ActSession {
     steps: [],
     startedAt: Date.now(),
     saveAs: str(args, 'save'),
+    isDone: false,
   }
 }
 
@@ -282,7 +286,9 @@ async function tableOrDone(run: Run): Promise<ServerResponse> {
 /** The DONE line; with `start --save`, the recording is written here, sparing the decider a turn. */
 async function doneLine(session: ActSession): Promise<string> {
   const line = `DONE: until ${session.until.label} · ${session.steps.length} steps · ${((Date.now() - session.startedAt) / 1000).toFixed(1)}s`
-  if (!session.saveAs) return line
+  const isFirstDone = !session.isDone
+  session.isDone = true
+  if (!session.saveAs || !isFirstDone) return line
   const saved = await save(session, session.saveAs)
   return `${line} · saved ${saved.ok ? saved.data : saved.error}`
 }
