@@ -67,6 +67,9 @@ function isValidConfig(obj: unknown): obj is AgentViewConfig {
   if (c.logMaxBytes !== undefined) {
     if (typeof c.logMaxBytes !== 'number' || c.logMaxBytes < 1024) return false
   }
+  if (c.testIdAttribute !== undefined) {
+    if (typeof c.testIdAttribute !== 'string' || !/^[\w-]+$/.test(c.testIdAttribute)) return false
+  }
 
   return true
 }

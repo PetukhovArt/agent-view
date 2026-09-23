@@ -26,6 +26,7 @@ export async function runDom(config: AgentViewConfig, options: DomOptions): Prom
       count: options.count,
       maxLines: options.maxLines,
       diff: options.diff,
+      testIdAttribute: config.testIdAttribute,
     },
   })
 

@@ -348,6 +348,24 @@ describe('formatAccessibilityTree --compact', () => {
   })
 })
 
+describe('formatAccessibilityTree test ids', () => {
+  // Component libraries put the test id on an unnamed wrapper, which the tree otherwise drops.
+  const nodes = [
+    node('1', 'group', 'Form', ['2']),
+    node('2', 'generic', undefined, ['3'], 20),
+    node('3', 'textbox', undefined, undefined, 30),
+  ]
+  const testIds = new Map([[20, 'email'], [30, 'email-input']])
+
+  it.each([false, true])('prints an unnamed wrapper that carries a test id (compact: %s)', (compact) => {
+    expect(formatAccessibilityTree(nodes, { testIds, compact }).text).toBe([
+      'group "Form" [ref=1]',
+      '  generic [testid=email] [ref=2]',
+      '    textbox [testid=email-input] [ref=3]',
+    ].join('\n'))
+  })
+})
+
 describe('countAccessibilityNodes', () => {
   it('returns 0 for empty node list', () => {
     expect(countAccessibilityNodes([]).count).toBe(0)

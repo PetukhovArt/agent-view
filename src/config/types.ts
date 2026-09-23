@@ -30,4 +30,9 @@ export type AgentViewConfig = {
   logFile?: string
   /** Feed size cap in bytes. On overflow the feed rotates once to `<file>.prev`. Default 8 MB. */
   logMaxBytes?: number
+  /**
+   * Attribute carrying the project's test ids, shown by `dom` and addressed by `--testid`.
+   * Missing: `data-testid`, `data-test-id`, `data-test`, `data-qa` and `data-cy` are all tried.
+   */
+  testIdAttribute?: string
 }

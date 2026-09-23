@@ -40,6 +40,7 @@ import { AxTreeCache } from '../cdp/ax-cache.js'
 import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
 import { buildMatcher } from './pattern.js'
+import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -583,6 +584,7 @@ export class AgentViewServer {
       startRef: this.refStore.getNextRef(),
       compact,
       maxLines: argNum(req.args, 'maxLines'),
+      testIds: await conn.getTestIds(testIdAttributes(argStr(req.args, 'testIdAttribute'))),
     })
 
     this.refStore.store(refs, req.port, targetId, nextRef)
@@ -730,6 +732,15 @@ export class AgentViewServer {
       return { ok: true, data: `${verb} at (${x}, ${y})` }
     }
 
+    const locator = locatorFromArgs(req.args)
+    if (locator) {
+      const found = await findByLocator(conn, locator)
+      if ('error' in found) return { ok: false, error: found.error }
+      await conn.clickByNodeId(found.backendDOMNodeId, clickOpts)
+      this.axTreeCache.invalidate(cacheKey)
+      return { ok: true, data: `${verb} ${found.label}` }
+    }
+
     const clickFilter = argStr(req.args, 'filter')
     if (clickFilter) {
       const filter = clickFilter
@@ -745,7 +756,7 @@ export class AgentViewServer {
 
     const ref = argNum(req.args, 'ref')
     if (ref === undefined) {
-      return { ok: false, error: 'click requires --ref, --filter, or --pos' }
+      return { ok: false, error: 'click requires --ref, --filter, --testid, --selector, or --pos' }
     }
     const entry = this.refStore.get(ref)
     if (!entry) {
@@ -824,6 +835,15 @@ export class AgentViewServer {
       return { ok: false, error: 'fill requires --value' }
     }
 
+    const locator = locatorFromArgs(req.args)
+    if (locator) {
+      const found = await findByLocator(conn, locator)
+      if ('error' in found) return { ok: false, error: found.error }
+      await conn.fillByNodeId(found.backendDOMNodeId, value)
+      this.axTreeCache.invalidate(cacheKey)
+      return { ok: true, data: `Filled ${found.label} with "${value}"` }
+    }
+
     const fillFilter = argStr(req.args, 'filter')
     if (fillFilter) {
       const filter = fillFilter
@@ -839,7 +859,7 @@ export class AgentViewServer {
 
     const fillRef = argNum(req.args, 'ref')
     if (fillRef === undefined) {
-      return { ok: false, error: 'fill requires --ref or --filter' }
+      return { ok: false, error: 'fill requires --ref, --filter, --testid, or --selector' }
     }
     const entry = this.refStore.get(fillRef)
     if (!entry) {
@@ -1164,8 +1184,9 @@ export class AgentViewServer {
 
   private async handleWait(req: ServerRequest): Promise<ServerResponse> {
     const filter = argStr(req.args, 'filter')
-    if (!filter) {
-      return { ok: false, error: 'wait requires --filter' }
+    const locator = locatorFromArgs(req.args)
+    if (!filter && !locator) {
+      return { ok: false, error: 'wait requires --filter, --testid, or --selector' }
     }
 
     const timeout = argNum(req.args, 'timeout') ?? 10
@@ -1174,6 +1195,17 @@ export class AgentViewServer {
 
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getPageSession(req, targetId)
+
+    if (locator) {
+      let found = await findByLocator(conn, locator)
+      for (let i = 1; i < maxAttempts && 'error' in found; i++) {
+        await new Promise(resolve => setTimeout(resolve, interval))
+        found = await findByLocator(conn, locator)
+      }
+      return 'error' in found
+        ? { ok: false, error: `Timeout after ${timeout}s: ${found.error}` }
+        : { ok: true, data: `Found ${found.label}` }
+    }
 
     for (let i = 0; i < maxAttempts; i++) {
       const nodes = await conn.getAccessibilityTree()
@@ -1210,21 +1242,30 @@ export class AgentViewServer {
 
     const scale = argNum(req.args, 'scale')
     const cropFilter = argStr(req.args, 'crop')
+    const locator = locatorFromArgs(req.args)
 
     let warning: string | undefined
     let clip: { x: number; y: number; width: number; height: number } | undefined
 
-    if (cropFilter !== undefined) {
+    let cropNode: number | undefined
+    if (locator) {
+      // Unlike a text filter, an exact locator that misses is a wrong locator: a
+      // full-window fallback would spend ~19k vision tokens on the wrong question.
+      const found = await findByLocator(conn, locator)
+      if ('error' in found) return { ok: false, error: found.error }
+      cropNode = found.backendDOMNodeId
+    } else if (cropFilter !== undefined) {
       const found = await this.findByFilter(conn, cropFilter, req, targetId)
-      if (!found) {
-        warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
-      } else {
-        const cropUp = argNum(req.args, 'cropUp') ?? 0
-        clip = await conn.getBoxRect(found.backendDOMNodeId, { scrollIntoView: true, ancestorLevels: cropUp })
-        if (clip.height < TEXT_LINE_HEIGHT_PX && cropUp === 0) {
-          warning = `crop matched a text-sized box (${Math.round(clip.width)}×${Math.round(clip.height)}) — `
-            + `pass --crop-up 1 (or 2) to capture the surrounding container instead`
-        }
+      if (found) cropNode = found.backendDOMNodeId
+      else warning = `crop filter '${cropFilter}' matched nothing — capturing full window`
+    }
+
+    if (cropNode !== undefined) {
+      const cropUp = argNum(req.args, 'cropUp') ?? 0
+      clip = await conn.getBoxRect(cropNode, { scrollIntoView: true, ancestorLevels: cropUp })
+      if (clip.height < TEXT_LINE_HEIGHT_PX && cropUp === 0) {
+        warning = `crop matched a text-sized box (${Math.round(clip.width)}×${Math.round(clip.height)}) — `
+          + `pass --crop-up 1 (or 2) to capture the surrounding container instead`
       }
     }
 

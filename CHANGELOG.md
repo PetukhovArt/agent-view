@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Test ids. `dom` prints `[testid=…]` next to the ref of every accessibility-tree node that carries one. Unnamed wrappers with a test id are now printed too, because component libraries put the id on the wrapper. Test ids are often set through props, so the live DOM is the only place to read them. `click`, `fill`, `wait` and `screenshot` take `--testid <id>`. A test id survives HMR, navigation and copy changes; a ref and a text filter do not. The new config field `testIdAttribute` names the attribute. Without it, `data-testid`, `data-test-id`, `data-test`, `data-qa` and `data-cy` are all read.
+- `--selector <css>` on the same four commands, for projects without test ids. Both act on the first visible match and say `(first visible of N)` when there are several. Hidden matches are skipped, so `wait --testid` holds until the element shows. A miss exits 1, `screenshot` included.
+- `click` and `fill` refuse more than one way of addressing the element (`<ref>`, `--filter`, `--testid`, `--selector`, `--pos`). Before, one silently won, and `fill 12 "abc" --testid x` typed `12`.
+
+### Fixed
+- `fill` on a `<textarea>` threw `Illegal invocation`, because it called the `<input>` value setter. `fill` on a wrapper element now fills the `input` or `textarea` inside it, so `--testid` works on components. An element with no field exits 1; before, `fill` set a stray `value` on it and reported success.
+
 ## [0.16.1] - 2026-09-23
 
 ### Fixed

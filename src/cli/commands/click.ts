@@ -4,20 +4,26 @@ import type { AgentViewConfig } from '../../config/types.js'
 type ClickOptions = {
   pos?: string
   filter?: string
+  testid?: string
+  selector?: string
   window?: string
   double?: boolean
   right?: boolean
 }
 
 export async function runClick(config: AgentViewConfig, refArg: string | undefined, options: ClickOptions): Promise<void> {
-  if (!refArg && !options.pos && !options.filter) {
-    console.error('Usage: agent-view click <ref> | --filter <text> | --pos <x,y>')
+  const ways = [refArg, options.pos, options.filter, options.testid, options.selector].filter(f => f !== undefined)
+  if (ways.length !== 1) {
+    console.error('Usage: agent-view click <ref> | --filter <text> | --testid <id> | --selector <css> | --pos <x,y> — exactly one')
     process.exit(1)
   }
 
-  const args: Record<string, unknown> = {}
+  const args: Record<string, unknown> = { testIdAttribute: config.testIdAttribute }
 
-  if (options.filter) {
+  if (options.testid !== undefined || options.selector !== undefined) {
+    args.testid = options.testid
+    args.selector = options.selector
+  } else if (options.filter) {
     args.filter = options.filter
   } else if (options.pos) {
     const [x, y] = options.pos.split(',').map(Number)

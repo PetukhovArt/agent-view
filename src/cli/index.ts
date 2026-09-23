@@ -92,8 +92,10 @@ program
 
 program
   .command('click [ref]')
-  .description('Click DOM element by ref, filter, or position')
+  .description('Click DOM element by ref, filter, test id, selector, or position')
   .option('-f, --filter <text>', 'Find element by text and click')
+  .option('--testid <id>', 'Find element by test id (see testIdAttribute)')
+  .option('--selector <css>', 'Find element by CSS selector')
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('--double', 'Double-click (fires dblclick handlers)')
@@ -125,8 +127,10 @@ program
 
 program
   .command('fill <refOrValue> [value]')
-  .description('Type text into input by ref or filter')
+  .description('Type text into input by ref, filter, test id, or selector')
   .option('-f, --filter <text>', 'Find input by label/text and fill')
+  .option('--testid <id>', 'Find input by test id — a wrapper resolves to the field inside it')
+  .option('--selector <css>', 'Find input by CSS selector')
   .option('-w, --window <id>', 'Target window ID or name')
   .action(async (refOrValue, value, options) => {
     const config = requireConfig()
@@ -136,7 +140,9 @@ program
 program
   .command('wait')
   .description('Wait for element to appear in DOM')
-  .requiredOption('-f, --filter <text>', 'Text to wait for')
+  .option('-f, --filter <text>', 'Text to wait for')
+  .option('--testid <id>', 'Test id to wait for')
+  .option('--selector <css>', 'CSS selector to wait for')
   .option('-t, --timeout <seconds>', 'Max wait time (default: 10)')
   .option('-w, --window <id>', 'Target window ID or name')
   .action(async (options) => {
@@ -150,7 +156,9 @@ program
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-s, --scale <factor>', 'Scale factor 0..1 — reduces image size and Claude vision token cost (e.g. 0.5)', parseFloat)
   .option('--crop <filter>', 'Crop to bounding box of matched element (massive vision-token win)')
-  .option('--crop-up <n>', 'Climb N element ancestors from the --crop match before cropping (heading → its card)', parseCropUp)
+  .option('--testid <id>', 'Crop to the element with this test id')
+  .option('--selector <css>', 'Crop to the element matching this CSS selector')
+  .option('--crop-up <n>', 'Climb N element ancestors from the crop match before cropping (heading → its card)', parseCropUp)
   .action(async (options) => {
     const config = requireConfig()
     await runScreenshot(config, options)

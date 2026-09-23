@@ -48,6 +48,14 @@ _Avoid_: Subscription, Poll, Observer
 An opaque integer handle for a node (`[ref=N]`), issued for the life of the session and valid until the next accessibility-tree mutation. The input to click, fill, drag and screenshot cropping.
 _Avoid_: Handle, NodeId, Selector
 
+**Test Id**
+A string the project itself puts on an element, in an attribute such as `data-testid` (see `testIdAttribute`). Unlike a Ref, the app's authors choose it, and it survives reloads, HMR and copy changes. A saved check should address elements by it.
+_Avoid_: Test ref, QA id
+
+**Locator**
+A `--testid` or `--selector` argument. Resolved against the live DOM on every call to the first visible match, so, unlike a Ref, it never goes stale.
+_Avoid_: Finder, Query
+
 ## Console and network
 
 **Console Stream**

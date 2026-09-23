@@ -146,9 +146,9 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 
 | Command       | What it gives the agent                                                                |
 |---------------|-----------------------------------------------------------------------------------------|
-| `dom`         | Accessibility tree with `[ref=N]` handles. Flags: `--filter`, `--compact`, `--count`, `--max-lines`, `--diff`. |
+| `dom`         | Accessibility tree with `[ref=N]` handles and the project's test ids (`[testid=…]`). Flags: `--filter`, `--compact`, `--count`, `--max-lines`, `--diff`. |
 | `screenshot`  | PNG, scaled with `--scale`, or `--crop <element>` for one element only. Cuts vision tokens. |
-| `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native; `drag` does HTML5 DnD through `Input.dragIntercepted` and pointer DnD through mouse events. |
+| `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native; `drag` does HTML5 DnD through `Input.dragIntercepted` and pointer DnD through mouse events. `click` / `fill` / `wait` / `screenshot` also address elements by `--testid` or `--selector`. |
 | `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
@@ -310,7 +310,8 @@ Full form with all optional fields:
   "captureBody": false,
   "networkBufferSize": 200,
   "logFile": ".agent-view/console.log",
-  "logMaxBytes": 8388608
+  "logMaxBytes": 8388608,
+  "testIdAttribute": "data-testid"
 }
 ```
 
@@ -327,6 +328,7 @@ Full form with all optional fields:
 | `networkBufferSize` | no       | Per-target network ring capacity. Positive integer. Default `200` (smaller than console — entries are heavier)                                                                                         |
 | `logFile`           | no       | Feed file for `agent-view logs`. Relative paths resolve against the project root. Default `.agent-view/console.log` (gitignore it). Keep it per-checkout: two ports recording into one file is refused                                                                     |
 | `logMaxBytes`       | no       | Feed size cap in bytes; on overflow it rotates once to `<file>.prev`. Default `8388608` (8 MB)                                                                                                         |
+| `testIdAttribute`   | no       | Attribute holding the project's test ids, shown by `dom` and matched by `--testid`. Default: `data-testid`, `data-test-id`, `data-test`, `data-qa` and `data-cy` are all read. Setting it reads only that one |
 
 ---
 

@@ -2,14 +2,16 @@ import { sendCommand } from '../client.js'
 import type { AgentViewConfig } from '../../config/types.js'
 
 type WaitOptions = {
-  filter: string
+  filter?: string
+  testid?: string
+  selector?: string
   timeout?: string
   window?: string
 }
 
 export async function runWait(config: AgentViewConfig, options: WaitOptions): Promise<void> {
-  if (!options.filter) {
-    console.error('Usage: agent-view wait --filter <text> [--timeout <seconds>]')
+  if (!options.filter && !options.testid && !options.selector) {
+    console.error('Usage: agent-view wait --filter <text> | --testid <id> | --selector <css> [--timeout <seconds>]')
     process.exit(1)
   }
 
@@ -21,6 +23,9 @@ export async function runWait(config: AgentViewConfig, options: WaitOptions): Pr
     runtime: config.runtime,
     args: {
       filter: options.filter,
+      testid: options.testid,
+      selector: options.selector,
+      testIdAttribute: config.testIdAttribute,
       timeout,
       window: options.window,
     },

@@ -5,12 +5,16 @@ type ScreenshotOptions = {
   window?: string
   scale?: number
   crop?: string
+  testid?: string
+  selector?: string
   cropUp?: number
 }
 
 export async function runScreenshot(config: AgentViewConfig, options: ScreenshotOptions): Promise<void> {
-  const args: Record<string, unknown> = {}
+  const args: Record<string, unknown> = { testIdAttribute: config.testIdAttribute }
   if (options.window) args.window = options.window
+  if (options.testid !== undefined) args.testid = options.testid
+  if (options.selector !== undefined) args.selector = options.selector
   if (options.scale !== undefined) args.scale = options.scale
   if (options.crop !== undefined) args.crop = options.crop
   if (options.cropUp !== undefined) args.cropUp = options.cropUp

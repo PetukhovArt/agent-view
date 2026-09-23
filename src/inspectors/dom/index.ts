@@ -11,6 +11,8 @@ export type DOMSnapshotOptions = {
   startRef?: number
   compact?: boolean
   maxLines?: number
+  /** `backendDOMNodeId` → test id. A node carrying one is printed even when it has no name. */
+  testIds?: ReadonlyMap<number, string>
 }
 
 export type DOMSnapshotResult = {
@@ -98,6 +100,21 @@ type VisitContext = {
   nodeMap: Map<string, AXNode>
   lowerFilter: string | undefined
   maxDepth: number | undefined
+  testIds?: ReadonlyMap<number, string>
+}
+
+function testIdOf(node: AXNode, ctx: VisitContext): string | undefined {
+  return node.backendDOMNodeId === undefined ? undefined : ctx.testIds?.get(node.backendDOMNodeId)
+}
+
+function isSkipped(node: AXNode, role: string, name: string, ctx: VisitContext): boolean {
+  return SKIP_WHEN_EMPTY_ROLES.has(role) && !name && testIdOf(node, ctx) === undefined
+}
+
+function formatLabel(node: AXNode, role: string, name: string, isFallback: boolean, ctx: VisitContext): string {
+  const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
+  const testId = testIdOf(node, ctx)
+  return `${role}${nameStr}${testId === undefined ? '' : ` [testid=${testId}]`}`
 }
 
 function resolveNameFromChildren(node: AXNode, nodeMap: Map<string, AXNode>, depthLimit = 5): string {
@@ -175,7 +192,7 @@ function walkVisibleNodes(
 
   if (ALWAYS_SKIP_ROLES.has(role)) return
 
-  const skip = SKIP_WHEN_EMPTY_ROLES.has(role) && !name
+  const skip = isSkipped(node, role, name, ctx)
 
   if (!skip) {
     if (nodePassesFilter(node, name, role, ctx)) {
@@ -192,7 +209,8 @@ function walkVisibleNodes(
   }
 }
 
-function effectiveChildren(node: AXNode, nodeMap: Map<string, AXNode>): string[] {
+function effectiveChildren(node: AXNode, ctx: VisitContext): string[] {
+  const { nodeMap } = ctx
   if (!node.childIds) return []
   return node.childIds.filter(childId => {
     const child = nodeMap.get(childId)
@@ -202,8 +220,7 @@ function effectiveChildren(node: AXNode, nodeMap: Map<string, AXNode>): string[]
     const childName = child.name?.value ?? ''
     const fallback = !childName ? resolveNameFromChildren(child, nodeMap) : ''
     const resolvedName = childName || fallback
-    if (SKIP_WHEN_EMPTY_ROLES.has(childRole) && !resolvedName) return false
-    return true
+    return !isSkipped(child, childRole, resolvedName, ctx)
   })
 }
 
@@ -224,7 +241,7 @@ export function formatAccessibilityTree(
   const rootNodeId = nodes[0]?.nodeId
   if (!rootNodeId) return { text: '(empty)', refs: [], nextRef }
 
-  const ctx: VisitContext = { nodeMap, lowerFilter: filter?.toLowerCase(), maxDepth }
+  const ctx: VisitContext = { nodeMap, lowerFilter: filter?.toLowerCase(), maxDepth, testIds: options.testIds }
 
   if (!compact) {
     walkVisibleNodes(rootNodeId, 0, ctx, (node, name, isFallback, indent) => {
@@ -233,9 +250,7 @@ export function formatAccessibilityTree(
         refs.push({ ref, backendDOMNodeId: node.backendDOMNodeId })
       }
       const padding = '  '.repeat(indent)
-      const role = node.role?.value ?? ''
-      const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
-      lines.push(`${padding}${role}${nameStr} [ref=${ref}]`)
+      lines.push(`${padding}${formatLabel(node, node.role?.value ?? '', name, isFallback, ctx)} [ref=${ref}]`)
     })
   } else {
     walkCompact(rootNodeId, 0, [], 0, ctx, {
@@ -287,7 +302,7 @@ function walkCompact(
 
   if (ALWAYS_SKIP_ROLES.has(role)) return
 
-  const skip = SKIP_WHEN_EMPTY_ROLES.has(role) && !name
+  const skip = isSkipped(node, role, name, ctx)
 
   if (skip) {
     if (node.childIds) {
@@ -301,19 +316,18 @@ function walkCompact(
   if (!nodePassesFilter(node, name, role, ctx)) return
 
   const ref = sink.allocRef(node.backendDOMNodeId)
-  const effChildren = effectiveChildren(node, ctx.nodeMap)
+  const effChildren = effectiveChildren(node, ctx)
   const isSingleChild = effChildren.length === 1
 
-  if (isSingleChild && !ownName) {
+  if (isSingleChild && !ownName && testIdOf(node, ctx) === undefined) {
     walkCompact(effChildren[0], indent + 1, [...chain, role], chainIndent, ctx, sink)
     return
   }
 
   const isFallback = !ownName && !!fallbackName
-  const nameStr = name ? ` "${name}"${isFallback ? ' [fallback]' : ''}` : ''
   const padding = '  '.repeat(chainIndent)
   const chainPrefix = chain.length > 0 ? `${chain.join(' > ')} > ` : ''
-  sink.pushLine(`${padding}${chainPrefix}${role}${nameStr} [ref=${ref}]`)
+  sink.pushLine(`${padding}${chainPrefix}${formatLabel(node, role, name, isFallback, ctx)} [ref=${ref}]`)
 
   if (node.childIds) {
     for (const childId of node.childIds) {

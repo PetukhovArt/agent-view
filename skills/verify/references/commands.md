@@ -48,6 +48,15 @@ agent-view dom --diff                   # Lines changed since last dom call (+ a
 
 `--count` skips tree output and ref mutations — cheapest way to assert "element exists N times" without loading the full tree into context.
 
+**Test ids.** A node carrying a test id prints it: `button "Save" [testid=save-btn] [ref=12]`. An
+unnamed wrapper that carries one is printed too (`generic [testid=email] [ref=6]`), because
+component libraries put the id on the wrapper. The attribute is `testIdAttribute` from
+`agent-view.config.json`; without it `data-testid`, `data-test-id`, `data-test`, `data-qa` and
+`data-cy` are all read. A test id survives HMR, navigation and text changes; a ref does not. Once
+`dom` has shown a test id, address the element with `--testid` (below). Limit: an element absent
+from the AX tree prints no line. An inline `<span data-testid>` holding only text prints as its
+`StaticText`, without the id. `--testid` still finds it.
+
 ### Interaction
 ```bash
 agent-view click <ref>                  # Click element by ref from dom output
@@ -55,7 +64,10 @@ agent-view click --filter "Save"        # Find element by text and click
 agent-view click --pos 100,200          # Click by coordinates — CANVAS ONLY, see below
 agent-view click <ref> --double         # Double-click (fires dblclick handlers); works with --filter / --pos too
 agent-view click <ref> --right          # Right-click (fires contextmenu); works with --filter / --pos too
+agent-view click --testid save-btn      # By test id (see "Test ids" above)
+agent-view click --selector "tr:nth-child(3) button"  # By CSS selector
 agent-view fill <ref> "text"            # Type into input field
+agent-view fill --testid email "a@b.c"  # A test id on a wrapper resolves to the input/textarea inside
 agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
 agent-view drag --from-pos 50,80 --to-pos 200,300  # Drag by coordinates (for canvas / Pixi)
 agent-view drag --from <ref> --to <ref> --steps 25 --hold-ms 60  # Smoother movement, longer hold
@@ -74,9 +86,18 @@ ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targe
 Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.
 Increase `--steps` for handlers using `globalpointermove` so intermediate frames are not skipped.
 
+`--testid` / `--selector` act on the **first visible** match; hidden copies (`v-show`, a closed
+popover) are skipped. When several match, the output says so — `Clicked testid "row" (first visible
+of 3)` — and the address is too broad: narrow it, e.g. a `--selector` with `:nth-child`. Exit 1 with
+`No element matches testid "x"` when nothing matches, and with `None of 2 element(s) matching
+testid "x" is visible` when every match is hidden. Pass exactly one of `<ref>`, `--filter`,
+`--testid`, `--selector`, `--pos`. `fill` exits 1 with `No input or textarea at or inside the
+element` when the element holds no field.
+
 **Coordinates are a last resort.** `--pos` / `--from-pos` / `--to-pos` exist for canvas and WebGL,
-where no ref exists. On DOM the correct order is `dom --filter "<text>"` → take the `[ref=N]` →
-`click <ref>`, or `click --filter "<text>"` in one step. A coordinate pair breaks on any layout
+where no ref exists. On DOM, use `--testid` when `dom` shows one. Otherwise run
+`dom --filter "<text>"` → take the `[ref=N]` → `click <ref>`, or `click --filter "<text>"` in one
+step. A coordinate pair breaks on any layout
 shift, scroll, zoom, or window resize, and it clicks whatever now sits at that point — silently.
 If you reach for `--pos` on a DOM element, first say why the ref was not usable.
 
@@ -148,9 +169,14 @@ an IPC channel) are out of reach — CDP does not see the main process.
 agent-view wait --filter "Saved"                    # until the text appears in the AX tree
 agent-view wait --filter "Saved" --timeout 20       # max wait in seconds (default 10)
 agent-view wait --filter "Row 5" --window "Main"    # specific window
+agent-view wait --testid order-saved                # until an element with this test id is visible
+agent-view wait --selector ".toast.success"         # until a selector match is visible
 ```
 
 Exits as soon as the element appears; exits non-zero on timeout — so `&&` after it is a real gate.
+A mounted but hidden match (`v-show`, `display:none`, `visibility:hidden`) does not end a
+`--testid` / `--selector` wait. On timeout the error says whether nothing matched or every match
+was hidden.
 
 **Never sleep for a fixed time** — see the waiting-signal table in `SKILL.md`. If no condition-based
 wait fits, poll `dom --filter X --count` with an explicit attempt cap and report the attempt count.
@@ -163,10 +189,12 @@ agent-view screenshot --scale 0.5 --window <id>  # Specific window
 agent-view screenshot --crop "Sidebar"         # Crop to element bounding box (~1.6k tokens — 12× win)
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
 agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not just its heading
+agent-view screenshot --testid order-card      # Crop to the element with this test id
+agent-view screenshot --selector ".chart"      # Crop to the first visible selector match
 agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
 ```
 
-`--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing.
+`--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing. `--testid` / `--selector` crop the same way and take `--crop-up`, but a miss exits 1 instead: an exact address that misses is a wrong address, and a full-window capture would spend ~19k tokens on it.
 
 A text filter usually matches the text-bearing node, so cropping on a section title returns a thin strip of that title. `--crop-up <n>` climbs `n` element ancestors before cropping — use `1` (sometimes `2`) to get the surrounding card/section. When a crop comes back text-sized, the command says so on stderr.
 

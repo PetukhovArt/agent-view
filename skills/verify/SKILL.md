@@ -23,7 +23,7 @@ read it before your first call in a session.
 |--------------------------------------|----------------------------------------------------------------|
 | `launch` `discover` `stop` `targets` | start the app; list windows and worker targets                 |
 | `dom`                                | accessibility tree — filter, count, diff, depth cap            |
-| `click` `fill` `drag`                | interaction by ref, by text, or by coordinate                  |
+| `click` `fill` `drag`                | interaction by ref, text or coordinate; `click` `fill` also by test id or selector |
 | `wait`                               | block until an element appears; non-zero on timeout            |
 | `dialog` `upload`                    | JS modals and native file pickers                              |
 | `screenshot`                         | full window, scaled, or cropped to one element                 |
@@ -47,6 +47,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Count of matching elements                                       | `dom --filter X --count`                                     | Single integer, no tree output, no ref mutations                                            |
 | App state, store contents, computed values                       | `eval "expr"`                                                | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable        |
 | Does `window.X` / a globally-exposed API exist?                  | `eval "typeof window.X"`                                     | DOM doesn't show JS globals; only authoritative check                                       |
+| Acting on an element `dom` shows with `[testid=…]`               | `click` / `fill` / `wait --testid <id>`                      | Survives HMR, navigation and copy changes; a ref and a text filter do not                   |
 | An element that has not rendered yet                             | `wait --filter "<text>"`                                     | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause             |
 | State *trajectory* — what changed during/after an action         | `watch "expr" --until …` or `--max-changes 1`                | `eval` shows the final snapshot only; `watch` shows the diffs in order                      |
 | Worker logic (SharedWorker / ServiceWorker)                      | `eval --target <name>`                                       | Workers have no DOM at all                                                                  |

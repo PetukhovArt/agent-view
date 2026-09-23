@@ -903,6 +903,14 @@ type DOMDebuggerDomain = {
   getEventListeners: (p: Record<string, unknown>) => Promise<{ listeners: RawEventListener[] }>
 }
 
+/** `DOMSnapshot.captureSnapshot`, reduced to the node attributes. Strings are indices into `strings`. */
+type DOMSnapshotDomain = {
+  captureSnapshot: (p: Record<string, unknown>) => Promise<{
+    documents: Array<{ nodes: { backendNodeId?: number[]; attributes?: number[][] } }>
+    strings: string[]
+  }>
+}
+
 type DebuggerDomain = {
   enable: () => Promise<unknown>
   disable: () => Promise<unknown>
@@ -1008,6 +1016,7 @@ export async function connectToPage(
     DOMDebugger: DOMDebuggerDomain
   }
   const DOMDebugger = (client as RawCDPClient & { DOMDebugger: DOMDebuggerDomain }).DOMDebugger
+  const DOMSnapshot = (client as RawCDPClient & { DOMSnapshot: DOMSnapshotDomain }).DOMSnapshot
   const cacheKey = `${port}:${target.id}`
 
   // Subscribe BEFORE enable so we catch buffered console/log entries emitted at enable-time.
@@ -1222,6 +1231,49 @@ export async function connectToPage(
       return listenersOn(result.objectId, depth)
     },
 
+    async queryVisible(selector) {
+      const all = `document.querySelectorAll(${JSON.stringify(selector)})`
+      const counted = await Runtime.evaluate({ expression: `${all}.length`, returnByValue: true })
+      if (counted.exceptionDetails) throw new EvaluationError(`Invalid selector ${JSON.stringify(selector)}`)
+      const count = Number(counted.result.value)
+      if (count === 0) return { backendDOMNodeId: null, count }
+
+      // objectId, not nodeId — same reasoning as `uploadBySelector`. `checkVisibility` is
+      // Chromium 105+; the fallback still rules out `display:none`.
+      const { result } = await Runtime.evaluate({
+        expression: `[...${all}].find(el => el.checkVisibility
+          ? el.checkVisibility({ visibilityProperty: true })
+          : el.getClientRects().length > 0) ?? null`,
+        returnByValue: false,
+      })
+      if (!result.objectId) return { backendDOMNodeId: null, count }
+      const { node } = await DOM.describeNode({ objectId: result.objectId })
+      return { backendDOMNodeId: node.backendNodeId, count }
+    },
+
+    async getTestIds(attributes) {
+      const ids = new Map<number, string>()
+      // Skips the whole-document snapshot on the many pages that carry no test ids.
+      const probe = await Runtime.evaluate({
+        expression: `document.querySelector(${JSON.stringify(attributes.map(a => `[${a}]`).join(','))}) !== null`,
+        returnByValue: true,
+      })
+      if (probe.result.value !== true) return ids
+
+      const wanted = new Set(attributes)
+      const { documents, strings } = await DOMSnapshot.captureSnapshot({ computedStyles: [] })
+      for (const { nodes } of documents) {
+        const backendIds = nodes.backendNodeId ?? []
+        nodes.attributes?.forEach((pairs, n) => {
+          // `pairs` is [name, value, name, value, …], each an index into `strings`.
+          const at = pairs.findIndex((name, i) => i % 2 === 0 && wanted.has(strings[name]))
+          const value = at === -1 ? '' : strings[pairs[at + 1]]
+          if (value) ids.set(backendIds[n], value)
+        })
+      }
+      return ids
+    },
+
     onJsDialog: (handler) => jsDialogSub.add(handler),
     answerJsDialog: (accept, promptText) => jsDialogSub.answer(accept, promptText),
     setJsDialogPolicy: (policy) => jsDialogSub.setPolicy(policy),
@@ -1328,19 +1380,25 @@ export async function connectToPage(
 
     async fillByNodeId(backendNodeId: number, value: string): Promise<void> {
       const { object } = await DOM.resolveNode({ backendNodeId })
-      await DOM.focus({ backendNodeId })
-      await Runtime.callFunctionOn({
+      // A test id usually sits on a component's wrapper, not on the field inside it.
+      // tagName, not instanceof: a field in an iframe belongs to another realm. The
+      // native setter is what framework value trackers (React) see.
+      const filled = await Runtime.callFunctionOn({
         objectId: object.objectId,
         functionDeclaration: `function(val) {
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-            || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-          if (nativeSetter) nativeSetter.call(this, val);
-          else this.value = val;
-          this.dispatchEvent(new Event('input', { bubbles: true }));
-          this.dispatchEvent(new Event('change', { bubbles: true }));
+          const field = this.matches('input, textarea') ? this : this.querySelector('input:not([type=hidden]), textarea');
+          if (!field) return false;
+          field.focus();
+          const proto = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, 'value').set.call(field, val);
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+          field.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         }`,
         arguments: [{ value }],
-      })
+        returnByValue: true,
+      }) as { result?: { value?: unknown } }
+      if (filled.result?.value !== true) throw new EvaluationError('No input or textarea at or inside the element')
     },
 
     async close(): Promise<void> {

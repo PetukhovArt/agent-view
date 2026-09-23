@@ -267,6 +267,18 @@ export type PageSession = RuntimeSession & {
    * matches nothing or is malformed.
    */
   getEventListenersBySelector: (selector: string, depth?: number) => Promise<EventListenerInfo[] | null>
+  /**
+   * How many elements match a CSS selector, and the first of them that is visible
+   * (`null` when none is). A hidden first match — a `v-show` copy, a closed popover —
+   * has no box to click and no reason to satisfy a wait. Throws `EvaluationError`
+   * on a malformed selector.
+   */
+  queryVisible: (selector: string) => Promise<{ backendDOMNodeId: number | null; count: number }>
+  /**
+   * `backendDOMNodeId` → test id for every element carrying one of `attributes`.
+   * The AX tree has no attributes, so this is the only way to put test ids next to refs.
+   */
+  getTestIds: (attributes: readonly string[]) => Promise<Map<number, string>>
   getAccessibilityTree: () => Promise<AXNode[]>
   /** Same as getAccessibilityTree but also signals whether nodes came from the AX tree cache. */
   getAccessibilityTreeMeta: () => Promise<{ nodes: AXNode[]; fromCache: boolean }>
