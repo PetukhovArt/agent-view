@@ -41,6 +41,8 @@ import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
 import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
+import { SERVER_PORT, TOKEN_DIR, TOKEN_PATH } from './port.js'
+import { ReloadedAfterAction, isDeadSocket, runAct, type ActSession } from './act-session.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -54,7 +56,6 @@ import {
 } from './log-recorder.js'
 import type { AgentViewConfig } from '../config/types.js'
 
-const SERVER_PORT = 47922
 /**
  * Every non-streaming command answers within this budget (plus its own `--timeout`,
  * for the commands that poll). A CDP call that never returns used to leave the CLI
@@ -68,8 +69,6 @@ const VALID_ENGINES = new Set<WebGLEngine>(Object.values(WebGLEngine))
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const DELIMITER = '\n'
 const MAX_BUFFER_SIZE = 1_048_576 // 1 MB
-const TOKEN_DIR = join(homedir(), '.agent-view')
-const TOKEN_PATH = join(TOKEN_DIR, 'token')
 const EVAL_OUTPUT_CAP = 64 * 1024
 const DEFAULT_CONSOLE_TARGETS: ReadonlyArray<TargetType> = [TargetType.Page, TargetType.SharedWorker, TargetType.ServiceWorker]
 const DEFAULT_NETWORK_BUFFER = 200
@@ -214,6 +213,7 @@ type PortState = {
   networkRefs: Map<number, { targetId: string; requestId: string }>
   networkNextRef: number
   logRecorder: LogRecorder | null
+  act: ActSession | null
 }
 
 export class AgentViewServer {
@@ -251,6 +251,7 @@ export class AgentViewServer {
     coverage: (req: ServerRequest) => this.handleCoverage(req),
     listeners: (req: ServerRequest) => this.handleListeners(req),
     heap: (req: ServerRequest) => this.handleHeap(req),
+    act: (req: ServerRequest) => this.handleAct(req),
     stop: () => this.handleStop(),
   } as const satisfies Record<string, (req: ServerRequest) => Promise<ServerResponse>>
 
@@ -286,6 +287,7 @@ export class AgentViewServer {
         networkRefs: new Map(),
         networkNextRef: 1,
         logRecorder: null,
+        act: null,
       }
       this.portStates.set(port, state)
     }
@@ -766,6 +768,35 @@ export class AgentViewServer {
     await conn.clickByNodeId(entry.backendDOMNodeId, clickOpts)
     this.axTreeCache.invalidate(cacheKey)
     return { ok: true, data: `${verb} ref ${ref}` }
+  }
+
+  private async handleAct(req: ServerRequest): Promise<ServerResponse> {
+    const run = async (args: Record<string, unknown> = req.args) => {
+      const { targetId } = await this.resolveWindow(req)
+      const conn = await this.getPageSession(req, targetId)
+      const cacheKey = `${req.port}:${targetId}`
+      const reconnect = async () => {
+        this.dropSessionsForPort(req.port)
+        return this.getPageSession(req, (await this.resolveWindow(req)).targetId)
+      }
+      return runAct(this.stateFor(req.port), args, { conn, invalidateAxCache: () => this.axTreeCache.invalidate(cacheKey), reconnect })
+    }
+    try {
+      return await run()
+    } catch (err) {
+      // A login that reloads the window kills the cached socket before its disconnect
+      // event lands. Observing ops are safe to repeat on a fresh one; an action is not,
+      // unless it is known to have gone out — then settle on the new document instead.
+      if (err instanceof ReloadedAfterAction) {
+        this.dropSessionsForPort(req.port)
+        const settled = await run({ ...req.args, op: 'wait' })
+        if (!settled.ok) return settled
+        return { ok: true, data: String(settled.data).replace(/^✓ wait · \d+ms/, `✓ ${err.done} · window reloaded`) }
+      }
+      if (!isDeadSocket(err) || !['start', 'table', 'wait'].includes(String(req.args.op))) throw err
+      this.dropSessionsForPort(req.port)
+      return run()
+    }
   }
 
   private async handleDrag(req: ServerRequest): Promise<ServerResponse> {

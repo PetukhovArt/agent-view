@@ -21,6 +21,8 @@ import {
   type TargetInfo,
   type RuntimeSession,
   type PageSession,
+  type LayoutNode,
+  type LayoutSnapshot,
   type ConsoleMessage,
   type EvaluateOpts,
   type DragOpts,
@@ -906,7 +908,13 @@ type DOMDebuggerDomain = {
 /** `DOMSnapshot.captureSnapshot`, reduced to the node attributes. Strings are indices into `strings`. */
 type DOMSnapshotDomain = {
   captureSnapshot: (p: Record<string, unknown>) => Promise<{
-    documents: Array<{ nodes: { backendNodeId?: number[]; attributes?: number[][] } }>
+    documents: Array<{
+      nodes: { backendNodeId?: number[]; attributes?: number[][]; nodeName?: number[] }
+      /** `styles[i]` holds the requested `computedStyles`, in request order. */
+      layout: { nodeIndex: number[]; bounds: number[][]; styles?: number[][] }
+      scrollOffsetX?: number
+      scrollOffsetY?: number
+    }>
     strings: string[]
   }>
 }
@@ -915,6 +923,8 @@ type DebuggerDomain = {
   enable: () => Promise<unknown>
   disable: () => Promise<unknown>
 }
+
+const SCROLL_VIEWPORT_FRACTION = 0.8
 
 /** Bounds the wait for the `scriptParsed` replay when an id is still missing. */
 const SCRIPT_PARSED_DEADLINE_MS = 1_000
@@ -1010,8 +1020,8 @@ export async function connectToPage(
   const client = await openClient(port, target)
   const { Runtime, Accessibility, Page, DOM, Input } = client as RawCDPClient & {
     Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
-    Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number } }>; frameNavigated: (cb: () => void) => unknown }
-    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown> }
+    Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
+    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown>; getNodeForLocation: (p: Record<string, unknown>) => Promise<{ backendNodeId: number }> }
     Input: InputDomain
     DOMDebugger: DOMDebuggerDomain
   }
@@ -1399,6 +1409,94 @@ export async function connectToPage(
         returnByValue: true,
       }) as { result?: { value?: unknown } }
       if (filled.result?.value !== true) throw new EvaluationError('No input or textarea at or inside the element')
+    },
+
+    async getLayoutSnapshot(): Promise<LayoutSnapshot> {
+      const [{ documents, strings }, { layoutViewport, cssLayoutViewport }] = await Promise.all([
+        DOMSnapshot.captureSnapshot({ computedStyles: ['cursor'] }),
+        Page.getLayoutMetrics(),
+      ])
+      // Snapshot bounds are device pixels. At an OS scale of 125% a button at CSS y=517
+      // lands at 646 and falls off a 644 CSS-px viewport unless scaled back.
+      const dpr = layoutViewport.clientWidth / cssLayoutViewport.clientWidth
+      const nodes = new Map<number, LayoutNode>()
+      for (const doc of documents) {
+        const backendIds = doc.nodes.backendNodeId ?? []
+        doc.layout.nodeIndex.forEach((n, i) => {
+          const [x, y, width, height] = doc.layout.bounds[i]
+          const pairs = doc.nodes.attributes?.[n] ?? []
+          const attributes: Record<string, string> = {}
+          for (let a = 0; a < pairs.length; a += 2) attributes[strings[pairs[a]]] = strings[pairs[a + 1]]
+          nodes.set(backendIds[n], {
+            // Bounds are document-relative; the table wants what is on screen now.
+            rect: {
+              x: (x - (doc.scrollOffsetX ?? 0)) / dpr,
+              y: (y - (doc.scrollOffsetY ?? 0)) / dpr,
+              width: width / dpr,
+              height: height / dpr,
+            },
+            tag: (strings[doc.nodes.nodeName?.[n] ?? -1] ?? '').toLowerCase(),
+            attributes,
+            cursor: strings[doc.layout.styles?.[i]?.[0] ?? -1] ?? '',
+          })
+        })
+      }
+      return { viewport: { width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight }, nodes }
+    },
+
+    async hitTest(backendNodeId: number, testIdAttributes: readonly string[]): Promise<string | null> {
+      const { x, y } = await resolveBoxCenter(backendNodeId, true)
+      const hit = await DOM.getNodeForLocation({ x: Math.round(x), y: Math.round(y) })
+      if (hit.backendNodeId === backendNodeId) return null
+      const [target, other] = await Promise.all([
+        DOM.resolveNode({ backendNodeId }),
+        DOM.resolveNode({ backendNodeId: hit.backendNodeId }),
+      ])
+      const verdict = await Runtime.callFunctionOn({
+        objectId: target.object.objectId,
+        functionDeclaration: `function(hit, attrs) {
+          const el = hit.nodeType === Node.TEXT_NODE ? hit.parentElement : hit;
+          if (this.contains(el) || el.contains(this)) return null;
+          const id = el.id ? '#' + el.id : '';
+          const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).join('.') : '';
+          const attr = attrs.find(a => el.hasAttribute(a));
+          return el.tagName.toLowerCase() + id + cls + (attr ? ' testid=' + el.getAttribute(attr) : '');
+        }`,
+        arguments: [{ objectId: other.object.objectId }, { value: testIdAttributes }],
+        returnByValue: true,
+      }) as { result?: { value?: unknown } }
+      return typeof verdict.result?.value === 'string' ? verdict.result.value : null
+    },
+
+    async selectOption(backendNodeId: number, optionText: string): Promise<'ok' | 'not-select' | 'no-option'> {
+      const { object } = await DOM.resolveNode({ backendNodeId })
+      const outcome = await Runtime.callFunctionOn({
+        objectId: object.objectId,
+        functionDeclaration: `function(text) {
+          if (this.tagName !== 'SELECT') return 'not-select';
+          const option = [...this.options].find(o => o.text.trim() === text.trim());
+          if (!option) return 'no-option';
+          this.value = option.value;
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+          return 'ok';
+        }`,
+        arguments: [{ value: optionText }],
+        returnByValue: true,
+      }) as { result?: { value?: 'ok' | 'not-select' | 'no-option' } }
+      return outcome.result?.value ?? 'not-select'
+    },
+
+    async scrollViewport(direction: 'up' | 'down'): Promise<void> {
+      const { cssLayoutViewport } = await Page.getLayoutMetrics()
+      const deltaY = Math.round(cssLayoutViewport.clientHeight * SCROLL_VIEWPORT_FRACTION) * (direction === 'down' ? 1 : -1)
+      await Input.dispatchMouseEvent({
+        type: 'mouseWheel',
+        x: Math.round(cssLayoutViewport.clientWidth / 2),
+        y: Math.round(cssLayoutViewport.clientHeight / 2),
+        deltaX: 0,
+        deltaY,
+      })
     },
 
     async close(): Promise<void> {

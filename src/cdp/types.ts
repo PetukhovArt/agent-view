@@ -298,6 +298,27 @@ export type PageSession = RuntimeSession & {
   getBoxRect: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean; ancestorLevels?: number }) => Promise<ScreenshotClip>
   /** CDP-level drag. Reports whether Chromium turned it into an HTML5 drag and what payload it carried. */
   dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<DragResult>
+  /** One `DOMSnapshot` for the whole page: viewport-relative rect, tag and attributes of every laid-out element. */
+  getLayoutSnapshot: () => Promise<LayoutSnapshot>
+  /** Scroll into view, hit-test the box centre. null = the element (or its descendant/ancestor) receives the click; else a short description of what covers it. */
+  hitTest: (backendDOMNodeId: number, testIdAttributes: readonly string[]) => Promise<string | null>
+  /** Pick an option of a native `<select>` by its visible text. */
+  selectOption: (backendDOMNodeId: number, optionText: string) => Promise<'ok' | 'not-select' | 'no-option'>
+  /** Mouse wheel at the viewport centre, ~0.8 viewport height. */
+  scrollViewport: (direction: 'up' | 'down') => Promise<void>
+}
+
+export type LayoutNode = {
+  rect: ScreenshotClip
+  tag: string
+  attributes: Record<string, string>
+  /** Computed `cursor`. */
+  cursor: string
+}
+
+export type LayoutSnapshot = {
+  viewport: { width: number; height: number }
+  nodes: Map<number, LayoutNode>
 }
 
 export type AXNode = {
@@ -307,6 +328,8 @@ export type AXNode = {
   childIds?: string[]
   backendDOMNodeId?: number
   properties?: AXProperty[]
+  value?: { value?: unknown }
+  ignored?: boolean
 }
 
 export type AXProperty = {

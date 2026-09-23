@@ -11,6 +11,7 @@ listing call — always expand from the most recent one.
 - [Interaction](#interaction) — `click`, `fill`, `drag`
 - [Modals & file pickers](#modals--file-pickers-dialog-upload) — `dialog`, `upload`
 - [Waiting](#waiting-wait) — `wait`
+- [Step protocol](#step-protocol-act) — `act`
 - [Screenshots](#screenshots) — `screenshot`
 - [Runtime state](#runtime-state-eval) — `eval`
 - [Reactive state](#reactive-state-watch) — `watch`
@@ -181,6 +182,71 @@ was hidden.
 **Never sleep for a fixed time** — see the waiting-signal table in `SKILL.md`. If no condition-based
 wait fits, poll `dom --filter X --count` with an explicit attempt cap and report the attempt count.
 
+
+### Step protocol (`act`)
+
+For a driver that only ever answers `op n [text]`. Each call acts, waits for the UI to settle,
+checks the done condition, and prints a fresh numbered control table.
+
+```bash
+agent-view act start --until-testid workspace-root   # new session for this CDP port; prints the table
+agent-view act start --until-selector ".dashboard" --max-steps 20   # budget, default 30
+agent-view act start                    # no until: DONE never fires, the driver decides when to stop
+agent-view act table                    # re-snapshot, print the table
+agent-view act click 3                  # row numbers refer to the LAST printed table
+agent-view act type 1 "admin"           # fill
+agent-view act select 4 "Monthly"       # native <select> only
+agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
+agent-view act do "type 2 root" "type 3 secret" "click 1"   # several ops, all numbered from ONE table; stops at the first BLOCKED/DONE/error
+agent-view act drag 5                   # pointer-drag row 5 onto the viewport centre
+agent-view act drag 5 2                 # … onto the centre of row 2
+agent-view act drag 7 testid=video-panel right   # … onto any visible element by test id, 20 px inside its right edge
+agent-view act drag 7 center left       # … near the viewport's left edge; edge: left|right|top|bottom|center (default)
+agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
+agent-view act save login               # writes ~/.agent-view/scratch/login.json, prints the path
+agent-view act start --until-testid x --save login   # same, written automatically on DONE (one turn fewer)
+AGENT_VIEW_SECRET=… agent-view act replay login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE
+```
+
+Table — interactive controls visible in the viewport, renumbered from 1 on every print, capped at
+150 rows (`… N more below — act scroll down`). A wrapper that boxes a control of its own role
+(Vuetify `v-field` around its input) is folded into the inner one. After the AX rows come `item`
+rows: elements with no interactive role but a test id and computed `cursor: pointer` (a
+`<div @pointerdown>` widget-bar entry), so they can be clicked or dragged. Password values print as
+`••••`, or `empty`:
+
+```
+act step 2/30 · 14 controls · until testid "workspace-root"
+[1] textbox "Логин" testid=login-input · "admin"
+[2] textbox "Пароль" testid=password · ••••
+[3] button "Войти" testid=login-btn
+[4] checkbox "Запомнить" · checked
+```
+
+First line of an op's output:
+
+| Line | Meaning |
+|---|---|
+| `✓ click [3] button "Войти" · 240ms` | acted and settled; the new table follows |
+| `✓ drag [7] item "ГИС" testid=nav__widgetbar__item-GisWidget → testid=video-panel right · 310ms` | dragged: `→` names the target and edge |
+| `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
+| `BLOCKED: [3] button "Войти" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
+| `BLOCKED: [3] covered by div.overlay testid=spinner` | something else receives the click; fresh table follows, nothing was done |
+| `BLOCKED: step budget 30 exhausted` | `--max-steps` reached |
+
+Errors (non-zero exit): `` run `agent-view act start` first ``, `not a native select — click it`,
+`[n] is a <role>, not a text field` (`type` on a non-text row),
+`act drag <n> [to] [edge] — edge is one of left|right|top|bottom|center`.
+The saved script names each control by test id, else role + name — never by row number — and
+stores no password. `act replay` runs it inside the server: each step waits (50 ms polls, 10 s cap)
+only for its own control to be on screen, enabled and uncovered, then acts; a window reload
+mid-run is ridden over. Its one line:
+
+| Line | Exit | Meaning |
+|---|---|---|
+| `DONE: replay login · 2 steps · 1.8s (steps 0.1s, then waiting for testid "x")` | 0 | until met |
+| `FAIL: replay login — steps ran, testid "x" not visible after 15s` | 1 | the app did not answer — likely a bug |
+| `STALE: step 2/2 click button "Войти" — not on screen, enabled and uncovered within 10s` | 3 | the script no longer fits the app — re-record it |
 
 ### Screenshots
 ```bash

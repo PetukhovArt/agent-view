@@ -34,6 +34,7 @@ import { runCoverage } from './commands/coverage.js'
 import { runListeners } from './commands/listeners.js'
 import { runHeap } from './commands/heap.js'
 import { runUpload } from './commands/upload.js'
+import { runAct } from './commands/act.js'
 import type { AgentViewConfig } from '../config/types.js'
 
 // Resolve version from package.json at runtime — same path in dev (src/cli) and build (dist/cli).
@@ -402,6 +403,51 @@ heap
     const config = requireConfig()
     await runHeap(config, 'clear', {})
   })
+
+const act = program
+  .command('act')
+  .description('Step protocol: act on a numbered control table, settle, check a done condition')
+
+act
+  .command('start')
+  .description('New act session for this CDP port; prints the control table')
+  .option('--until-testid <id>', 'Done when an element with this test id is visible')
+  .option('--until-selector <css>', 'Done when a match of this selector is visible')
+  .option('--max-steps <n>', 'Step budget (default 30)', (v: string) => parseInt(v, 10))
+  .option('--save <name>', 'Write the replay script on DONE (same as act save <name>)')
+  .action(async (options) => {
+    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save })
+  })
+
+act.command('table').description('Re-snapshot and print the control table')
+  .action(async () => { await runAct(requireConfig(), { op: 'table' }) })
+
+act.command('click <n>').description('Click row n of the last table')
+  .action(async (n: string) => { await runAct(requireConfig(), { op: 'click', n: Number(n) }) })
+
+act.command('type <n> <text>').description('Fill row n with text')
+  .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'type', n: Number(n), text }) })
+
+act.command('select <n> <option>').description('Pick an option of a native <select> by its text')
+  .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'select', n: Number(n), text }) })
+
+act.command('scroll <direction>').description('Wheel up or down by ~0.8 viewport')
+  .action(async (direction: string) => { await runAct(requireConfig(), { op: 'scroll', direction }) })
+
+act.command('drag <n> [to] [edge]').description('Pointer-drag row n onto `to` (a row, testid=<id>, or `center`/omitted = the viewport), near its left|right|top|bottom edge or center (default)')
+  .action(async (n: string, to: string | undefined, edge: string | undefined) => { await runAct(requireConfig(), { op: 'drag', n: Number(n), to, edge }) })
+
+act.command('do <steps...>').description('Several ops decided from one table, e.g. act do "type 2 root" "type 3 secret" "click 1"')
+  .action(async (steps: string[]) => { await runAct(requireConfig(), { op: 'do', steps }) })
+
+act.command('wait').description('No action: settle up to 3 s for the app to react, then print the table')
+  .action(async () => { await runAct(requireConfig(), { op: 'wait' }) })
+
+act.command('replay <name>').description('Run a saved act script with no model. Exit 0 DONE, 1 FAIL (until never came), 3 STALE (a control is gone). Passwords from $AGENT_VIEW_SECRET')
+  .action(async (name: string) => { await runAct(requireConfig(), { op: 'replay', name, secret: process.env.AGENT_VIEW_SECRET }) })
+
+act.command('save <name>').description('Write the recorded steps as a replay script; prints its path')
+  .action(async (name: string) => { await runAct(requireConfig(), { op: 'save', name }) })
 
 program
   .command('listeners')
