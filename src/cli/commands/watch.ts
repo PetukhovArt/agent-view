@@ -3,7 +3,7 @@ import type { AgentViewConfig } from '../../config/types.js'
 import { readToken, startServer } from '../client.js'
 import { WATCH_MIN_INTERVAL_MS, type WatchFrame, type JsonPatchOp } from '../../inspectors/watch/types.js'
 
-const SERVER_PORT = 47922
+import { SERVER_PORT } from '../../server/port.js'
 const DELIMITER = '\n'
 
 export type WatchOptions = {

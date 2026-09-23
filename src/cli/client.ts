@@ -4,12 +4,10 @@ import { createRequire } from 'node:module'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { SERVER_PORT, TOKEN_PATH } from '../server/port.js'
 import type { ServerRequest, ServerResponse } from '../types.js'
 
-const SERVER_PORT = 47922
 const DELIMITER = '\n'
-const TOKEN_PATH = join(homedir(), '.agent-view', 'token')
 /** Backstop above the server-side deadline: the CLI must always exit, even against a wedged server. */
 const CLIENT_DEADLINE_MS = 120_000
 
