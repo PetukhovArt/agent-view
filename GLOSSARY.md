@@ -180,6 +180,26 @@ _Avoid_: Assertion, Check
 The comparison of a captured screenshot against a reference image, given as the triple of a label, a capture command and a reference path.
 _Avoid_: Visual Regression, Pixel Diff
 
+**Act Session**
+Server-side state of one step-protocol run on a CDP port: the done condition, the rows of the last printed Control Table, and the recorded steps. `act start` opens a new one and discards the previous.
+_Avoid_: Act Run, Scenario Session
+
+**Control Table**
+The numbered list of visible controls an Act Session prints after every step: role, name, value, states, test id. Row numbers are valid only for the table printed last.
+_Avoid_: Element List, Snapshot
+
+**Act Step**
+One CLI call of the step protocol: re-snapshot, map the row, hit-test, act, settle, check the done condition, print DONE or the next Control Table.
+_Avoid_: Action, Move
+
+**Decider**
+Whatever turns a Control Table into the next Act Step (`op n [text]`). Outside agent-view by design; the first one is the `act-decider` subagent.
+_Avoid_: Driver, Solver, Agent
+
+**Replay**
+A saved Act Session re-run inside the server with no Decider. Ends DONE, FAIL (the app did not reach the done condition) or STALE (a recorded control is gone — the recording no longer fits the app).
+_Avoid_: Script Run, Playback
+
 **requires_visual_review**
 A Verification Run step verdict: an executable check was made and gave no answer, and no one has looked at the step yet. Not a way to describe a step that has no executable check.
 _Avoid_: Manual Check, TODO
