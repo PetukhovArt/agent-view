@@ -29,15 +29,15 @@ export type ScreenshotClip = {
 }
 
 export type ScreenshotOpts = {
-  /** Scale factor (0 < scale ≤ 1). Values < 1 use WebP at q=80 (JPEG fallback for old Chrome/Electron). */
+  /** Scale factor (0 < scale ≤ 1), applied in-process after the capture. */
   scale?: number
-  /** Crop to this rect before capturing. Combined with scale when both are set. */
+  /** Crop to this rect (CSS px, viewport-relative). Combined with scale when both are set. */
   clip?: ScreenshotClip
 }
 
 export type ScreenshotResult = {
   buffer: Buffer
-  format: 'png' | 'jpeg' | 'webp'
+  format: 'png'
 }
 
 export enum MouseButton {

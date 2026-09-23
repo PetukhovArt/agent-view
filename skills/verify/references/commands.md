@@ -158,7 +158,7 @@ wait fits, poll `dom --filter X --count` with an explicit attempt cap and report
 
 ### Screenshots
 ```bash
-agent-view screenshot --scale 0.5              # Recommended: JPEG at half-res (~3× fewer vision tokens)
+agent-view screenshot --scale 0.5              # Recommended: half-res PNG (~3× fewer vision tokens)
 agent-view screenshot --scale 0.5 --window <id>  # Specific window
 agent-view screenshot --crop "Sidebar"         # Crop to element bounding box (~1.6k tokens — 12× win)
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)

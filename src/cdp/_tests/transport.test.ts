@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { deflateSync, inflateSync } from 'node:zlib'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
 
@@ -132,63 +133,54 @@ const workerTarget: TargetInfo = { id: 'worker-1', type: TargetType.SharedWorker
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+// 4×2 device px, left half red, right half blue — a 2×1 CSS viewport at DPR 2.
+function twoColorPng(): string {
+  const row = [0, 255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255]
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(4, 0)
+  ihdr.writeUInt32BE(2, 4)
+  ihdr[8] = 8
+  ihdr[9] = 6
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    return Buffer.concat([len, Buffer.from(type, 'latin1'), data, Buffer.alloc(4)])
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.from([...row, ...row]))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64')
+}
+
 describe('captureScreenshot', () => {
   beforeEach(() => {
     mockCaptureScreenshot.mockClear()
     mockGetLayoutMetrics.mockClear()
   })
 
-  it('default (no scale) calls captureScreenshot with png format, no clip', async () => {
+  it('default (no scale) returns the png as captured', async () => {
+    mockCaptureScreenshot.mockResolvedValueOnce({ data: twoColorPng() })
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.captureScreenshot()
+    const result = await conn.captureScreenshot()
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
-    expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
+    expect(result.buffer.toString('base64')).toBe(twoColorPng())
   })
 
-  it('scale=1 behaves same as no scale', async () => {
+  // A clip makes Chromium resize the render view until the capture completes;
+  // on a hidden window it never completes and the app stays shrunk.
+  it('crops and scales in-process, never sending a clip to Chromium', async () => {
+    mockCaptureScreenshot.mockResolvedValueOnce({ data: twoColorPng() })
+    mockGetLayoutMetrics.mockResolvedValueOnce({ layoutViewport: { clientWidth: 4 }, cssLayoutViewport: { clientWidth: 2 } })
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.captureScreenshot({ scale: 1 })
+    const { buffer } = await conn.captureScreenshot({ scale: 0.5, clip: { x: 1, y: 0, width: 1, height: 1 } })
+
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
-    expect(mockGetLayoutMetrics).not.toHaveBeenCalled()
-  })
-
-  it('scale=0.5 fetches layout metrics and requests webp format', async () => {
-    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    const result = await conn.captureScreenshot({ scale: 0.5 })
-    expect(mockGetLayoutMetrics).toHaveBeenCalledOnce()
-    expect(mockCaptureScreenshot).toHaveBeenCalledWith({
-      format: 'webp',
-      quality: 80,
-      clip: { x: 0, y: 0, width: 1280, height: 720, scale: 0.5 },
-    })
-    expect(result.format).toBe('webp')
-  })
-
-  it('scale=0.25 uses viewport dimensions from getLayoutMetrics', async () => {
-    mockGetLayoutMetrics.mockResolvedValueOnce({
-      cssLayoutViewport: { clientWidth: 1920, clientHeight: 1080 },
-    })
-
-    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    await conn.captureScreenshot({ scale: 0.25 })
-
-    expect(mockCaptureScreenshot).toHaveBeenCalledWith(
-      expect.objectContaining({
-        clip: expect.objectContaining({ width: 1920, height: 1080, scale: 0.25 }),
-      }),
-    )
-  })
-
-  it('falls back to jpeg when webp throws', async () => {
-    mockCaptureScreenshot.mockRejectedValueOnce(new Error('Invalid format'))
-
-    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
-    const result = await conn.captureScreenshot({ scale: 0.5 })
-
-    expect(result.format).toBe('jpeg')
-    expect(mockCaptureScreenshot).toHaveBeenCalledTimes(2)
-    expect(mockCaptureScreenshot).toHaveBeenNthCalledWith(1, expect.objectContaining({ format: 'webp' }))
-    expect(mockCaptureScreenshot).toHaveBeenNthCalledWith(2, expect.objectContaining({ format: 'jpeg' }))
+    expect([buffer.readUInt32BE(16), buffer.readUInt32BE(20)]).toEqual([1, 1])
+    const idatLen = buffer.readUInt32BE(33)
+    const pixel = inflateSync(buffer.subarray(41, 41 + idatLen)).subarray(1)
+    expect([...pixel]).toEqual([0, 0, 255, 255])
   })
 })
 

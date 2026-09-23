@@ -1198,8 +1198,7 @@ export class AgentViewServer {
     opts: { scale?: number; clip?: { x: number; y: number; width: number; height: number } } = {},
   ): Promise<string> {
     const { buffer, format } = await conn.captureScreenshot(opts)
-    const ext = format === 'jpeg' ? 'jpg' : format
-    const filename = `agent-view-screenshot-${Date.now()}.${ext}`
+    const filename = `agent-view-screenshot-${Date.now()}.${format}`
     const filepath = join(tmpdir(), filename)
     await writeFile(filepath, buffer)
     return filepath

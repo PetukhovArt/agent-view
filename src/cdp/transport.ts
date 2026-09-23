@@ -17,6 +17,7 @@ import {
   type AXNode,
   type ScreenshotClip,
   type ScreenshotOpts,
+  type ScreenshotResult,
   type TargetInfo,
   type RuntimeSession,
   type PageSession,
@@ -37,6 +38,7 @@ import {
   type EventListenerInfo,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
+import { cropScalePng } from './png.js'
 
 // CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
 const CDP_HOSTS = ['127.0.0.1', '::1'] as const
@@ -1000,7 +1002,7 @@ export async function connectToPage(
   const client = await openClient(port, target)
   const { Runtime, Accessibility, Page, DOM, Input } = client as RawCDPClient & {
     Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
-    Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
+    Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number } }>; frameNavigated: (cb: () => void) => unknown }
     DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown> }
     Input: InputDomain
     DOMDebugger: DOMDebuggerDomain
@@ -1041,8 +1043,6 @@ export async function connectToPage(
 
   // null = not yet tested; true = available; false = unavailable (API not supported)
   let queryAXTreeAvailable: boolean | null = null
-  // null = not yet tested; true = webp supported; false = not supported (old Chrome/Electron)
-  let webpSupported: boolean | null = null
 
   Page.frameNavigated(async () => {
     cache.invalidate(cacheKey)
@@ -1265,42 +1265,19 @@ export async function connectToPage(
       }
     },
 
-    async captureScreenshot(opts?: ScreenshotOpts): Promise<{ buffer: Buffer; format: 'png' | 'jpeg' | 'webp' }> {
+    async captureScreenshot(opts?: ScreenshotOpts): Promise<ScreenshotResult> {
+      // Never pass `clip` to Chromium: see cropScalePng for why.
+      const { data } = await Page.captureScreenshot({ format: 'png' })
+      const png = Buffer.from(data, 'base64')
       const scale = opts?.scale ?? 1
-      const explicitClip = opts?.clip
+      if (opts?.clip === undefined && scale >= 1) return { buffer: png, format: 'png' }
 
-      if (explicitClip !== undefined) {
-        const format = scale < 1 ? 'jpeg' : 'png'
-        const params: Record<string, unknown> = { format, clip: { ...explicitClip, scale } }
-        if (format === 'jpeg') params.quality = 80
-        const { data } = await Page.captureScreenshot(params)
-        return { buffer: Buffer.from(data, 'base64'), format }
-      }
-
-      if (scale >= 1) {
-        const { data } = await Page.captureScreenshot({ format: 'png' })
-        return { buffer: Buffer.from(data, 'base64'), format: 'png' }
-      }
-
-      const { cssLayoutViewport } = await Page.getLayoutMetrics()
-      const clip = { x: 0, y: 0, width: cssLayoutViewport.clientWidth, height: cssLayoutViewport.clientHeight, scale }
-
-      if (webpSupported !== false) {
-        try {
-          const { data } = await Page.captureScreenshot({ format: 'webp', quality: 80, clip })
-          webpSupported = true
-          return { buffer: Buffer.from(data, 'base64'), format: 'webp' }
-        } catch {
-          if (webpSupported === null) {
-            // eslint-disable-next-line no-console
-            console.error('[agent-view] WebP not supported by this Chrome/Electron version, falling back to JPEG')
-            webpSupported = false
-          }
-        }
-      }
-
-      const { data } = await Page.captureScreenshot({ format: 'jpeg', quality: 80, clip })
-      return { buffer: Buffer.from(data, 'base64'), format: 'jpeg' }
+      // The capture is in device pixels, clip rects are in CSS pixels.
+      const { layoutViewport, cssLayoutViewport } = await Page.getLayoutMetrics()
+      const dpr = layoutViewport.clientWidth / cssLayoutViewport.clientWidth
+      const clip = opts?.clip
+      const rect = clip && { x: clip.x * dpr, y: clip.y * dpr, width: clip.width * dpr, height: clip.height * dpr }
+      return { buffer: cropScalePng(png, rect, Math.min(scale, 1)), format: 'png' }
     },
 
     async clickByNodeId(backendNodeId: number, opts?: ClickOpts): Promise<void> {

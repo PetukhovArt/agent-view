@@ -34,7 +34,7 @@ Works with any agent that can run shell commands. There's a Claude Code plugin i
 - Electron, Tauri on Windows (WebView2), and plain Chromium. One CLI, same commands. Tauri on macOS/Linux embeds WebKit, which has no Chrome DevTools Protocol, so it is out of reach.
 - `click`, `fill`, and `drag` fire real CDP input events. Vue `v-model`, React controlled inputs, and native fields actually accept the value; synthetic DOM events fail silently there.
 - `watch` emits RFC-6902 JSON-patches of any JS expression between two events. Answers "what mutated after the click?" without parsing screenshots.
-- `dom` returns the accessibility tree with `[ref=N]` handles. `--compact` cuts deep trees by 40–60%; `--diff`, `--count`, and `--max-lines` keep output bounded. `screenshot --crop` and WebP scaling do the same for vision tokens.
+- `dom` returns the accessibility tree with `[ref=N]` handles. `--compact` cuts deep trees by 40–60%; `--diff`, `--count`, and `--max-lines` keep output bounded. `screenshot --crop` and `--scale` do the same for vision tokens.
 - Lazy CDP daemon, one persistent socket, 300 ms AX-tree cache. `dom → click → dom` in about 17 ms.
 
 ---
@@ -147,7 +147,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | Command       | What it gives the agent                                                                |
 |---------------|-----------------------------------------------------------------------------------------|
 | `dom`         | Accessibility tree with `[ref=N]` handles. Flags: `--filter`, `--compact`, `--count`, `--max-lines`, `--diff`. |
-| `screenshot`  | PNG, or scaled WebP, or `--crop <element>` for one element only. Cuts vision tokens.    |
+| `screenshot`  | PNG, scaled with `--scale`, or `--crop <element>` for one element only. Cuts vision tokens. |
 | `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native; `drag` does HTML5 DnD through `Input.dragIntercepted` and pointer DnD through mouse events. |
 | `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
@@ -463,18 +463,18 @@ Out of reach: `showOpenFilePicker()` (File System Access API) exposes no input t
 
 ### `screenshot`
 
-Captures a screenshot, saves to temp dir, prints the file path. PNG by default; WebP (q=80) when `--scale` is set (JPEG fallback for older Chrome/Electron).
+Captures a screenshot, saves to temp dir, prints the file path. Always PNG.
 
 ```bash
 agent-view screenshot
-agent-view screenshot --scale 0.5             # Half-res WebP (~3× fewer vision tokens)
-agent-view screenshot --scale 0.25            # Quarter-res WebP (~12× fewer, 1 tile)
+agent-view screenshot --scale 0.5             # Half-res (~3× fewer vision tokens)
+agent-view screenshot --scale 0.25            # Quarter-res (~12× fewer, 1 tile)
 agent-view screenshot --crop "Sidebar"        # Crop to element bounding box (~12× fewer in best case)
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
 agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not its heading
 ```
 
-`--scale` accepts a factor in `(0, 1]`. CDP-side clip + WebP encode; recommended for agent loops where vision tokens dominate cost.
+`--scale` accepts a factor in `(0, 1]`; recommended for agent loops where vision tokens dominate cost. Crop and scale run inside the server on a plain full-viewport capture: a CDP `clip` resizes the app's render view until the capture completes, and on a hidden or minimised window it never completes, leaving the app drawn in a corner.
 
 `--crop <filter>` resolves a DOM element by the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box before encoding. One tile (~1.6k vision tokens) instead of twelve (~19k) in the best case. If the filter matches nothing a warning is emitted to stderr and the full window is captured instead. Combines naturally with `--scale`.
 

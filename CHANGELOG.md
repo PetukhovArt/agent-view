@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `screenshot --scale` / `--crop` (and `snap --scale`) no longer shrink the app. They passed a `clip` to `Page.captureScreenshot`, and Chromium resizes the render view to the clip for the capture, restoring it only when the capture completes. On a hidden, minimised or covered window it never completes, so after a timeout or a server restart the app stayed drawn at the clip size (640×360, halving on every retry) inside a full-size window. The capture is now always a plain full-viewport PNG; crop and scale run in-process.
+
+### Changed
+- Scaled screenshots are PNG, not WebP/JPEG. Vision tokens depend on pixel size, not file size.
+
 ## [0.16.0] - 2026-09-17
 
 ### Changed
