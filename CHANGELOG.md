@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.0] - 2026-09-25
+
+### Added
+- `act` scripts are stored per project ([ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md)). `act save` and `start --save` write to `.agent-view/scripts/` next to `agent-view.config.json` in the main checkout, and every git worktree of the project uses that same folder. `act replay` falls back to the old `~/.agent-view/scratch/`.
+- `act list` prints the project's scripts, one line each, and works without the app running. Every save regenerates `INDEX.md` in the same folder with the same lines.
+- A script can carry `--note <text>` (what it is for) and `--after <name>` (a script to run first, usually a login). `act start` records the start route: the hash, or the path of an http page. `act replay` runs the `after` script first and skips it when its done condition already holds.
+- `eval --file <path>` reads the code from a file. On Windows the npm `.cmd` shim cuts an argument at its first newline, so multi-line code passed as an argument never reached agent-view.
+- The plugin's `act-decider` saves every run, names it `<section>-<target>` when no name was given, and adds a note. The `verify` skill makes agents check `act list` and replay a script before they explore the UI.
+
 ## [0.17.1] - 2026-09-23
 
 ### Added
