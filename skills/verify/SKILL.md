@@ -50,7 +50,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Does `window.X` / a globally-exposed API exist?                  | `eval "typeof window.X"`                                     | DOM doesn't show JS globals; only authoritative check                                       |
 | Acting on an element `dom` shows with `[testid=…]`               | `click` / `fill` / `wait --testid <id>`                      | Survives HMR, navigation and copy changes; a ref and a text filter do not                   |
 | An element that has not rendered yet                             | `wait --filter "<text>"`                                     | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause             |
-| A multi-step UI scenario with a known end state (login, a form)  | `act start --until-testid <id>` … `act replay <name>`        | One call per step with a small table; hand the loop to the `act-decider` agent — the done check and the replay need no model |
+| Getting to a screen or through a flow with a known end state (login, a form) | `act list` → `act replay <name>`; none fits → `act start --until-testid <id> --save <name>` | Replay takes seconds and no model; a new path goes to the `act-decider` agent and is saved for the next run. See [Reaching the screen](#reaching-the-screen-under-test) |
 | State *trajectory* — what changed during/after an action         | `watch "expr" --until …` or `--max-changes 1`                | `eval` shows the final snapshot only; `watch` shows the diffs in order                      |
 | Worker logic (SharedWorker / ServiceWorker)                      | `eval --target <name>`                                       | Workers have no DOM at all                                                                  |
 | Did the last action throw or warn?                               | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM                                                |
@@ -141,7 +141,19 @@ same data:
 ## Verification Workflow
 
 Run the whole thing inline — **no subagent**. Resolve the window id once with `agent-view discover`
-if you need `--window`.
+if you need `--window`. When a caller fans scenarios out to agents, give each agent one scenario: an agent
+carrying several runs out of turns before it finishes any.
+
+### Reaching the screen under test
+
+Navigation is a recorded path, re-explored only when it broke:
+
+1. `agent-view act list` prints the project's saved scripts, one line each: note, start route, prerequisite, done
+   condition. Scripts live in the main checkout, so every worktree of the project sees the same list.
+2. A script lands where you need: `agent-view act replay <name>`. Its `after` prerequisite (a login) runs first and is
+   skipped when already met. DONE: go on. STALE: re-record under the same name.
+3. No script fits: record one. Hand the goal, a done condition and a name `<section>-<target>`
+   (`settings-connections-open`) to the `act-decider` agent, or drive `act start … --save <name> --note "…"` yourself.
 
 ### Ad-hoc mode (standalone)
 

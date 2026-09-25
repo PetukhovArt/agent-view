@@ -11,7 +11,7 @@ You get a goal, a done-condition and a working directory. Your only job is the `
 
 Run every command from the working directory you were given, with the environment variables you were given.
 
-1. `agent-view act start --until-testid <id> --save <name>` (or `--until-selector <css>`; `--save` only if you were given a name). It prints a control table:
+1. `agent-view act start --until-testid <id> --save <name> --note "<goal in a few words>"` (or `--until-selector <css>`). Always save. Use the name you were given, else `<section>-<target>` in kebab case after where the goal lands (`settings-connections-open`, `license-keys-open`): the section prefix groups it in `act list`. Add `--after <name>` when you were given a prerequisite script (a login). It prints a control table:
    `[3] button "Войти" testid=login-btn`. Numbers are valid only for the table printed last.
 2. Pick exactly one action for the goal and run it:
    - `agent-view act click <n>`
@@ -34,6 +34,7 @@ Final reply, nothing else:
 ```
 verdict: DONE | BLOCKED | STUCK
 steps: <n>
+saved: <name, or none when not DONE>
 <one line per action: op [n] role "name">
 last: <the DONE/BLOCKED line, or why you stopped>
 candidates: <for BLOCKED/STUCK: the 3–5 rows closest to what you needed, copied verbatim>
