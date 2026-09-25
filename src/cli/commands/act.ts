@@ -9,7 +9,7 @@ export async function runAct(config: AgentViewConfig, args: Record<string, unkno
     command: 'act',
     port: config.port,
     runtime: config.runtime,
-    args: { ...args, testIdAttribute: config.testIdAttribute },
+    args: { ...args, testIdAttribute: config.testIdAttribute, cwd: process.cwd() },
   })
 
   if (!response.ok) {

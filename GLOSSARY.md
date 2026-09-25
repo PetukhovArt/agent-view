@@ -200,6 +200,14 @@ _Avoid_: Driver, Solver, Agent
 A saved Act Session re-run inside the server with no Decider. Ends DONE, FAIL (the app did not reach the done condition, or a recorded control stayed disabled or covered) or STALE (a recorded control is gone — the recording no longer fits the app).
 _Avoid_: Script Run, Playback
 
+**Act Script**
+A saved Act Session as JSON: done condition, steps, and optionally a note, the start route and an `after` prerequisite script that Replay runs first unless its done condition already holds.
+_Avoid_: Recording, Macro, Scenario
+
+**Script Store**
+The directory holding a project's Act Scripts and their generated `INDEX.md`: `.agent-view/scripts/` beside `agent-view.config.json` in the main checkout, shared by all its worktrees ([ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md)).
+_Avoid_: Scratch, Script Dir
+
 **requires_visual_review**
 A Verification Run step verdict: an executable check was made and gave no answer, and no one has looked at the step yet. Not a way to describe a step that has no executable check.
 _Avoid_: Manual Check, TODO

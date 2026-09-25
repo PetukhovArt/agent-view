@@ -14,7 +14,7 @@ export async function runEval(
   options: EvalOptions,
 ): Promise<void> {
   if (!expression) {
-    console.error('eval requires an expression')
+    console.error('eval requires an expression or --file <path>')
     process.exit(1)
   }
 

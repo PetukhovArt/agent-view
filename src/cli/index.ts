@@ -202,15 +202,25 @@ program
   })
 
 program
-  .command('eval <expression>')
+  .command('eval [expression]')
   .description('Evaluate JS in a target (requires "allowEval": true in config)')
   .option('-t, --target <id>', 'Target by CDP id, title, or URL substring')
   .option('-w, --window <id>', 'Page-target by id or title (alias of --target restricted to pages)')
   .option('--await', 'Set awaitPromise on Runtime.evaluate')
   .option('--json', 'Output JSON.stringify(result) instead of human-readable')
+  .option('--file <path>', 'Read the expression from a file (multi-line code: a Windows .cmd shim cuts an argument at its first newline)')
   .action(async (expression, options) => {
+    let code = expression
+    if (options.file) {
+      try {
+        code = readFileSync(options.file, 'utf8')
+      } catch {
+        console.error(`Cannot read --file ${options.file}`)
+        process.exit(1)
+      }
+    }
     const config = requireConfig()
-    await runEval(config, expression, options)
+    await runEval(config, code, options)
   })
 
 program
@@ -415,8 +425,10 @@ act
   .option('--until-selector <css>', 'Done when a match of this selector is visible')
   .option('--max-steps <n>', 'Step budget (default 30)', (v: string) => parseInt(v, 10))
   .option('--save <name>', 'Write the replay script on DONE (same as act save <name>)')
+  .option('--note <text>', 'One line saying what the script does, shown in act list and INDEX.md')
+  .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
   .action(async (options) => {
-    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save })
+    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, note: options.note, after: options.after })
   })
 
 act.command('table').description('Re-snapshot and print the control table')
@@ -447,7 +459,12 @@ act.command('replay <name>').description('Run a saved act script with no model. 
   .action(async (name: string) => { await runAct(requireConfig(), { op: 'replay', name, secret: process.env.AGENT_VIEW_SECRET }) })
 
 act.command('save <name>').description('Write the recorded steps as a replay script; prints its path')
-  .action(async (name: string) => { await runAct(requireConfig(), { op: 'save', name }) })
+  .option('--note <text>', 'One line saying what the script does, shown in act list and INDEX.md')
+  .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
+  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, note: options.note, after: options.after }) })
+
+act.command('list').description('Saved scripts of this project, one line each; needs no running app')
+  .action(async () => { await runAct(requireConfig(), { op: 'list' }) })
 
 program
   .command('listeners')

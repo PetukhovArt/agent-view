@@ -42,7 +42,7 @@ import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspector
 import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
-import { runAct, type ActSession } from './act-session.js'
+import { listSaved, runAct, type ActSession } from './act-session.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -771,6 +771,7 @@ export class AgentViewServer {
   }
 
   private async handleAct(req: ServerRequest): Promise<ServerResponse> {
+    if (argStr(req.args, 'op') === 'list') return listSaved(req.args)
     const { targetId } = await this.resolveWindow(req)
     const cacheKey = `${req.port}:${targetId}`
     return runAct(this.stateFor(req.port), req.args, {

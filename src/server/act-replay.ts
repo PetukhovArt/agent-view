@@ -2,8 +2,8 @@ import type { PageSession } from '../cdp/types.js'
 import { isDeadSocket } from '../cdp/transport.js'
 import type { ServerResponse } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
-import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator } from './locator.js'
-import { edgePoint, readScript, viewportBox, type StepTarget } from './act-script.js'
+import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator, type Locator } from './locator.js'
+import { edgePoint, readScript, viewportBox, type ActScript, type StepTarget } from './act-script.js'
 
 const POLL_MS = 50
 const STEP_TIMEOUT_MS = 10_000
@@ -26,19 +26,24 @@ export type ActDeps = {
  * its own target is on screen, enabled and uncovered, then acts. First line of the
  * result: `DONE` (until met), `FAIL` (the app did not answer: until never came, or a
  * control stayed disabled or covered — a bug) or `STALE` (a step's control is gone —
- * the script no longer fits the app).
+ * the script no longer fits the app). Its `after` chain runs first, prerequisites
+ * whose own until already holds skipped; a prerequisite that is not DONE ends the run
+ * with its verdict.
  */
 export async function replay(
-  { name, secret, testIdAttribute }: { name: string; secret?: string; testIdAttribute?: string },
+  { store, name, secret, testIdAttribute }: { store: string; name: string; secret?: string; testIdAttribute?: string },
   deps: ActDeps,
 ): Promise<ServerResponse> {
-  const script = await readScript(name)
-  if (!script) return { ok: false, error: `No saved script "${name}" — record one with act start … --save ${name}` }
-  if (script.steps.some(s => 'isPassword' in s && s.isPassword) && !secret) {
-    return { ok: false, error: `"${name}" types a password — set AGENT_VIEW_SECRET` }
+  // Prerequisites first: [login, …, name].
+  const chain: { name: string; script: ActScript }[] = []
+  for (let next: string | undefined = name; next;) {
+    const seen: string[] = chain.map(c => c.name)
+    if (seen.includes(next)) return { ok: false, error: `"${name}" after-chain loops: ${[...seen.reverse(), next].join(' → ')}` }
+    const script = await readScript(store, next)
+    if (!script) return { ok: false, error: `No saved script "${next}" — record one with act start … --save ${next}` }
+    chain.unshift({ name: next, script })
+    next = script.after
   }
-  const until = locatorFromArgs({ ...script.until, testIdAttribute })
-  if (!until) return { ok: false, error: `"${name}" has no done condition — re-record it with act start --until-testid …` }
   const attributes = testIdAttributes(testIdAttribute)
 
   const t0 = Date.now()
@@ -91,57 +96,94 @@ export async function replay(
     return 'error' in found ? undefined : found
   }, STEP_TIMEOUT_MS)
   const describe = (t: StepTarget) => (t.name ? `${t.role} "${t.name}"` : t.role) + (t.testid ? ` testid=${t.testid}` : '')
+  const isShown = (until: Locator) => async (c: PageSession) => ('error' in await findByLocator(c, until) ? undefined : true)
 
-  for (const [i, step] of script.steps.entries()) {
-    const at = `step ${i + 1}/${script.steps.length}`
-    if (step.op === 'scroll') {
-      await poll(async c => { await c.scrollViewport(step.direction); return true }, STEP_TIMEOUT_MS)
-      continue
-    }
-    const { control, seen } = await find(step.target, { isEnabledRequired: step.op !== 'drag' })
-    if (!control) {
-      // Present but unusable is the app misbehaving; absent is the script out of date.
-      return seen
-        ? verdict(EXIT_FAIL, `FAIL: ${at} ${step.op} ${describe(step.target)} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
-        : verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describe(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
-    }
-    try {
-      if (step.op !== 'drag') {
-        if (step.op === 'click') {
-          await deps.conn.clickByNodeId(control.backendDOMNodeId)
-        } else if (step.op === 'type') {
-          await deps.conn.fillByNodeId(control.backendDOMNodeId, step.isPassword ? secret! : step.value ?? '')
+  /** A FAIL / STALE verdict for the first step that could not run, or undefined when all ran. */
+  const runSteps = async (script: ActScript, prefix: string): Promise<ServerResponse | undefined> => {
+    for (const [i, step] of script.steps.entries()) {
+      const at = `${prefix}step ${i + 1}/${script.steps.length}`
+      if (step.op === 'scroll') {
+        await poll(async c => { await c.scrollViewport(step.direction); return true }, STEP_TIMEOUT_MS)
+        continue
+      }
+      const { control, seen } = await find(step.target, { isEnabledRequired: step.op !== 'drag' })
+      if (!control) {
+        // Present but unusable is the app misbehaving; absent is the script out of date.
+        return seen
+          ? verdict(EXIT_FAIL, `FAIL: ${at} ${step.op} ${describe(step.target)} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
+          : verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describe(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
+      }
+      try {
+        if (step.op !== 'drag') {
+          if (step.op === 'click') {
+            await deps.conn.clickByNodeId(control.backendDOMNodeId)
+          } else if (step.op === 'type') {
+            await deps.conn.fillByNodeId(control.backendDOMNodeId, step.isPassword ? secret! : step.value ?? '')
+          } else {
+            const outcome = await deps.conn.selectOption(control.backendDOMNodeId, step.value ?? '')
+            const reason = outcome === 'no-option' ? `no option "${step.value}"` : 'not a native select'
+            if (outcome !== 'ok') return verdict(EXIT_STALE, `STALE: ${at} select ${describe(step.target)} — ${reason}`)
+          }
         } else {
-          const outcome = await deps.conn.selectOption(control.backendDOMNodeId, step.value ?? '')
-          const reason = outcome === 'no-option' ? `no option "${step.value}"` : 'not a native select'
-          if (outcome !== 'ok') return verdict(EXIT_STALE, `STALE: ${at} select ${describe(step.target)} — ${reason}`)
+          const to = step.to
+          const dest = !to ? undefined : 'role' in to ? (await find(to, { isEnabledRequired: false })).control : await findTestId(to.testid)
+          if (to && !dest) {
+            const label = 'role' in to ? describe(to) : `testid=${to.testid}`
+            return verdict(EXIT_STALE, `STALE: ${at} drag target ${label} not found`)
+          }
+          const from = await deps.conn.getBoxCenter(control.backendDOMNodeId)
+          const box = dest ? await deps.conn.getBoxRect(dest.backendDOMNodeId, { scrollIntoView: false }) : await viewportBox(deps.conn)
+          await deps.conn.dragBetweenPositions(from, edgePoint(box, step.edge), { mode: 'pointer' })
         }
-      } else {
-        const to = step.to
-        const dest = !to ? undefined : 'role' in to ? (await find(to, { isEnabledRequired: false })).control : await findTestId(to.testid)
-        if (to && !dest) {
-          const label = 'role' in to ? describe(to) : `testid=${to.testid}`
-          return verdict(EXIT_STALE, `STALE: ${at} drag target ${label} not found`)
+      } catch (err) {
+        // The window reloaded under the action (login, logout): it went out; the next poll reconnects.
+        // Any other failure means the control vanished between finding and acting (a panel
+        // that toggled shut): the app is not in the state the script was recorded in.
+        if (!isDeadSocket(err)) {
+          const reason = err instanceof Error ? err.message : String(err)
+          return verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describe(step.target)} — ${reason}`)
         }
-        const from = await deps.conn.getBoxCenter(control.backendDOMNodeId)
-        const box = dest ? await deps.conn.getBoxRect(dest.backendDOMNodeId, { scrollIntoView: false }) : await viewportBox(deps.conn)
-        await deps.conn.dragBetweenPositions(from, edgePoint(box, step.edge), { mode: 'pointer' })
-      }
-    } catch (err) {
-      // The window reloaded under the action (login, logout): it went out; the next poll reconnects.
-      // Any other failure means the control vanished between finding and acting (a panel
-      // that toggled shut): the app is not in the state the script was recorded in.
-      if (!isDeadSocket(err)) {
-        const reason = err instanceof Error ? err.message : String(err)
-        return verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describe(step.target)} — ${reason}`)
       }
     }
+    return undefined
   }
 
-  // Split the total: our steps vs the app answering them (auth, reload) — only the first is ours to speed up.
-  const stepsTime = elapsed()
-  const isMet = await poll(async c => ('error' in await findByLocator(c, until) ? undefined : true), UNTIL_TIMEOUT_MS)
-  return isMet
-    ? verdict(EXIT_DONE, `DONE: replay ${name} · ${script.steps.length} steps in ${stepsTime}, then ${until.label}`)
-    : verdict(EXIT_FAIL, `FAIL: replay ${name} — steps ran, ${until.label} not visible after ${UNTIL_TIMEOUT_MS / 1000}s`)
+  /** Steps, then the until condition: a verdict when the script did not reach DONE, else how long its steps took. */
+  const runScript = async (current: string, script: ActScript, until: Locator, isMain: boolean): Promise<ServerResponse | string> => {
+    if (script.steps.some(s => 'isPassword' in s && s.isPassword) && !secret) {
+      return { ok: false, error: `"${current}" types a password — set AGENT_VIEW_SECRET` }
+    }
+    const stepsStart = Date.now()
+    const failed = await runSteps(script, isMain ? '' : `prerequisite ${current}: `)
+    if (failed) return failed
+    // Split the total: our steps vs the app answering them (auth, reload) — only the first is ours to speed up.
+    const stepsTime = `${((Date.now() - stepsStart) / 1000).toFixed(1)}s`
+    const isMet = await poll(isShown(until), UNTIL_TIMEOUT_MS)
+    const who = isMain ? `replay ${current}` : `prerequisite ${current}`
+    return isMet ? stepsTime : verdict(EXIT_FAIL, `FAIL: ${who} — steps ran, ${until.label} not visible after ${UNTIL_TIMEOUT_MS / 1000}s`)
+  }
+  const untilOf = (current: string, script: ActScript): Locator | ServerResponse =>
+    locatorFromArgs({ ...script.until, testIdAttribute })
+    ?? { ok: false, error: `"${current}" has no done condition — re-record it with act start --until-testid …` }
+
+  const { script } = chain.pop()!
+  const prerequisites: string[] = []
+  for (const pre of chain) {
+    const until = untilOf(pre.name, pre.script)
+    if ('ok' in until) return until
+    // Checked once, no polling: an app already past the prerequisite (logged in) skips it.
+    if (await isShown(until)(deps.conn).catch(() => undefined)) {
+      prerequisites.push(`${pre.name} skipped`)
+      continue
+    }
+    const ran = await runScript(pre.name, pre.script, until, false)
+    if (typeof ran !== 'string') return ran
+    prerequisites.push(`${pre.name} ran`)
+  }
+  const until = untilOf(name, script)
+  if ('ok' in until) return until
+  const stepsTime = await runScript(name, script, until, true)
+  if (typeof stepsTime !== 'string') return stepsTime
+  const after = prerequisites.length ? ` · after ${prerequisites.join(', ')}` : ''
+  return verdict(EXIT_DONE, `DONE: replay ${name}${after} · ${script.steps.length} steps in ${stepsTime}, then ${until.label}`)
 }

@@ -17,6 +17,9 @@ import {
   edgePoint,
   isEdge,
   isScriptName,
+  listScripts,
+  renderScripts,
+  scriptStore,
   viewportBox,
   writeScript,
   type DropTarget,
@@ -50,6 +53,11 @@ export type ActSession = {
   startedAt: number
   /** Script name to write on DONE (`act start --save`). */
   saveAs?: string
+  /** The project dir the CLI ran in: where the script store is resolved on save. */
+  cwd: string
+  note?: string
+  start?: string
+  after?: string
   /** DONE was printed: the recording is complete and takes no more steps. */
   isDone: boolean
 }
@@ -61,6 +69,18 @@ const str = (args: Record<string, unknown>, key: string): string | undefined =>
   typeof args[key] === 'string' ? args[key] as string : undefined
 const num = (value: unknown): number => (typeof value === 'number' ? value : NaN)
 const isRowOp = (op: string): op is RowOp => (ROW_OPS as readonly string[]).includes(op)
+const cwdOf = (args: Record<string, unknown>): string => str(args, 'cwd') ?? process.cwd()
+/** Machine-agnostic: the hash route, else path + query of a web page; never origin or a file path. */
+const START_EXPRESSION = "location.hash || (/^https?:$/.test(location.protocol) ? location.pathname + location.search : '')"
+
+/** `act list`: needs no app, so the server runs it before resolving a window. */
+export async function listSaved(args: Record<string, unknown>): Promise<ServerResponse> {
+  const store = await scriptStore(cwdOf(args))
+  const entries = await listScripts(store)
+  if (entries.length === 0) return { ok: true, data: `No saved scripts in ${store} — record one with act start … --save <name>` }
+  return { ok: true, data: `${store} · replay: agent-view act replay <name>
+${renderScripts(entries)}` }
+}
 
 export async function runAct(
   holder: { act: ActSession | null },
@@ -71,14 +91,16 @@ export async function runAct(
   if (op === 'replay') {
     const name = str(args, 'name')
     if (!isScriptName(name)) return { ok: false, error: 'act replay <name>' }
-    return replay({ name, secret: str(args, 'secret'), testIdAttribute: str(args, 'testIdAttribute') }, deps)
+    const store = await scriptStore(cwdOf(args))
+    return replay({ store, name, secret: str(args, 'secret'), testIdAttribute: str(args, 'testIdAttribute') }, deps)
   }
   if (op === 'start') {
     // Done is agent-view's call, never the driver's: no run without a done condition.
     if ((str(args, 'untilTestid') === undefined) === (str(args, 'untilSelector') === undefined)) {
       return { ok: false, error: 'act start --until-testid <id> | --until-selector <css> — exactly one' }
     }
-    holder.act = createSession(args)
+    const start = await deps.conn.evaluate(START_EXPRESSION).catch(() => undefined)
+    holder.act = { ...createSession(args), start: typeof start === 'string' && start ? start : undefined }
     return tableOrDone({ session: holder.act, deps })
   }
   const session = holder.act
@@ -86,7 +108,7 @@ export async function runAct(
   const run: Run = { session, deps }
 
   if (op === 'table') return tableOrDone(run)
-  if (op === 'save') return save(session, str(args, 'name'))
+  if (op === 'save') return save(session, str(args, 'name'), { note: str(args, 'note'), after: str(args, 'after') })
   if (op === 'wait') return finishStep(run, { before: tableKey(await snapshot(run)), done: 'wait', quietPolls: Infinity })
   if (session.isDone) return { ok: false, error: 'this act run is DONE — `agent-view act start` for a new one' }
   if (session.steps.length >= session.maxSteps) {
@@ -112,6 +134,9 @@ function createSession(args: Record<string, unknown>): ActSession {
     steps: [],
     startedAt: Date.now(),
     saveAs: str(args, 'save'),
+    cwd: cwdOf(args),
+    note: str(args, 'note'),
+    after: str(args, 'after'),
     isDone: false,
   }
 }
@@ -337,8 +362,16 @@ async function finishStep(
   return { ok: true, data: `✓ ${done} · ${elapsed}ms\n${table}` }
 }
 
-async function save(session: ActSession, name: string | undefined): Promise<ServerResponse> {
+async function save(
+  session: ActSession,
+  name: string | undefined,
+  { note = session.note, after = session.after }: { note?: string; after?: string } = {},
+): Promise<ServerResponse> {
   if (!isScriptName(name)) return { ok: false, error: 'act save <name> — letters, digits, . _ - only' }
-  const path = await writeScript(name, { until: session.untilArgs, steps: session.steps })
+  if (after !== undefined && (!isScriptName(after) || after === name)) {
+    return { ok: false, error: '--after <name> — another saved script, letters, digits, . _ - only' }
+  }
+  const script = { until: session.untilArgs, steps: session.steps, note, start: session.start, after }
+  const path = await writeScript(await scriptStore(session.cwd), name, script)
   return { ok: true, data: `${path} · replay: agent-view act replay ${name}` }
 }

@@ -205,10 +205,30 @@ agent-view act drag 5 2                 # … onto the centre of row 2
 agent-view act drag 7 testid=video-panel right   # … onto any visible element by test id, 20 px inside its right edge
 agent-view act drag 7 center left       # … near the viewport's left edge; edge: left|right|top|bottom|center (default)
 agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
-agent-view act save login               # writes ~/.agent-view/scratch/login.json, prints the path
+agent-view act save login               # writes <project>/.agent-view/scripts/login.json + INDEX.md, prints the path
 agent-view act start --until-testid x --save login   # same, written automatically on DONE (one turn fewer)
+agent-view act start --until-testid settings-root --save settings-open --after login --note "open settings"
+agent-view act save settings-open --after login --note "open settings"   # --note / --after on either
 AGENT_VIEW_SECRET=… agent-view act replay login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
+agent-view act list                     # saved scripts of this project; needs no running app
 ```
+
+Scripts live per project in `<project>/.agent-view/scripts/`, `<project>` being the directory of
+`agent-view.config.json`. In a git worktree they go to the **main** checkout (same subdirectory), so
+every worktree of a project shares one store. A name missing there is read from the old
+`~/.agent-view/scratch/<name>.json` (read-only). Each save rewrites `INDEX.md` in the store; `act list`
+prints the same lines, built from the JSON files, sorted by name, so a shared prefix (`settings-*`)
+groups one UI section:
+
+```
+C:\proj\.agent-view\scripts · replay: agent-view act replay <name>
+- `login` — until testid "workspace-root" · 3 steps
+- `settings-open` — open settings · start `#/main` · after `login` · until testid "settings-root" · 1 step
+```
+
+Empty store: `No saved scripts in <store> — record one with act start … --save <name>`. `start` is
+recorded at `act start`: the hash route, else path + query of an http(s) page (never the origin);
+informational, replay does not navigate there. `--after <name>` names a prerequisite (a login).
 
 Table — interactive controls visible in the viewport, renumbered from 1 on every print, capped at
 150 rows (`… N more below — act scroll down`). Named `alert` / `status` nodes (a snackbar) are listed
@@ -253,11 +273,15 @@ First line of an op's output:
 The saved script names each control by test id, else role + name — never by row number — and
 stores no password. `act replay` runs it inside the server: each step waits (50 ms polls, 10 s cap)
 only for its own control to be on screen, enabled and uncovered, then acts; a window reload
-mid-run is ridden over. Its one line, ending in the total time:
+mid-run is ridden over. The `after` chain runs first: a prerequisite whose own until already holds
+is skipped (checked once, no wait); the main script's until is not pre-checked. Its one line, ending
+in the total time:
 
 | Line | Exit | Meaning |
 |---|---|---|
 | `DONE: replay login · 2 steps in 0.1s, then testid "x" · 1.8s` | 0 | until met; the steps took 0.1 s, the app the rest |
+| `DONE: replay settings-open · after login skipped · 1 steps in 0.1s, then testid "y" · 0.6s` | 0 | same; prerequisites listed `skipped` or `ran` |
+| `FAIL: prerequisite login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | a prerequisite did not reach DONE; its step lines read `FAIL:` / `STALE: prerequisite login: step 2/2 …` |
 | `FAIL: replay login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | the app did not answer — likely a bug |
 | `FAIL: step 2/2 click button "Войти" testid=login-btn — still disabled after 10s · 10.4s` | 1 | the control is there but stayed `disabled` / `covered by …` — likely a bug |
 | `STALE: step 2/2 click button "Войти" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
@@ -265,8 +289,9 @@ mid-run is ridden over. Its one line, ending in the total time:
 | `STALE: step 1/2 select combobox "Период" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
 | `STALE: step 2/3 click button "Закрыть" — <CDP error> · 0.4s` | 3 | the control vanished between finding and acting |
 
-Exit 2, message on stderr: the replay could not run — `No saved script "x"`, `"x" types a password —
-set AGENT_VIEW_SECRET`, `"x" has no done condition`.
+Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
+prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,
+`"x" after-chain loops: x → login → x`.
 
 ### Screenshots
 ```bash
@@ -295,7 +320,11 @@ agent-view eval --window "Settings" "router.currentRoute.path"
 agent-view eval --target sync-worker "self.queue.length"      # SharedWorker / ServiceWorker by id or substring
 agent-view eval --await "fetch('/api/health').then(r => r.status)"
 agent-view eval --json "({ buttons: document.querySelectorAll('button').length })"
+agent-view eval --file probe.js                               # multi-line code: read from a file
 ```
+
+Multi-line code goes through `--file`: on Windows the npm `.cmd` shim (PowerShell, cmd, `npx`) cuts an
+argument at its first newline, and the rest arrives as `SyntaxError: Unexpected end of input`.
 
 When to reach for `eval` instead of `dom`:
 - The truth lives in JS state, not the DOM (Pinia/Vuex/Redux/Zustand store, Vue refs, computed values, app singletons).

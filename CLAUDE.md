@@ -74,7 +74,8 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
     - **Token auth** at `~/.agent-view/token`, idle shutdown, 1 MB request cap. `AGENT_VIEW_SERVER_PORT` moves the
       server off 47922 with its own `token-<port>` (`server/port.ts`), so a dev build runs beside the installed one.
     - **`ActSession`** (`server/act-session.ts`) — per-port state of the `act` step protocol; saved runs replay in
-      `server/act-replay.ts`. See [ADR 0003](./docs/adr/0003-act-step-protocol-and-replay.md).
+      `server/act-replay.ts`. See [ADR 0003](./docs/adr/0003-act-step-protocol-and-replay.md); where scripts are
+      stored: [ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md).
 
 4. **`src/cli/`** — thin shells. `cli/index.ts` registers commander commands; `cli/commands/*.ts` opens a TCP socket to
    the server and writes a `ServerRequest` JSON line. No business logic here.
