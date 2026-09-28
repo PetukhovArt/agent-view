@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.19.0] - 2026-09-29
+
+### Added
+- `act dblclick <n>` and `act rightclick <n>` double-click and right-click a row of the control table, so a step that opens a context menu or fires a `dblclick` handler can be recorded and replayed instead of scripted in shell. `act do` takes them too. Saved scripts store them as ops of their own; scripts recorded before replay unchanged.
+
 ## [0.18.1] - 2026-09-28
 
 ### Changed
