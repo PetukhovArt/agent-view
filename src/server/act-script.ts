@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import { promisify } from 'node:util'
-import type { PageSession, Point, Rect } from '../cdp/types.js'
+import { MouseButton, type ClickOpts, type PageSession, type Point, type Rect } from '../cdp/types.js'
 import { locatorFromArgs } from './locator.js'
 import { AGENT_VIEW_DIR } from './port.js'
 
@@ -12,8 +12,18 @@ export type StepTarget = { testid?: string; role: string; name: string }
 /** A drop target: a row, or any element by its test id. */
 export type DropTarget = StepTarget | { testid: string }
 
+/** Click ops of the step protocol and the pointer each one sends. */
+export const CLICKS = {
+  click: {},
+  dblclick: { clicks: 2 },
+  rightclick: { button: MouseButton.Right },
+} as const satisfies Record<string, ClickOpts>
+export type ClickOp = keyof typeof CLICKS
+
+export const isClickOp = (op: string): op is ClickOp => Object.keys(CLICKS).includes(op)
+
 export type RecordedStep =
-  | { op: 'click' | 'type' | 'select'; target: StepTarget; value?: string; isPassword: boolean }
+  | { op: ClickOp | 'type' | 'select'; target: StepTarget; value?: string; isPassword: boolean }
   | { op: 'scroll'; direction: 'up' | 'down' }
   /** `to`: a row, any element by test id, or absent = the viewport. */
   | { op: 'drag'; target: StepTarget; to?: DropTarget; edge: Edge }

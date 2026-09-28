@@ -437,6 +437,12 @@ act.command('table').description('Re-snapshot and print the control table')
 act.command('click <n>').description('Click row n of the last table')
   .action(async (n: string) => { await runAct(requireConfig(), { op: 'click', n: Number(n) }) })
 
+act.command('dblclick <n>').description('Double-click row n of the last table (fires dblclick)')
+  .action(async (n: string) => { await runAct(requireConfig(), { op: 'dblclick', n: Number(n) }) })
+
+act.command('rightclick <n>').description('Right-click row n of the last table (fires contextmenu)')
+  .action(async (n: string) => { await runAct(requireConfig(), { op: 'rightclick', n: Number(n) }) })
+
 act.command('type <n> <text>').description('Fill row n with text')
   .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'type', n: Number(n), text }) })
 

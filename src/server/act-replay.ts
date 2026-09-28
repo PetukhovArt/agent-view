@@ -3,7 +3,7 @@ import { isDeadSocket } from '../cdp/transport.js'
 import type { ServerResponse } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
 import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator, type Locator } from './locator.js'
-import { edgePoint, readScript, viewportBox, type ActScript, type StepTarget } from './act-script.js'
+import { CLICKS, edgePoint, isClickOp, readScript, viewportBox, type ActScript, type StepTarget } from './act-script.js'
 
 const POLL_MS = 50
 const STEP_TIMEOUT_MS = 10_000
@@ -115,8 +115,8 @@ export async function replay(
       }
       try {
         if (step.op !== 'drag') {
-          if (step.op === 'click') {
-            await deps.conn.clickByNodeId(control.backendDOMNodeId)
+          if (isClickOp(step.op)) {
+            await deps.conn.clickByNodeId(control.backendDOMNodeId, CLICKS[step.op])
           } else if (step.op === 'type') {
             await deps.conn.fillByNodeId(control.backendDOMNodeId, step.isPassword ? secret! : step.value ?? '')
           } else {

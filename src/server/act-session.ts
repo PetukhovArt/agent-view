@@ -13,8 +13,10 @@ import {
 } from '../inspectors/controls/index.js'
 import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator, type Locator } from './locator.js'
 import {
+  CLICKS,
   EDGES,
   edgePoint,
+  isClickOp,
   isEdge,
   isScriptName,
   listScripts,
@@ -36,7 +38,7 @@ const SETTLE_BUDGET_MS = 3_000
 const SETTLE_STABLE_POLLS = 2
 /** Polls an action that changed nothing waits before giving up on a reaction. */
 const SETTLE_QUIET_POLLS = 4
-const ROW_OPS = ['click', 'type', 'select'] as const
+const ROW_OPS = ['click', 'dblclick', 'rightclick', 'type', 'select'] as const
 type RowOp = typeof ROW_OPS[number]
 type RowStepArgs = { op: RowOp; n: number; text: string }
 
@@ -181,12 +183,12 @@ async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerRe
   }
 
   const { session, deps } = run
-  const echo = op === 'click' ? '' : ` ${target.isPassword ? PASSWORD_MASK : JSON.stringify(text)}`
+  const echo = isClickOp(op) ? '' : ` ${target.isPassword ? PASSWORD_MASK : JSON.stringify(text)}`
   const done = `${op} [${n}] ${describeControl(target)}${echo}`
   let isReloaded = false
   try {
-    if (op === 'click') {
-      await deps.conn.clickByNodeId(target.backendDOMNodeId)
+    if (isClickOp(op)) {
+      await deps.conn.clickByNodeId(target.backendDOMNodeId, CLICKS[op])
     } else if (op === 'type') {
       await deps.conn.fillByNodeId(target.backendDOMNodeId, text)
     } else {
@@ -200,7 +202,7 @@ async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerRe
     isReloaded = true
   }
   deps.invalidateAxCache()
-  session.steps.push({ op, target: stepTarget(target), value: op === 'click' ? undefined : text, isPassword: target.isPassword })
+  session.steps.push({ op, target: stepTarget(target), value: isClickOp(op) ? undefined : text, isPassword: target.isPassword })
   return finishStep(run, { before: tableKey(fresh), done: isReloaded ? `${done} · window reloaded` : done })
 }
 
@@ -220,7 +222,7 @@ async function batchStep(run: Run, raw: unknown): Promise<ServerResponse> {
   const parsed = steps.map(parseRowStep)
   if (!parsed.every((p): p is RowStepArgs => p !== undefined)) {
     const bad = steps[parsed.indexOf(undefined)]
-    return { ok: false, error: `act do: "${bad}" — each step is click|type|select <n> [text]` }
+    return { ok: false, error: `act do: "${bad}" — each step is ${ROW_OPS.join('|')} <n> [text]` }
   }
   const pinned = run.session.rows
   const lines: string[] = []

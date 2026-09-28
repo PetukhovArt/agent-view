@@ -196,6 +196,8 @@ agent-view act start --until-testid workspace-root   # new session for this CDP 
 agent-view act start --until-selector ".dashboard" --max-steps 20   # budget, default 30
 agent-view act table                    # re-snapshot, print the table
 agent-view act click 3                  # row numbers refer to the LAST printed table
+agent-view act dblclick 3               # double-click (fires dblclick); recorded and replayed as such
+agent-view act rightclick 3             # right-click (fires contextmenu); then pick the menu row from the next table
 agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
 agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
@@ -251,6 +253,7 @@ First line of an op's output:
 | Line | Meaning |
 |---|---|
 | `✓ click [3] button "Войти" · 240ms` | acted and settled; the new table follows |
+| `✓ rightclick [5] treeitem "Сцена 1" · 180ms` | same for `dblclick` / `rightclick`: the line names the op |
 | `✓ click [3] button "Войти" · window reloaded · 900ms` | the window reloaded under the action (login); settled on the new document |
 | `✓ drag [7] item "ГИС" testid=nav__widgetbar__item-GisWidget → testid=video-panel right · 310ms` | dragged: `→` names the target and edge |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
@@ -266,7 +269,7 @@ First line of an op's output:
 - `[n] is a <role>, not a text field — pick a textbox/combobox row` (`type` on a non-text row);
   `No input or textarea at or inside the element` (`type` on a native `<select>` — use `select`)
 - `not a native select — click it`, `No option "x" in [n]`
-- `act do: "…" — each step is click|type|select <n> [text]` (checked before any step runs; a
+- `act do: "…" — each step is click|dblclick|rightclick|type|select <n> [text]` (checked before any step runs; a
   failing step prints the `✓` lines of the ones before it)
 - `act scroll <up|down>`, `act drag <n> [to] [edge] — edge is one of left|right|top|bottom|center`
 
