@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.18.1] - 2026-09-28
+
+### Changed
+- The `verify` skill names `act start --until-selector <css>` next to `--until-testid` for recording a path, and says the control table comes from the accessibility tree. Agents read the old line as "no test id, no `act`" and drove flows one click at a time instead.
+
 ## [0.18.0] - 2026-09-25
 
 ### Added
