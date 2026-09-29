@@ -20,6 +20,7 @@ import {
   isEdge,
   isScriptName,
   listScripts,
+  markParams,
   renderScripts,
   scriptStore,
   viewportBox,
@@ -60,6 +61,8 @@ export type ActSession = {
   note?: string
   start?: string
   after?: string
+  /** `--param NAME=value` of `start`: marked in the script `--save` writes. */
+  params?: string[]
   /** DONE was printed: the recording is complete and takes no more steps. */
   isDone: boolean
 }
@@ -69,6 +72,11 @@ type Run = { session: ActSession; deps: ActDeps }
 
 const str = (args: Record<string, unknown>, key: string): string | undefined =>
   typeof args[key] === 'string' ? args[key] as string : undefined
+/** A repeatable flag; none given is undefined, so `act save` keeps the `--param`s of `act start`. */
+const strs = (args: Record<string, unknown>, key: string): string[] | undefined => {
+  const values = Array.isArray(args[key]) ? (args[key] as unknown[]).filter(v => typeof v === 'string') : []
+  return values.length ? values : undefined
+}
 const num = (value: unknown): number => (typeof value === 'number' ? value : NaN)
 const isRowOp = (op: string): op is RowOp => (ROW_OPS as readonly string[]).includes(op)
 const cwdOf = (args: Record<string, unknown>): string => str(args, 'cwd') ?? process.cwd()
@@ -94,7 +102,8 @@ export async function runAct(
     const name = str(args, 'name')
     if (!isScriptName(name)) return { ok: false, error: 'act replay <name>' }
     const store = await scriptStore(cwdOf(args))
-    return replay({ store, name, secret: str(args, 'secret'), testIdAttribute: str(args, 'testIdAttribute') }, deps)
+    const params = typeof args.params === 'object' && args.params ? args.params as Record<string, string> : undefined
+    return replay({ store, name, secret: str(args, 'secret'), params, testIdAttribute: str(args, 'testIdAttribute') }, deps)
   }
   if (op === 'start') {
     // Done is agent-view's call, never the driver's: no run without a done condition.
@@ -110,7 +119,7 @@ export async function runAct(
   const run: Run = { session, deps }
 
   if (op === 'table') return tableOrDone(run)
-  if (op === 'save') return save(session, str(args, 'name'), { note: str(args, 'note'), after: str(args, 'after') })
+  if (op === 'save') return save(session, str(args, 'name'), { note: str(args, 'note'), after: str(args, 'after'), params: strs(args, 'params') })
   if (op === 'wait') return finishStep(run, { before: tableKey(await snapshot(run)), done: 'wait', quietPolls: Infinity })
   if (session.isDone) return { ok: false, error: 'this act run is DONE — `agent-view act start` for a new one' }
   if (session.steps.length >= session.maxSteps) {
@@ -139,6 +148,7 @@ function createSession(args: Record<string, unknown>): ActSession {
     cwd: cwdOf(args),
     note: str(args, 'note'),
     after: str(args, 'after'),
+    params: strs(args, 'params'),
     isDone: false,
   }
 }
@@ -367,13 +377,14 @@ async function finishStep(
 async function save(
   session: ActSession,
   name: string | undefined,
-  { note = session.note, after = session.after }: { note?: string; after?: string } = {},
+  { note = session.note, after = session.after, params = session.params ?? [] }: { note?: string; after?: string; params?: string[] } = {},
 ): Promise<ServerResponse> {
   if (!isScriptName(name)) return { ok: false, error: 'act save <name> — letters, digits, . _ - only' }
   if (after !== undefined && (!isScriptName(after) || after === name)) {
     return { ok: false, error: '--after <name> — another saved script, letters, digits, . _ - only' }
   }
-  const script = { until: session.untilArgs, steps: session.steps, note, start: session.start, after }
+  const script = markParams({ until: session.untilArgs, steps: session.steps, note, start: session.start, after }, params)
+  if ('error' in script) return { ok: false, error: script.error }
   const path = await writeScript(await scriptStore(session.cwd), name, script)
   return { ok: true, data: `${path} · replay: agent-view act replay ${name}` }
 }

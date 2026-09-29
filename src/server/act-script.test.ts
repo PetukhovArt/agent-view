@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { edgePoint, scriptStore } from './act-script.js'
+import { edgePoint, markParams, paramsOf, scriptStore } from './act-script.js'
 
 describe('edgePoint', () => {
   it('drops inside the right edge strip, not the replace-zone centre', () => {
@@ -34,5 +34,29 @@ describe('scriptStore', () => {
   it('uses the project dir itself outside git', async () => {
     const dir = tmp()
     expect(await scriptStore(dir)).toBe(join(dir, '.agent-view', 'scripts'))
+  })
+})
+
+describe('markParams', () => {
+  const script = {
+    until: { selector: '[data-testid="row-library/Насосы/Насос"][aria-selected]' },
+    steps: [
+      { op: 'click' as const, target: { testid: 'row-library/Насосы/Насос', role: 'button', name: 'Насос' }, isPassword: false },
+      { op: 'type' as const, target: { role: 'textbox', name: 'Имя' }, value: 'Насос', isPassword: false },
+    ],
+  }
+
+  it('turns every occurrence of a value, in steps and the until, into ${NAME}, longest value first', () => {
+    const marked = markParams(script, ['NAME=Насос', 'ROW=library/Насосы/Насос'])
+
+    expect(marked).toMatchObject({
+      until: { selector: '[data-testid="row-${ROW}"][aria-selected]' },
+      steps: [{ target: { testid: 'row-${ROW}', name: '${NAME}' } }, { value: '${NAME}' }],
+    })
+    expect(paramsOf(marked as typeof script)).toEqual(['NAME', 'ROW'])
+  })
+
+  it('refuses a value that occurs nowhere, so a typo does not save a fixed script', () => {
+    expect(markParams(script, ['ROW=library/Нет'])).toEqual({ error: '--param ROW: "library/Нет" is in no step and not in the until' })
   })
 })

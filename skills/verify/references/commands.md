@@ -211,7 +211,9 @@ agent-view act save login               # writes <project>/.agent-view/scripts/l
 agent-view act start --until-testid x --save login   # same, written automatically on DONE (one turn fewer)
 agent-view act start --until-testid settings-root --save settings-open --after login --note "open settings"
 agent-view act save settings-open --after login --note "open settings"   # --note / --after on either
+agent-view act save tree-row-select --param ROW=library/Насосы/Насос   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
 AGENT_VIEW_SECRET=… agent-view act replay login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
+ROW=library/Насосы/Пожарный agent-view act replay tree-row-select   # ${ROW} filled from $ROW, in the after chain too
 agent-view act list                     # saved scripts of this project; needs no running app
 ```
 
@@ -226,7 +228,14 @@ groups one UI section:
 C:\proj\.agent-view\scripts · replay: agent-view act replay <name>
 - `login` — until testid "workspace-root" · 3 steps
 - `settings-open` — open settings · start `#/main` · after `login` · until testid "settings-root" · 1 step
+- `tree-row-select` — select a tree row · params ROW · until selector "[data-testid="row-${ROW}"][aria-selected]" · 1 step
 ```
+
+Parameters: `--param NAME=value` (NAME of `A-Z 0-9 _`) replaces every occurrence of the value in the
+steps' test ids, names and typed text and in the until with `${NAME}`, longest value first; a value
+found nowhere refuses the save (`--param ROW: "…" is in no step and not in the until`). Replay takes
+each `${NAME}` from the env var `NAME`, for every script of the `after` chain; scripts without
+placeholders replay as before.
 
 Empty store: `No saved scripts in <store> — record one with act start … --save <name>`. `start` is
 recorded at `act start`: the hash route, else path + query of an http(s) page (never the origin);
@@ -276,8 +285,9 @@ First line of an op's output:
 The saved script names each control by test id, else role + name — never by row number — and
 stores no password. `act replay` runs it inside the server: each step waits (50 ms polls, 10 s cap)
 only for its own control to be on screen, enabled and uncovered, then acts; a window reload
-mid-run is ridden over. The `after` chain runs first: a prerequisite whose own until already holds
-is skipped (checked once, no wait); the main script's until is not pre-checked. Its one line, ending
+mid-run is ridden over. The `after` chain runs first, checked nearest-first (once, no wait): the
+nearest prerequisite whose own until already holds is skipped together with every one before it,
+and the ones after it run; the main script's until is not pre-checked. Its one line, ending
 in the total time:
 
 | Line | Exit | Meaning |
@@ -294,7 +304,8 @@ in the total time:
 
 Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
 prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,
-`"x" after-chain loops: x → login → x`.
+`"x" after-chain loops: x → login → x`, `"x" needs ROW, SCENE — set as env vars` (checked for the whole
+chain before any step).
 
 ### Screenshots
 ```bash

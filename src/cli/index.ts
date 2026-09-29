@@ -414,6 +414,12 @@ heap
     await runHeap(config, 'clear', {})
   })
 
+const PARAM_FLAG = '--param <NAME=value>'
+const PARAM_HELP = 'Save every occurrence of value as ${NAME}, filled from $NAME at replay; repeatable'
+const collectParam = (value: string, previous: string[]) => [...previous, value]
+/** Candidates for `${NAME}`: the server keeps only the names a script uses. */
+const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
+
 const act = program
   .command('act')
   .description('Step protocol: act on a numbered control table, settle, check a done condition')
@@ -427,8 +433,9 @@ act
   .option('--save <name>', 'Write the replay script on DONE (same as act save <name>)')
   .option('--note <text>', 'One line saying what the script does, shown in act list and INDEX.md')
   .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
+  .option(PARAM_FLAG, PARAM_HELP, collectParam, [])
   .action(async (options) => {
-    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, note: options.note, after: options.after })
+    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, note: options.note, after: options.after, params: options.param })
   })
 
 act.command('table').description('Re-snapshot and print the control table')
@@ -461,13 +468,14 @@ act.command('do <steps...>').description('Several ops decided from one table, e.
 act.command('wait').description('No action: settle up to 3 s for the app to react, then print the table')
   .action(async () => { await runAct(requireConfig(), { op: 'wait' }) })
 
-act.command('replay <name>').description('Run a saved act script with no model. Exit 0 DONE, 1 FAIL (until never came), 3 STALE (a control is gone). Passwords from $AGENT_VIEW_SECRET')
-  .action(async (name: string) => { await runAct(requireConfig(), { op: 'replay', name, secret: process.env.AGENT_VIEW_SECRET }) })
+act.command('replay <name>').description('Run a saved act script with no model. Exit 0 DONE, 1 FAIL (until never came), 3 STALE (a control is gone). Passwords from $AGENT_VIEW_SECRET, ${NAME} parameters from $NAME')
+  .action(async (name: string) => { await runAct(requireConfig(), { op: 'replay', name, secret: process.env.AGENT_VIEW_SECRET, params: envParams() }) })
 
 act.command('save <name>').description('Write the recorded steps as a replay script; prints its path')
   .option('--note <text>', 'One line saying what the script does, shown in act list and INDEX.md')
   .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
-  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, note: options.note, after: options.after }) })
+  .option(PARAM_FLAG, PARAM_HELP, collectParam, [])
+  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, note: options.note, after: options.after, params: options.param }) })
 
 act.command('list').description('Saved scripts of this project, one line each; needs no running app')
   .action(async () => { await runAct(requireConfig(), { op: 'list' }) })

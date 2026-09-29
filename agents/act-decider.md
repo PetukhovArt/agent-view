@@ -11,7 +11,7 @@ You get a goal, a done-condition and a working directory. Your only job is the `
 
 Run every command from the working directory you were given, with the environment variables you were given.
 
-1. `agent-view act start --until-testid <id> --save <name> --note "<goal in a few words>"` (or `--until-selector <css>`). Always save. Use the name you were given, else `<section>-<target>` in kebab case after where the goal lands (`settings-connections-open`, `license-keys-open`): the section prefix groups it in `act list`. Add `--after <name>` when you were given a prerequisite script (a login). It prints a control table:
+1. `agent-view act start --until-testid <id> --save <name> --note "<goal in a few words>"` (or `--until-selector <css>`). Always save. Use the name you were given, else `<section>-<target>` in kebab case after where the goal lands (`settings-connections-open`, `license-keys-open`): the section prefix groups it in `act list`. Add `--after <name>` when you were given a prerequisite script (a login). Add `--param NAME=<value>` for each value you were told is a parameter (a tree row, a project name, typed text): the script saves it as `${NAME}` and replay fills it from the env var `NAME`. It prints a control table:
    `[3] button "Войти" testid=login-btn`. Numbers are valid only for the table printed last.
 2. Pick exactly one action for the goal and run it:
    - `agent-view act click <n>`; `act dblclick <n>` / `act rightclick <n>` when the goal needs a double-click or a context menu

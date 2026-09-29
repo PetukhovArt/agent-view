@@ -3,7 +3,7 @@ import { isDeadSocket } from '../cdp/transport.js'
 import type { ServerResponse } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
 import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator, type Locator } from './locator.js'
-import { CLICKS, edgePoint, isClickOp, readScript, viewportBox, type ActScript, type StepTarget } from './act-script.js'
+import { CLICKS, edgePoint, fillParams, isClickOp, paramsOf, readScript, viewportBox, type ActScript, type StepTarget } from './act-script.js'
 
 const POLL_MS = 50
 const STEP_TIMEOUT_MS = 10_000
@@ -26,12 +26,14 @@ export type ActDeps = {
  * its own target is on screen, enabled and uncovered, then acts. First line of the
  * result: `DONE` (until met), `FAIL` (the app did not answer: until never came, or a
  * control stayed disabled or covered — a bug) or `STALE` (a step's control is gone —
- * the script no longer fits the app). Its `after` chain runs first, prerequisites
- * whose own until already holds skipped; a prerequisite that is not DONE ends the run
- * with its verdict.
+ * the script no longer fits the app). Its `after` chain runs first, from the nearest
+ * prerequisite whose own until already holds; a prerequisite that is not DONE ends the
+ * run with its verdict. `${NAME}` in any script of the chain takes `params[NAME]`; one missing
+ * refuses the run before its first step.
  */
 export async function replay(
-  { store, name, secret, testIdAttribute }: { store: string; name: string; secret?: string; testIdAttribute?: string },
+  { store, name, secret, params = {}, testIdAttribute }:
+    { store: string; name: string; secret?: string; params?: Record<string, string>; testIdAttribute?: string },
   deps: ActDeps,
 ): Promise<ServerResponse> {
   // Prerequisites first: [login, …, name].
@@ -41,7 +43,9 @@ export async function replay(
     if (seen.includes(next)) return { ok: false, error: `"${name}" after-chain loops: ${[...seen.reverse(), next].join(' → ')}` }
     const script = await readScript(store, next)
     if (!script) return { ok: false, error: `No saved script "${next}" — record one with act start … --save ${next}` }
-    chain.unshift({ name: next, script })
+    const missing = paramsOf(script).filter(p => !params[p])
+    if (missing.length) return { ok: false, error: `"${next}" needs ${missing.join(', ')} — set as env vars` }
+    chain.unshift({ name: next, script: fillParams(script, params) })
     next = script.after
   }
   const attributes = testIdAttributes(testIdAttribute)
@@ -167,16 +171,22 @@ export async function replay(
     ?? { ok: false, error: `"${current}" has no done condition — re-record it with act start --until-testid …` }
 
   const { script } = chain.pop()!
-  const prerequisites: string[] = []
+  const untils: Locator[] = []
   for (const pre of chain) {
     const until = untilOf(pre.name, pre.script)
     if ('ok' in until) return until
-    // Checked once, no polling: an app already past the prerequisite (logged in) skips it.
-    if (await isShown(until)(deps.conn).catch(() => undefined)) {
-      prerequisites.push(`${pre.name} skipped`)
-      continue
-    }
-    const ran = await runScript(pre.name, pre.script, until, false)
+    untils.push(until)
+  }
+  // Nearest first, checked once, no polling: a prerequisite already reached (logged in, a menu open)
+  // is skipped with every one before it, whose state its own next step may have consumed (a menu closed by its item).
+  let firstToRun = chain.length
+  while (firstToRun > 0 && !await isShown(untils[firstToRun - 1])(deps.conn).catch(() => undefined)) {
+    firstToRun--
+  }
+  const prerequisites = chain.slice(0, firstToRun).map(pre => `${pre.name} skipped`)
+  for (const [i, pre] of chain.entries()) {
+    if (i < firstToRun) continue
+    const ran = await runScript(pre.name, pre.script, untils[i], false)
     if (typeof ran !== 'string') return ran
     prerequisites.push(`${pre.name} ran`)
   }

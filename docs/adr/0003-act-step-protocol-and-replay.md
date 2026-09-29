@@ -14,9 +14,10 @@ A cheap model can pick "which control next" if every call answers with a small n
 A server-side **Act Session** per CDP port, driven over the CLI:
 
 - `act start --until-testid <id>` (or `--until-selector`, exactly one — a run without a done condition is refused) prints a **Control Table** — visible interactive controls and named `alert`/`status` notices, numbered, with role, name, value, states and test id; password values masked.
-- Each **Act Step** (`act click|type|select|drag|scroll|do …`) is one CLI call that re-snapshots, maps row n from the last printed table (stale guard: same node, else unique role|name|testid match, else BLOCKED), hit-tests, acts, settles by polling instead of sleeping, checks the until condition, and prints DONE or the next table.
+- Each **Act Step** (`act click|dblclick|rightclick|type|select|drag|scroll|do …`) is one CLI call that re-snapshots, maps row n from the last printed table (stale guard: same node, else unique role|name|testid match, else BLOCKED), hit-tests, acts, settles by polling instead of sleeping, checks the until condition, and prints DONE or the next table.
 - Done is checked by agent-view, never taken from the model.
 - The run is recorded by test id, else role + name — never by row number — and `act save` / `start --save` writes it as JSON. `act replay` re-runs it inside the server with no model: each step waits only for its own control, then acts. Exit 0 DONE, 1 FAIL (until never came, or a control stayed disabled or covered), 3 STALE (a control is gone — re-record), 2 when the replay could not run.
+- A value that varies between runs (a tree row, a project) is saved as `${NAME}` by `act save --param NAME=value` and filled at replay from the env var `NAME`, like the password from `AGENT_VIEW_SECRET`: env reaches the whole `after` chain in one call with no extra flags, and [ADR 0004](./0004-act-scripts-live-in-the-main-checkout.md) already keeps values in env. An unset one refuses the replay before any step. Rejected: `--param` flags on `replay` — a caller would restate every value for each script of the chain.
 
 The **Decider** — whatever turns a table into `op n [text]` — is not part of agent-view. The first one is a Claude Code subagent shipped with the plugin (`agents/act-decider.md`); later a dedicated calibrator can take its place without changing the protocol.
 
