@@ -211,3 +211,7 @@ _Avoid_: Scratch, Script Dir
 **requires_visual_review**
 A Verification Run step verdict: an executable check was made and gave no answer, and no one has looked at the step yet. Not a way to describe a step that has no executable check.
 _Avoid_: Manual Check, TODO
+
+**skipped**
+A Verification Run step verdict: the step could not run (retry budget spent, a reference image missing), with the reason attached. Never counted as a pass.
+_Avoid_: SKIP, N/A

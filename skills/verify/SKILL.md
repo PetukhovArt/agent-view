@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Visual and runtime verification of a running app over CDP. Use when user looking for: checking a UI change, reproducing a visual bug, driving interactions, or when any workflow phase must inspect the live app — DOM, screenshots, store and worker state, console errors, network calls, or which code an action actually reached, or mention: verify, agent-view, check UI, visual regression"
+description: "Inspects and drives a running app over CDP with agent-view: DOM, screenshots, JS state, console, network, reached code, memory. Use to check a UI change, reproduce a UI bug, or whenever a task needs the live app, or on: verify, agent-view, check UI."
 allowed-tools: Bash(agent-view *), Read
 ---
 
@@ -69,10 +69,10 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 
 When two tools could answer the same question, prefer the one higher up the table.
 
-## Execution discipline (read first, every run)
+## Execution discipline
 
-A run produces one of three outcomes per step: **pass**, **fail**, **requires_visual_review**. There is no fourth bucket
-called "actually fine, here's why". A failed `Expected:` line is FAIL.
+A run produces one of four outcomes per step: **pass**, **fail**, **requires_visual_review**, **skipped** (the step
+could not run; give the reason). There is no bucket called "actually fine, here's why".
 
 **How to run the commands themselves:**
 
@@ -81,7 +81,7 @@ called "actually fine, here's why". A failed `Expected:` line is FAIL.
   matched nothing looks exactly like a successful one.
 - **Chain with `&&`, not newlines.** Newline-separated commands keep running after a failure, so a
   broken first step is followed by three steps acting on the wrong state. `&&` stops at the first
-  non-zero exit.
+  non-zero exit (POSIX shells and PowerShell 7; Windows PowerShell 5.1 has no `&&`: use `; if ($?) { … }`).
 - **One action, then one check.** `click` is not evidence. The evidence is the `dom --diff`,
   `dom --filter … --count`, `eval`, or `console --level error` you run after it. Three clicks in a row with no check
   between them prove nothing about any of them.
@@ -91,7 +91,7 @@ called "actually fine, here's why". A failed `Expected:` line is FAIL.
   wait for every kind of signal:
 
   | You are waiting for… | Use |
-    |---|---|
+  |---|---|
   | An element to render | `wait --filter "<text>"` |
   | A store/state value | `watch "<expr>" --until "<expr>"` |
   | A log line | `console --follow --until "<pattern>"` |
@@ -104,35 +104,12 @@ called "actually fine, here's why". A failed `Expected:` line is FAIL.
   `agent-view …` / `pnpm exec agent-view …`. Prefixing every call with `npx <package>` re-resolves the package on each
   invocation, and in permission-gated harnesses each call then needs a fresh approval prompt.
 
-These heuristics catch real bugs. Skipping them is how a run silently passes while the bug sits in plain sight in the
-same data:
+**Reading the results:**
 
-1. **A failed expectation is FAIL.** If output disagrees with what the step expected, mark `fail` and continue, with
+1. **A failed expectation is `fail`.** If output disagrees with what the step expected, mark `fail` and continue, with
    the expectation unchanged. Explanations belong in the bug report after the run, not in the per-step log.
 
-2. **UI-vs-model mismatch is the bug, not noise.** When a count or hierarchy check returns
-   `match: false`, the default hypothesis is that the UI renderer is wrong. Before reaching for "the filter matched
-   something extra in a side panel", query the bounding boxes and ancestor chains of the matched elements — two matches
-   at the same x in adjacent y rows are sibling rows in one list, i.e. a renderer bug. The model is one representation,
-   not the source of truth; the bug may live in the gap between model and UI.
-
-3. **Defensive eval reads.** Sentinel-check every `node.field` read (`transform.x`,
-   `transform.width`) before using it in arithmetic. A renamed field silently returns `NaN`/`null`, which fail-passes
-   downstream comparisons. Add `isFinite(value)` / `value !== undefined` guards inline.
-
-4. **No hardcoded literal IDs.** A hardcoded node-ID prefix that no longer matches the current scene degrades the whole
-   check to a silent no-op. Verify at least one expected ID exists; if not, derive IDs by role at runtime, proceed with
-   the corrected lookup, and say the plan needs an ID refresh.
-
-5. **Reload checkpoint is not optional.** If the feature mutated persisted structure, run one:
-   `agent-view eval "location.reload()"`, wait for the app to come back, re-read the structural signature, diff. Drift
-   is a real bug, not a "fixed-up on save".
-
-6. **Invariants run first or fail closed.** When the plan states invariants, execute those steps before the
-   action-specific checks. A failed invariant is FAIL for that invariant *and* a flag on the rest of the run — keep
-   running the remaining steps, tagged "trust-impaired until invariant restored".
-
-7. **Never claim a `window.*` API is missing without `eval`.** Before reporting "API not exposed" /
+2. **Never claim a `window.*` API is missing without `eval`.** Before reporting "API not exposed" /
    "global X doesn't exist" / "the host doesn't expose Y", run `agent-view eval "typeof window.X"`
    and report the literal result (`"undefined"` / `"object"` / `"function"`). DOM scraping cannot answer this — globals
    are not in the AX tree. If it returns `"undefined"` the API really is absent from the main world; anything else means
@@ -140,9 +117,10 @@ same data:
 
 ## Verification Workflow
 
-Run the whole thing inline — **no subagent**. Resolve the window id once with `agent-view discover`
-if you need `--window`. When a caller fans scenarios out to agents, give each agent one scenario: an agent
-carrying several runs out of turns before it finishes any.
+Run the checks inline, with no subagent. The one exception is recording a new `act` path, which goes to
+`act-decider` (see below). Resolve the window id once with `agent-view discover` if you need `--window`.
+When a caller fans scenarios out to agents, give each agent one scenario: an agent carrying several runs
+out of turns before it finishes any.
 
 ### Reaching the screen under test
 
@@ -164,20 +142,19 @@ read `console --level error`. A screenshot comes last, as visual confirmation on
 
 ### Scenario mode (from a plan)
 
-When UI scenarios are pre-generated (e.g. a plan file with a `## UI Scenarios` section): read the steps, resolve each
-symbolic `$var` via `agent-view dom --filter "<text>" --depth 3` to a ref, execute the steps in order, and verify each
-expected outcome with `dom --filter`. Screenshot only on FAIL and at the end of an E2E scenario, never per step.
+When UI scenarios are pre-generated (e.g. a plan file with a `## UI Scenarios` section), follow
+[`references/scenario-mode.md`](references/scenario-mode.md).
 
 ### Reporting
 
 One line per step, so the report stays machine-readable:
 
 ```
-<step label> | pass | fail | requires_visual_review — <evidence command and its result>
+<step label> | pass | fail | requires_visual_review | skipped — <evidence command and its result, or why it was skipped>
+login form error | fail — dom --filter "Неверный пароль" --count → 0
 ```
 
-Close with passed / failed / visual-review counts, and call out invariant violations separately. Do not paste raw stdout
-unless asked.
+Close with passed / failed / visual-review / skipped counts. Do not paste raw stdout unless asked.
 
 **Design conformance** — when you are handed `(label, screenshot command, expected reference path)`
 rows, follow [`references/design-conformance.md`](references/design-conformance.md).
@@ -185,24 +162,17 @@ rows, follow [`references/design-conformance.md`](references/design-conformance.
 ## Resilience
 
 - **Element not found:** `agent-view wait --filter "<text>" --timeout 5` covers the render delay after HMR. If it times
-  out — report FAIL.
-- **Stale refs:** re-run `dom` after HMR, navigation, or a state change before interacting again.
+  out — report `fail`.
 - **CDP disconnect:** `agent-view discover` to check. If no windows — `agent-view launch`. On
   `PORT_CONFLICT` the CLI reports the owning PID and process name; surface it and ask the user to free the port. Never
   kill a foreign process from this skill.
 - **`CDP_TIMEOUT`:** the command hit the server-side deadline and cached sessions for that port were dropped, so retry
   once. Repeated timeouts mean the app's DevTools endpoint is wedged — restart it.
-- **Retry budget: 2 per command**, then SKIP the step with a warning. Two covers a transient CDP drop; a third repeat
-  means the app or the plan is wrong, not the call. After two or three consecutive failures, stop and distinguish "the
-  plan is stale" (hardcoded IDs no longer match the UI) from "the feature is broken" (invariants violated on a current
-  scene) — they need opposite fixes.
+- **Retry budget: 2 per command**, then mark the step `skipped` with the reason. Two covers a transient CDP drop; a
+  third repeat means the app or the plan is wrong, not the call.
 
-## Token Optimization
+## Token cost
 
-Vision tokens dominate cost: a full-res screenshot is ≈19k tokens (1920×1080, 12 tiles), `--scale 0.5`
-≈6k (4 tiles), `--scale 0.25` and `--crop` ≈1.6k (1 tile). A text answer is ~50. So `--depth` and
-`--filter` on `dom`, and `--count` where a number is the whole answer, cost near nothing by comparison.
-
-**Default rule**: the answer is a value → `eval`; the answer is "is element X visible/correct?" →
-`dom --filter`; you need pixels for one section → `screenshot --crop "<element>"`; only call
-`screenshot --scale 0.5` for full-window visual proof.
+Vision tokens dominate: a full-res screenshot is ≈19k tokens (1920×1080, 12 tiles), `--scale 0.5` ≈6k (4 tiles),
+`--scale 0.25` and `--crop` ≈1.6k (1 tile); a text answer is ~50. So `--depth`, `--filter` and `--count` on `dom` cost
+near nothing by comparison.

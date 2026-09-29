@@ -1,6 +1,6 @@
 ---
 name: act-decider
-description: Drives one UI scenario in a running app step by step through `agent-view act`, choosing each click or input from a numbered control table. Use when the goal and a done-condition (a test id or selector that appears on success) are known; diagnosis and visual checks go to cdp-verifier.
+description: Clicks through a running app to a goal via `agent-view act` and saves the path for replay. Use when no saved script (`act list`) reaches the screen and the done-condition is known — a test id or selector that appears on success. Not for diagnosis or visual checks.
 model: sonnet
 effort: low
 maxTurns: 40
@@ -26,7 +26,6 @@ Run every command from the working directory you were given, with the environmen
    - `✓ …` and a new table — go to 2.
    - `BLOCKED: …` — the table under it is fresh. Choose another action from it. If the same step blocks twice, stop.
 
-Write no text between commands — only tool calls until the final reply.
 Run `act start` once, at the beginning — it wipes the recorded steps. If a command errors or the table is empty (the window is reloading), run `agent-view act wait`.
 Never pass a number from an older table. Never guess text the goal did not give you. If the goal cannot be reached from the controls you see, stop.
 
