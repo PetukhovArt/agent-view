@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0] - 2026-09-29
+
+### Added
+- Parameters in saved `act` scripts. `act save <name> --param NAME=value` (also on `act start … --save`, repeatable) saves every occurrence of the value in test ids, names, typed text and the until as `${NAME}`. `act replay` fills `${NAME}` from the env var `NAME` in every script of the `after` chain, and refuses the run before any step when one is unset (`"x" needs ROW — set as env vars`, exit 2). `act list` and `INDEX.md` show `params ROW …`. A step whose target varies (a tree row, a project) no longer has to be a shell script. Scripts without placeholders replay as before.
+
+### Fixed
+- `act replay` checks the `after` chain from the nearest prerequisite back. A prerequisite already reached is skipped together with the ones before it. Before, each was checked on its own from the first, so one whose state the next step had used up (a context menu closed by its item) ran again and failed with its until never shown.
+
 ## [0.19.0] - 2026-09-29
 
 ### Added
