@@ -110,7 +110,7 @@ export const fillParams = (script: ActScript, values: Record<string, string>): A
 export async function scriptStore(projectDir: string): Promise<string> {
   const dir = await realpath(projectDir)
   const args = ['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-toplevel']
-  const root = await execFileAsync('git', args, { cwd: dir }).then(
+  const root = await execFileAsync('git', args, { cwd: dir, windowsHide: true }).then(
     ({ stdout }) => {
       const [commonDir, toplevel] = stdout.trim().split(/\r?\n/)
       // A submodule's common dir sits in the superproject's .git/modules: it has no main checkout of its own.

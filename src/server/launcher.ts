@@ -67,7 +67,7 @@ async function resolvePortOwner(port: number): Promise<{ pid?: number, processNa
   try {
     if (process.platform === 'win32') {
       const ps = `$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue; \"$($c.OwningProcess)|$($p.ProcessName)\" }`
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: 3000 })
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: 3000, windowsHide: true })
       const line = stdout.trim()
       if (!line) return {}
       const [pidStr, name] = line.split('|')
