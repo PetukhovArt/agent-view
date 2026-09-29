@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.20.1] - 2026-09-29
 
 ### Fixed
 - Windows: every `act` call flashed a console window. The server runs without a console, so the `git rev-parse` that finds the script store (and the `powershell.exe` port-owner lookup) opened one of their own; both now start hidden.
