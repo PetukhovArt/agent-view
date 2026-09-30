@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.21.2] - 2026-09-30
 
 ### Changed
 - `screenshot` (and the one in `snap`) comes out in CSS pixels at any OS display scale, so a point read off it is a `click --pos` / `drag --*-pos` coordinate. At 125% it was in device pixels, and a click on a spot read off it landed 1.25× further right and down: on a window's close button. On a HiDPI screen the image is smaller than before (cheaper in tokens); `--scale` now scales the CSS-pixel image. Saved `act` scripts are unaffected: their `@x,y` were always CSS pixels.
