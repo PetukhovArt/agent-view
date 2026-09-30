@@ -211,6 +211,7 @@ agent-view act drag 7 testid=video-panel right   # … onto any visible element 
 agent-view act drag 7 center left       # … near the viewport's left edge; edge: left|right|top|bottom|center (default)
 agent-view act drag "css=canvas@10,10" "css=canvas@200,150"   # from a point to a point: a selection frame on a canvas
 agent-view act drag 7 "css=canvas@300,200"   # a tree row dropped at a point of the canvas
+agent-view act drag 7 5 --html5         # a native drag-and-drop (a `draggable` row) instead of pointer events
 agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
 agent-view act save login --in auth     # writes <project>/.agent-view/scripts/auth/login.json + the index.md files, prints the path
 agent-view act start --until-testid x --save auth-login --in auth   # same, written automatically on DONE (one turn fewer)
@@ -263,8 +264,9 @@ empty value, one it does not take, and a `--requires` that is not a file under `
 appear twice with different values. `timeout=` overrides the step's own. `--requires <path>` (repeatable)
 names a **fixture** — setup outside the UI (files on disk) kept in `<section>/fixtures/`: replay never
 runs it, it only prints `requires (not run by replay): <path>` under the verdict. Inside a use case the
-steps' `after` is not run; the list is the whole order. Replay skips, as for an `after` chain, the
-nearest step whose until already holds together with every one before it.
+steps' `after` is not run; the list is the whole order. Replay skips only its leading steps whose until
+already holds (project open, scene open); from the first one not reached, every step runs — a later step
+whose until holds from the start (a dialog closed, a tab active) is not a reason to skip the ones before it.
 
 Parameters: `--param NAME=value` (NAME of `A-Z 0-9 _`) replaces every occurrence of the value in the
 steps' test ids, names and typed text and in the until with `${NAME}`, longest value first; a value
@@ -319,7 +321,7 @@ First line of an op's output:
 - `act do: "…" — each step is click|dblclick|rightclick|type|select <n> [text]` (checked before any step runs; a
   failing step prints the `✓` lines of the ones before it)
 - `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
-  `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] — edge is one of left|right|top|bottom|center ``,
+  `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of left|right|top|bottom|center ``,
   `act click <n | testid=<id> | css=<selector>>[@x,y]`
 - `No element matches testid "x"` / `None of 3 element(s) matching selector "…" is visible` (a `testid=` / `css=` target)
 - `act save <name> --in <section>: the product area it belongs to …` (no or bad `--in`; `act start --save` checks it

@@ -35,7 +35,8 @@ export type RecordedStep =
   /** `target`: the element under the wheel; absent = the viewport centre. */
   | { op: 'scroll'; direction: 'up' | 'down'; target?: Target }
   /** `to`: a row, any element, or absent = the viewport; `toAt` replaces the `edge` point. */
-  | { op: 'drag'; target: Target; at?: Point; to?: Target; edge: Edge; toAt?: Point }
+  /** `isHtml5`: a native drag-and-drop (draggable rows), not pointer events. */
+  | { op: 'drag'; target: Target; at?: Point; to?: Target; edge: Edge; toAt?: Point; isHtml5?: boolean }
 
 export type UntilArgs = { testid?: string; selector?: string }
 
@@ -307,16 +308,19 @@ export async function clickNode(conn: PageSession, nodeId: number, op: ClickOp, 
   await conn.clickAtPosition(x, y, CLICKS[op])
 }
 
-/** Pointer drag from a node (its centre, or `at`) onto a drop node or the viewport: at `toAt`, else its `edge` point. */
+/**
+ * Drag from a node (its centre, or `at`) onto a drop node or the viewport: at `toAt`, else its `edge` point.
+ * Pointer events, or a native drag-and-drop when `isHtml5`.
+ */
 export async function dragNode(
   conn: PageSession,
   nodeId: number,
-  { at, dropId, toAt, edge }: { at?: Point; dropId?: number; toAt?: Point; edge: Edge },
+  { at, dropId, toAt, edge, isHtml5 }: { at?: Point; dropId?: number; toAt?: Point; edge: Edge; isHtml5?: boolean },
 ): Promise<void> {
   // Source first: scrolling it into view may move the target, so the target is measured after.
   const from = at ? pointIn(await conn.getBoxRect(nodeId), at) : await conn.getBoxCenter(nodeId)
   const box = dropId === undefined ? await viewportBox(conn) : await conn.getBoxRect(dropId, { scrollIntoView: false })
-  await conn.dragBetweenPositions(from, toAt ? pointIn(box, toAt) : edgePoint(box, edge), { mode: 'pointer' })
+  await conn.dragBetweenPositions(from, toAt ? pointIn(box, toAt) : edgePoint(box, edge), { mode: isHtml5 ? 'html5' : 'pointer' })
 }
 
 export const describeTarget = (target: Target): string => {

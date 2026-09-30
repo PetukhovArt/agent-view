@@ -473,7 +473,10 @@ act.command('scroll <direction> [over]').description('Wheel up or down by ~0.8 v
   .action(async (direction: string, over: string | undefined) => { await runAct(requireConfig(), { op: 'scroll', direction, target: over }) })
 
 act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, testid=<id>, css=<selector>; @x,y = px from its top-left, else its centre) onto `to` (same forms, or `center`/omitted = the viewport): at its @x,y, else near its left|right|top|bottom edge or center (default)')
-  .action(async (from: string, to: string | undefined, edge: string | undefined) => { await runAct(requireConfig(), { op: 'drag', target: from, to, edge }) })
+  .option('--html5', 'Native HTML5 drag-and-drop (a draggable row) instead of pointer events')
+  .action(async (from: string, to: string | undefined, edge: string | undefined, opts: { html5?: boolean }) => {
+    await runAct(requireConfig(), { op: 'drag', target: from, to, edge, html5: opts.html5 === true })
+  })
 
 act.command('do <steps...>').description('Several ops decided from one table, e.g. act do "type 2 root" "type 3 secret" "click 1"')
   .action(async (steps: string[]) => { await runAct(requireConfig(), { op: 'do', steps }) })

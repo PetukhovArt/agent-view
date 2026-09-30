@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `act drag … --html5`: a native HTML5 drag-and-drop (a `draggable` tree row onto a canvas point or another row) instead of pointer events; recorded and replayed as such.
+
+### Changed
+- A use case skips only its leading steps whose until already holds. It skipped the nearest reached step with every one before it, as an `after` chain does, so a step whose until holds from the start — «close the dialog», «activate the Демо tab» — skipped all the steps before it and could only stand first.
+
 ## [0.21.0] - 2026-09-30
 
 ### Added

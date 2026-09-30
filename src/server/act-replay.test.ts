@@ -85,4 +85,22 @@ describe('replay', () => {
     expect(result).toMatchObject({ ok: true, exitCode: 0 })
     expect(conn.clickByNodeId).not.toHaveBeenCalled()
   })
+
+  it('runs a use case from its first step not reached, though a later step\'s until already holds', async () => {
+    const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
+    const click = { op: 'click' as const, target: { role: 'button', name: 'Сцена' }, isPassword: false }
+    await writeScript({ store, name: 'menu-open' }, { until: { testid: 'menu' }, steps: [click] })
+    // «Close the dialog»: its until (no dialog) holds before the use case has opened one.
+    await writeScript({ store, name: 'dialog-close' }, { until: { selector: 'body:not(:has(.dialog))' }, steps: [click] })
+    await writeScript({ store, name: 'flow-use-case' }, { until: { testid: 'done' }, use: [{ step: 'menu-open' }, { step: 'dialog-close' }] })
+    const conn = fakeConn()
+    conn.queryVisible = async (css: string) =>
+      css.includes('menu') && !conn.clickByNodeId.mock.calls.length ? { backendDOMNodeId: null, count: 0 } : { backendDOMNodeId: 1, count: 1 }
+    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn }
+
+    const result = await replay({ store, name: 'flow-use-case' }, deps)
+
+    expect(result).toMatchObject({ ok: true, exitCode: 0 })
+    expect(conn.clickByNodeId).toHaveBeenCalledTimes(2)
+  })
 })

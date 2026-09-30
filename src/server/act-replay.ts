@@ -207,7 +207,7 @@ export async function replay(
         if (step.op === 'drag') {
           const dropId = step.to && (await resolve(step.to, false)).nodeId
           if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
-          await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge })
+          await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
         } else if (isClickOp(step.op)) {
           await clickNode(deps.conn, nodeId, step.op, step.at)
         } else if (step.op === 'type') {
@@ -257,11 +257,16 @@ export async function replay(
     if ('ok' in until) return until
     untils.push(until)
   }
-  // Nearest first, checked once, no polling: a prerequisite already reached (logged in, a menu open)
-  // is skipped with every one before it, whose state its own next step may have consumed (a menu closed by its item).
-  let firstToRun = chain.length
-  while (firstToRun > 0 && !await isShown(untils[firstToRun - 1])(deps.conn).catch(() => undefined)) {
-    firstToRun--
+  // Checked once, no polling. An `after` chain goes nearest first: a prerequisite already reached (logged in, a
+  // menu open) is skipped with every one before it, whose state its own next step may have consumed (a menu closed
+  // by its item). A use case only skips its leading steps already reached: a later step's until may hold from the
+  // start (a dialog closed, a tab active again) without the steps before it having run.
+  const isReached = (i: number) => isShown(untils[i])(deps.conn).catch(() => undefined)
+  let firstToRun = linkWord === 'step' ? 0 : chain.length
+  if (linkWord === 'step') {
+    while (firstToRun < chain.length && await isReached(firstToRun)) firstToRun++
+  } else {
+    while (firstToRun > 0 && !await isReached(firstToRun - 1)) firstToRun--
   }
   const prerequisites = chain.slice(0, firstToRun).map(pre => `${pre.name} skipped`)
   for (const [i, pre] of chain.entries()) {

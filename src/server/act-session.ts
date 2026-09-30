@@ -136,7 +136,7 @@ export async function runAct(
     return { ok: true, data: `BLOCKED: step budget ${session.maxSteps} exhausted\n${await printTable(run)}` }
   }
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
-  if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge') })
+  if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
     const target = parseTarget(str(args, 'target')!)
     if (!target) return { ok: false, error: `act ${op} <n | testid=<id> | css=<selector>>[@x,y]` }
@@ -312,9 +312,9 @@ async function clickStep(run: Run, op: ClickOp, target: CliTarget): Promise<Serv
  */
 async function dragStep(
   run: Run,
-  { from, to, edge = 'center' }: { from: string; to?: string; edge?: string },
+  { from, to, edge = 'center', isHtml5 }: { from: string; to?: string; edge?: string; isHtml5?: boolean },
 ): Promise<ServerResponse> {
-  const usage = `act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] — edge is one of ${EDGES.join('|')}`
+  const usage = `act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of ${EDGES.join('|')}`
   const source = parseTarget(from)
   const dest = to === undefined || to === 'center' ? undefined : parseTarget(to)
   if (!isEdge(edge) || !source || (to !== undefined && to !== 'center' && !dest)) return { ok: false, error: usage }
@@ -323,9 +323,9 @@ async function dragStep(
   if (!('nodeId' in picked)) return picked
   const drop = dest && await pick(run, dest)
   if (drop && !('nodeId' in drop)) return drop
-  await dragNode(deps.conn, picked.nodeId, { at: source.at, dropId: drop?.nodeId, toAt: dest?.at, edge })
+  await dragNode(deps.conn, picked.nodeId, { at: source.at, dropId: drop?.nodeId, toAt: dest?.at, edge, isHtml5 })
   deps.invalidateAxCache()
-  session.steps.push({ op: 'drag', target: picked.target, at: source.at, to: drop?.target, edge, toAt: dest?.at })
+  session.steps.push({ op: 'drag', target: picked.target, at: source.at, to: drop?.target, edge, toAt: dest?.at, isHtml5: isHtml5 || undefined })
   const toLabel = `${drop?.label ?? 'viewport'}${dest?.at ? describeAt(dest.at) : ` ${edge}`}`
   return finishStep(run, { before: picked.before, done: `drag ${picked.label}${describeAt(source.at)} → ${toLabel}` })
 }
