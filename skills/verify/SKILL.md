@@ -1,7 +1,6 @@
 ---
 name: verify
 description: "Inspects and drives a running app over CDP with agent-view: DOM, screenshots, JS state, console, network, reached code, memory. Use to check a UI change, reproduce a UI bug, or whenever a task needs the live app, or on: verify, agent-view, check UI."
-allowed-tools: Bash(agent-view *), Read
 ---
 
 # Visual Verification with agent-view
