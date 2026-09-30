@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.21.0] - 2026-09-30
 
 ### Added
 - Sections in the script store ([ADR 0005](./docs/adr/0005-script-store-sections-and-use-cases.md)). `act save` and `act start --save` take `--in <section>` (required): the product area the script drives (`auth`, `tree`, `editor/canvas`), a subdirectory of `.agent-view/scripts/`. Names stay unique across the whole store, so `replay`, `--after` and use cases name a script alone and moving it between sections breaks nothing; a name that lies in another section is refused. Every save writes an `index.md` per section and a root one listing the sections. `act list` prints the sections, `act list <section>` one of them and the sections below it (`editor` → `editor/canvas`); an emptied section loses its `index.md`. Scripts in the store root still replay and are listed as "In no section yet".
