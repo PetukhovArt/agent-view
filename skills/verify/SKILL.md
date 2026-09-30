@@ -50,7 +50,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | Does `window.X` / a globally-exposed API exist?                  | `eval "typeof window.X"`                                     | DOM doesn't show JS globals; only authoritative check                                       |
 | Acting on an element `dom` shows with `[testid=…]`               | `click` / `fill` / `wait --testid <id>`                      | Survives HMR, navigation and copy changes; a ref and a text filter do not                   |
 | An element that has not rendered yet                             | `wait --filter "<text>"`                                     | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause             |
-| Getting to a screen or through a flow with a known end state (login, a form) | `act list` → `act replay <name>`; none fits → `act start --until-testid <id> --save <name>`, or `--until-selector <css>` when the end state has no test id | Replay takes seconds and no model; a new path goes to the `act-decider` agent and is saved for the next run. The control table is read from the accessibility tree, so test ids are optional. See [Reaching the screen](#reaching-the-screen-under-test) |
+| Getting to a screen or through a flow with a known end state (login, a form) | `act list [section]` → `act replay <name>`; none fits → `act start --until-testid <id> --save <name> --in <section>`, or `--until-selector <css>` when the end state has no test id | Replay takes seconds and no model; a new path goes to the `act-decider` agent and is saved for the next run. The control table is read from the accessibility tree, so test ids are optional. See [Reaching the screen](#reaching-the-screen-under-test) |
 | State *trajectory* — what changed during/after an action         | `watch "expr" --until …` or `--max-changes 1`                | `eval` shows the final snapshot only; `watch` shows the diffs in order                      |
 | Worker logic (SharedWorker / ServiceWorker)                      | `eval --target <name>`                                       | Workers have no DOM at all                                                                  |
 | Did the last action throw or warn?                               | `console --clear` before, `console --level error,warn` after | Catches errors that don't surface in the DOM                                                |
@@ -126,12 +126,19 @@ out of turns before it finishes any.
 
 Navigation is a recorded path, re-explored only when it broke:
 
-1. `agent-view act list` prints the project's saved scripts, one line each: note, start route, prerequisite, done
-   condition. Scripts live in the main checkout, so every worktree of the project sees the same list.
-2. A script lands where you need: `agent-view act replay <name>`. Its `after` prerequisite (a login) runs first and is
-   skipped when already met. DONE: go on. STALE: re-record under the same name.
-3. No script fits: record one. Hand the goal, a done condition and a name `<section>-<target>`
-   (`settings-connections-open`) to the `act-decider` agent, or drive `act start … --save <name> --note "…"` yourself.
+1. `agent-view act list` prints the sections of the project's script store, one per product area (`auth`, `tree`,
+   `editor/canvas`) plus `integration`; `act list <section>` prints its **steps** (one small action each) and
+   **use cases** (a user goal built from steps, name ending in `-use-case`), one line each: note, start route,
+   prerequisite, parameters, done condition. Scripts live in the main checkout, so every worktree sees the same store.
+2. A script lands where you need: `agent-view act replay <name>`. Its `after` prerequisite (a login), or a use case's
+   steps, run first and are skipped when already met. DONE: go on. STALE: re-record under the same name.
+3. No script fits: record the missing steps, one small action each, into the section of the area they drive. Hand
+   the goal, a done condition, a name `<section>-<target>` (`settings-connections-open`) and the section to the
+   `act-decider` agent, or drive `act start … --save <name> --in <section> --note "…"` yourself. Then, when the
+   flow is worth repeating, chain the steps with `act save-use-case <name>-use-case --in <section> …` (`integration`
+   when it crosses areas). A step that act cannot record is a missing act op or a missing test id in the app, never a
+   shell script in the store; setup on disk is a fixture in `<section>/fixtures/`
+   ([commands](references/commands.md#step-protocol-act)).
 
 ### Ad-hoc mode (standalone)
 

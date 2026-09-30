@@ -202,11 +202,23 @@ _Avoid_: Script Run, Playback
 
 **Act Script**
 A saved Act Session as JSON: done condition, steps, and optionally a note, the start route and an `after` prerequisite script that Replay runs first unless its done condition already holds.
-_Avoid_: Recording, Macro, Scenario
+_Avoid_: Recording, Macro, Scenario, Step Script
+
+**Use Case**
+A user's goal as an ordered list of Act Scripts, each with its own parameter values, and a done condition of its own. The steps' `after` is not run inside it ([ADR 0005](./docs/adr/0005-script-store-sections-and-use-cases.md)).
+_Avoid_: Scenario, Flow, Chain
 
 **Script Store**
-The directory holding a project's Act Scripts and their generated `INDEX.md`: `.agent-view/scripts/` beside `agent-view.config.json` in the main checkout, shared by all its worktrees ([ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md)).
+The directory holding a project's Act Scripts and Use Cases, split into Sections, each with a generated `index.md`: `.agent-view/scripts/` beside `agent-view.config.json` in the main checkout, shared by all its worktrees ([ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md)).
 _Avoid_: Scratch, Script Dir
+
+**Section**
+A subdirectory of the Script Store named after a product area (`auth`, `libraries`); `integration` holds the Use Cases that cross areas. A script's name is unique across all Sections.
+_Avoid_: Feature Folder, Shared
+
+**Fixture**
+Setup outside the UI (files on disk) that a Use Case needs, kept in its Section's `fixtures/` and named in the Use Case's `requires`. Replay reminds, never runs it.
+_Avoid_: Setup Script, Test Data
 
 **requires_visual_review**
 A Verification Run step verdict: an executable check was made and gave no answer, and no one has looked at the step yet. Not a way to describe a step that has no executable check.

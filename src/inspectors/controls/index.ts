@@ -26,9 +26,16 @@ export type Control = {
 
 /**
  * Interactive AX nodes whose box is non-empty and intersects the viewport, in AX-tree order,
- * then pointer-only `item` rows in layout order.
+ * then pointer-only `item` rows in layout order. `isOffscreenIncluded` keeps the ones laid out
+ * outside the viewport too (a field below the fold of a scrollable panel).
  */
-export function extractControls(ax: AXNode[], layout: LayoutSnapshot, testIdAttributes: readonly string[]): Control[] {
+export function extractControls(
+  ax: AXNode[],
+  layout: LayoutSnapshot,
+  testIdAttributes: readonly string[],
+  { isOffscreenIncluded = false }: { isOffscreenIncluded?: boolean } = {},
+): Control[] {
+  const isShown = (rect: Rect) => (isOffscreenIncluded ? hasArea(rect) : isOnScreen(rect, layout.viewport))
   const byId = new Map(ax.map(n => [n.nodeId, n]))
   const childName = (node: AXNode, depth: number): string => {
     if (depth <= 0) return ''
@@ -47,7 +54,7 @@ export function extractControls(ax: AXNode[], layout: LayoutSnapshot, testIdAttr
     const id = node.backendDOMNodeId
     if (node.ignored || !(INTERACTIVE_ROLES.has(role) || NOTICE_ROLES.has(role)) || id === undefined) continue
     const box = layout.nodes.get(id)
-    if (!box || !isOnScreen(box.rect, layout.viewport)) continue
+    if (!box || !isShown(box.rect)) continue
 
     const name = node.name?.value || childName(node, NAME_SEARCH_DEPTH)
     // Empty alerts are standing slots (Vuetify's per-field `v-messages`), not news.
@@ -81,7 +88,7 @@ export function extractControls(ax: AXNode[], layout: LayoutSnapshot, testIdAttr
     const node = axById.get(id)
     return node?.name?.value || (node && childName(node, NAME_SEARCH_DEPTH)) || attributes['title'] || attributes['aria-label'] || ''
   }
-  return [...controls.filter(c => !isWrapper(c)), ...pointerItems(controls, { layout, testIdAttributes, nameOf })]
+  return [...controls.filter(c => !isWrapper(c)), ...pointerItems(controls, { layout, testIdAttributes, nameOf, isShown })]
 }
 
 /**
@@ -91,17 +98,18 @@ export function extractControls(ax: AXNode[], layout: LayoutSnapshot, testIdAttr
  */
 function pointerItems(
   controls: Control[],
-  { layout, testIdAttributes, nameOf }: {
+  { layout, testIdAttributes, nameOf, isShown }: {
     layout: LayoutSnapshot
     testIdAttributes: readonly string[]
     nameOf: (id: number, attributes: Record<string, string>) => string
+    isShown: (rect: Rect) => boolean
   },
 ): Control[] {
   const controlRects = controls.map(c => layout.nodes.get(c.backendDOMNodeId)!.rect)
   const items: Control[] = []
   for (const [id, box] of layout.nodes) {
     const testAttr = testIdAttributes.find(a => box.attributes[a])
-    if (!testAttr || box.cursor !== 'pointer' || !isOnScreen(box.rect, layout.viewport)) continue
+    if (!testAttr || box.cursor !== 'pointer' || !isShown(box.rect)) continue
     if (controlRects.some(rect => isInside(box.rect, rect))) continue
     const name = nameOf(id, box.attributes)
     items.push({ backendDOMNodeId: id, role: 'item', name, testid: box.attributes[testAttr], states: [], isPassword: false })
@@ -116,10 +124,11 @@ function isInside(inner: Rect, outer: Rect): boolean {
     && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height
 }
 
+const hasArea = (rect: Rect): boolean => rect.width > 0 && rect.height > 0
+
 function isOnScreen(rect: Rect, viewport: { width: number; height: number }): boolean {
-  const hasArea = rect.width > 0 && rect.height > 0
   const isIntersecting = rect.x < viewport.width && rect.y < viewport.height && rect.x + rect.width > 0 && rect.y + rect.height > 0
-  return hasArea && isIntersecting
+  return hasArea(rect) && isIntersecting
 }
 
 function isStateOn(node: AXNode, prop: string): boolean {

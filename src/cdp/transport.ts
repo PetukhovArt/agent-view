@@ -1504,7 +1504,7 @@ export async function connectToPage(
       return outcome.result?.value ?? 'not-select'
     },
 
-    async scrollViewport(direction: 'up' | 'down'): Promise<void> {
+    async scrollWheel(direction: 'up' | 'down', at?: Point): Promise<void> {
       const { cssLayoutViewport } = await Page.getLayoutMetrics()
       const deltaY = Math.round(cssLayoutViewport.clientHeight * SCROLL_VIEWPORT_FRACTION) * (direction === 'down' ? 1 : -1)
       // The wheel's ack sometimes never comes (1 in ~5 on the bench app) and held the call
@@ -1512,8 +1512,8 @@ export async function connectToPage(
       // loop sees the scroll, so wait for the ack only briefly.
       const wheel = Input.dispatchMouseEvent({
         type: 'mouseWheel',
-        x: Math.round(cssLayoutViewport.clientWidth / 2),
-        y: Math.round(cssLayoutViewport.clientHeight / 2),
+        x: Math.round(at?.x ?? cssLayoutViewport.clientWidth / 2),
+        y: Math.round(at?.y ?? cssLayoutViewport.clientHeight / 2),
         deltaX: 0,
         deltaY,
       })

@@ -198,38 +198,73 @@ agent-view act table                    # re-snapshot, print the table
 agent-view act click 3                  # row numbers refer to the LAST printed table
 agent-view act dblclick 3               # double-click (fires dblclick); recorded and replayed as such
 agent-view act rightclick 3             # right-click (fires contextmenu); then pick the menu row from the next table
+agent-view act click "css=#content-area canvas@120,80"   # what is no row: testid=<id> | css=<selector>; @x,y = px from its top-left
+agent-view act rightclick 3@10,5        # a row, at a point of it; without @ — its centre
 agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
 agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
+agent-view act scroll down testid=properties-panel   # wheel over a row / element: a panel scrolls only under the pointer
 agent-view act do "type 2 root" "type 3 secret" "click 1"   # several ops, all numbered from ONE table; stops at the first BLOCKED/DONE/error
 agent-view act drag 5                   # pointer-drag row 5 onto the viewport centre
 agent-view act drag 5 2                 # … onto the centre of row 2
 agent-view act drag 7 testid=video-panel right   # … onto any visible element by test id, 20 px inside its right edge
 agent-view act drag 7 center left       # … near the viewport's left edge; edge: left|right|top|bottom|center (default)
+agent-view act drag "css=canvas@10,10" "css=canvas@200,150"   # from a point to a point: a selection frame on a canvas
+agent-view act drag 7 "css=canvas@300,200"   # a tree row dropped at a point of the canvas
 agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
-agent-view act save login               # writes <project>/.agent-view/scripts/login.json + INDEX.md, prints the path
-agent-view act start --until-testid x --save login   # same, written automatically on DONE (one turn fewer)
-agent-view act start --until-testid settings-root --save settings-open --after login --note "open settings"
-agent-view act save settings-open --after login --note "open settings"   # --note / --after on either
-agent-view act save tree-row-select --param ROW=library/Насосы/Насос   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
-AGENT_VIEW_SECRET=… agent-view act replay login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
+agent-view act save login --in auth     # writes <project>/.agent-view/scripts/auth/login.json + the index.md files, prints the path
+agent-view act start --until-testid x --save auth-login --in auth   # same, written automatically on DONE (one turn fewer)
+agent-view act start --until-testid settings-root --save settings-open --in settings --after auth-login --note "open settings"
+agent-view act save settings-open --in settings --after auth-login --note "open settings"   # --note / --after on either
+agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
+agent-view act save project-import --in projects --timeout 120   # replay waits up to 120 s for the until (default 15)
+AGENT_VIEW_SECRET=… agent-view act replay auth-login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
 ROW=library/Насосы/Пожарный agent-view act replay tree-row-select   # ${ROW} filled from $ROW, in the after chain too
-agent-view act list                     # saved scripts of this project; needs no running app
+agent-view act list                     # sections of the store; needs no running app
+agent-view act list libraries           # the steps and use cases of one section (and of the sections below it)
+agent-view act save-use-case pump-open-use-case --in libraries --until-testid pump-card \
+  auth-login 'project-open PROJECT=${PROJECT}' "tree-row-select ROW=library/Насосы/Насос timeout=30" --note "open the pump card"
 ```
 
 Scripts live per project in `<project>/.agent-view/scripts/`, `<project>` being the directory of
 `agent-view.config.json`. In a git worktree they go to the **main** checkout (same subdirectory), so
-every worktree of a project shares one store. A name missing there is read from the old
-`~/.agent-view/scratch/<name>.json` (read-only). Each save rewrites `INDEX.md` in the store; `act list`
-prints the same lines, built from the JSON files, sorted by name, so a shared prefix (`settings-*`)
-groups one UI section:
+every worktree of a project shares one store. The store is split into **sections**, subdirectories named
+after the product area a script drives (`auth`, `tree`, `editor/canvas`), mirroring the project;
+`integration` holds use cases that cross areas. There is no `shared/`: any script is reusable from where
+it lies. `act save` / `start --save` need `--in <section>`. A name is unique across the whole store and is
+all `replay`, `--after` and a use case use — moving a file to another section breaks nothing; saving a
+name that lies in another section is refused. A script in the store root (saved before sections) still
+replays and is listed as "In no section yet"; a name missing from the store is read from the old
+`~/.agent-view/scratch/<name>.json` (read-only).
+
+Each save rewrites `index.md` in every section and in the store root. `act list` prints the root one,
+`act list <section>` one section — read the section before recording, a step you need may be there:
 
 ```
-C:\proj\.agent-view\scripts · replay: agent-view act replay <name>
-- `login` — until testid "workspace-root" · 3 steps
-- `settings-open` — open settings · start `#/main` · after `login` · until testid "settings-root" · 1 step
+C:\proj\.agent-view\scripts · replay: agent-view act replay <name> · one section: act list <section>
+- `auth/` — 1 step
+- `libraries/` — 2 steps, 1 use case
+- `settings/` — 1 step
+
+C:\proj\.agent-view\scripts\libraries · replay: agent-view act replay <name>
+Steps:
+- `project-open` — open the project · start `#/` · params PROJECT · until testid "tree-root" · timeout 60s · 2 steps
 - `tree-row-select` — select a tree row · params ROW · until selector "[data-testid="row-${ROW}"][aria-selected]" · 1 step
+Use cases:
+- `pump-open-use-case` — open the pump card · params PROJECT · until testid "pump-card" · auth-login → project-open → tree-row-select
 ```
+
+**Use cases.** A saved `act` run is a **step**: one small action, reusable. A **use case** is a user
+goal made of saved steps, in order, with a done condition of its own; its name ends in `-use-case` (a
+step's never does). `act save-use-case <name>-use-case --in <section> --until-testid|--until-selector …
+"<step> [NAME=value …] [timeout=<s>]" …` needs no running app; it refuses a step not saved, a parameter a
+step takes but the entry does not bind (`"tree-row-select" needs ROW — "tree-row-select ROW=…"`), an
+empty value, one it does not take, and a `--requires` that is not a file under `<section>/fixtures/`. A value may be `${NAME}`, filled from the env var `NAME` at replay, so one step can
+appear twice with different values. `timeout=` overrides the step's own. `--requires <path>` (repeatable)
+names a **fixture** — setup outside the UI (files on disk) kept in `<section>/fixtures/`: replay never
+runs it, it only prints `requires (not run by replay): <path>` under the verdict. Inside a use case the
+steps' `after` is not run; the list is the whole order. Replay skips, as for an `after` chain, the
+nearest step whose until already holds together with every one before it.
 
 Parameters: `--param NAME=value` (NAME of `A-Z 0-9 _`) replaces every occurrence of the value in the
 steps' test ids, names and typed text and in the until with `${NAME}`, longest value first; a value
@@ -237,7 +272,7 @@ found nowhere refuses the save (`--param ROW: "…" is in no step and not in the
 each `${NAME}` from the env var `NAME`, for every script of the `after` chain; scripts without
 placeholders replay as before.
 
-Empty store: `No saved scripts in <store> — record one with act start … --save <name>`. `start` is
+Empty store: `No saved scripts in <store> — record one with act start … --save <name> --in <section>`. `start` is
 recorded at `act start`: the hash route, else path + query of an http(s) page (never the origin);
 informational, replay does not navigate there. `--after <name>` names a prerequisite (a login).
 
@@ -265,6 +300,9 @@ First line of an op's output:
 | `✓ rightclick [5] treeitem "Сцена 1" · 180ms` | same for `dblclick` / `rightclick`: the line names the op |
 | `✓ click [3] button "Войти" · window reloaded · 900ms` | the window reloaded under the action (login); settled on the new document |
 | `✓ drag [7] item "ГИС" testid=nav__widgetbar__item-GisWidget → testid=video-panel right · 310ms` | dragged: `→` names the target and edge |
+| `✓ click css=#cv @120,80 · 150ms` | a point of an element: `@x,y` from its top-left |
+| `✓ drag css=#cv @10,10 → css=#cv @200,150 · 200ms` | point to point |
+| `✓ scroll down testid=properties-panel · 120ms` | wheel over that element |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
 | `BLOCKED: [3] button "Войти" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
 | `BLOCKED: [3] covered by div.overlay testid=spinner` | something else receives the click; fresh table follows, nothing was done |
@@ -280,21 +318,31 @@ First line of an op's output:
 - `not a native select — click it`, `No option "x" in [n]`
 - `act do: "…" — each step is click|dblclick|rightclick|type|select <n> [text]` (checked before any step runs; a
   failing step prints the `✓` lines of the ones before it)
-- `act scroll <up|down>`, `act drag <n> [to] [edge] — edge is one of left|right|top|bottom|center`
+- `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
+  `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] — edge is one of left|right|top|bottom|center ``,
+  `act click <n | testid=<id> | css=<selector>>[@x,y]`
+- `No element matches testid "x"` / `None of 3 element(s) matching selector "…" is visible` (a `testid=` / `css=` target)
+- `act save <name> --in <section>: the product area it belongs to …` (no or bad `--in`; `act start --save` checks it
+  up front), `"x" already lies in tree — save it into --in tree, or move or delete <path>`,
+  `act save x-use-case — a recording is a step, its name does not end in -use-case`
 
-The saved script names each control by test id, else role + name — never by row number — and
-stores no password. `act replay` runs it inside the server: each step waits (50 ms polls, 10 s cap)
-only for its own control to be on screen, enabled and uncovered, then acts; a window reload
-mid-run is ridden over. The `after` chain runs first, checked nearest-first (once, no wait): the
-nearest prerequisite whose own until already holds is skipped together with every one before it,
-and the ones after it run; the main script's until is not pre-checked. Its one line, ending
-in the total time:
+The saved script names each control by test id, else role + name — never by row number — plus which
+of several visible controls sharing that role + name it is (the × of every tab, `#2` in replay lines);
+a `testid=` / `css=` target is saved as given, with its `@x,y`. It stores no password. `act replay`
+runs it inside the server: each step waits (50 ms polls, 10 s cap) only for its own control to be on
+screen, enabled and uncovered, then acts; a window reload mid-run is ridden over. The until then gets
+15 s, or the script's `--timeout`. The `after` chain runs first, checked nearest-first (once, no wait):
+the nearest prerequisite whose own until already holds is skipped together with every one before it,
+and the ones after it run; the main script's until is not pre-checked. A use case runs its steps the
+same way, labelled `step` instead of `prerequisite`. Its one line, ending in the total time:
 
 | Line | Exit | Meaning |
 |---|---|---|
 | `DONE: replay login · 2 steps in 0.1s, then testid "x" · 1.8s` | 0 | until met; the steps took 0.1 s, the app the rest |
 | `DONE: replay settings-open · after login skipped · 1 steps in 0.1s, then testid "y" · 0.6s` | 0 | same; prerequisites listed `skipped` or `ran` |
+| `DONE: replay pump-open-use-case · auth-login skipped, project-open ran, tree-row-select ran, then testid "pump-card" · 4.2s` | 0 | a use case: each step `skipped` or `ran` |
 | `FAIL: prerequisite login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | a prerequisite did not reach DONE; its step lines read `FAIL:` / `STALE: prerequisite login: step 2/2 …` |
+| `FAIL: step project-open — steps ran, testid "tree-root" not visible after 60s · 61.0s` | 1 | same for a use-case step; its step lines read `STALE: step project-open: step 1/2 …` |
 | `FAIL: replay login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | the app did not answer — likely a bug |
 | `FAIL: step 2/2 click button "Войти" testid=login-btn — still disabled after 10s · 10.4s` | 1 | the control is there but stayed `disabled` / `covered by …` — likely a bug |
 | `STALE: step 2/2 click button "Войти" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
@@ -305,7 +353,8 @@ in the total time:
 Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
 prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,
 `"x" after-chain loops: x → login → x`, `"x" needs ROW, SCENE — set as env vars` (checked for the whole
-chain before any step).
+chain before any step), `"x-use-case": step "y" needs ROW — bind it in the use case`. A use case with
+`requires` adds a second line under its verdict: `requires (not run by replay): tree/fixtures/stub.sh`.
 
 ### Screenshots
 ```bash

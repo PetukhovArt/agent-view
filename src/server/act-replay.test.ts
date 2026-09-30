@@ -28,7 +28,7 @@ describe('replay', () => {
   ])('replays a recorded %s as that click', async (op, opts) => {
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
     const step = { op, target: { role: 'button', name: 'Сцена' }, isPassword: false }
-    await writeScript(store, 'open', { until: { testid: 'done' }, steps: [step] })
+    await writeScript({ store, name: 'open' }, { until: { testid: 'done' }, steps: [step] })
     const conn = fakeConn()
     const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn }
 
@@ -41,8 +41,8 @@ describe('replay', () => {
   const saveRowClick = async () => {
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
     const step = { op: 'click' as const, target: { testid: 'row-${ROW}', role: 'button', name: '' }, isPassword: false }
-    await writeScript(store, 'row', { until: { testid: 'row-selected' }, steps: [step] })
-    await writeScript(store, 'row-then', { until: { testid: 'done' }, steps: [], after: 'row' })
+    await writeScript({ store, name: 'row' }, { until: { testid: 'row-selected' }, steps: [step] })
+    await writeScript({ store, name: 'row-then' }, { until: { testid: 'done' }, steps: [], after: 'row' })
     const conn = fakeConn({ 'data-testid': 'row-library/Насосы' })
     // The prerequisite's until shows only once its row was clicked, so replay runs it.
     conn.queryVisible = async (css: string) =>
@@ -73,9 +73,9 @@ describe('replay', () => {
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
     const click = { op: 'click' as const, target: { role: 'button', name: 'Сцена' }, isPassword: false }
     // The menu the next prerequisite's item closed: running menu-open again would wait for it in vain.
-    await writeScript(store, 'menu-open', { until: { testid: 'menu' }, steps: [click] })
-    await writeScript(store, 'form-open', { until: { testid: 'form' }, steps: [click], after: 'menu-open' })
-    await writeScript(store, 'form-fill', { until: { testid: 'done' }, steps: [], after: 'form-open' })
+    await writeScript({ store, name: 'menu-open' }, { until: { testid: 'menu' }, steps: [click] })
+    await writeScript({ store, name: 'form-open' }, { until: { testid: 'form' }, steps: [click], after: 'menu-open' })
+    await writeScript({ store, name: 'form-fill' }, { until: { testid: 'done' }, steps: [], after: 'form-open' })
     const conn = fakeConn()
     conn.queryVisible = async (css: string) => (css.includes('menu') ? { backendDOMNodeId: null, count: 0 } : { backendDOMNodeId: 1, count: 1 })
     const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn }

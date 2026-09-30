@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Sections in the script store ([ADR 0005](./docs/adr/0005-script-store-sections-and-use-cases.md)). `act save` and `act start --save` take `--in <section>` (required): the product area the script drives (`auth`, `tree`, `editor/canvas`), a subdirectory of `.agent-view/scripts/`. Names stay unique across the whole store, so `replay`, `--after` and use cases name a script alone and moving it between sections breaks nothing; a name that lies in another section is refused. Every save writes an `index.md` per section and a root one listing the sections. `act list` prints the sections, `act list <section>` one of them and the sections below it (`editor` → `editor/canvas`); an emptied section loses its `index.md`. Scripts in the store root still replay and are listed as "In no section yet".
+- Use cases. `act save-use-case <name>-use-case --in <section> --until-testid|--until-selector … "<step> [NAME=value …] [timeout=<s>]" …` saves a user goal as an ordered list of saved steps, each with its own parameter values (a value may be `${NAME}` from env), with a done condition of its own; `integration` is the section for one that crosses areas. It needs no running app and refuses a missing step or an unbound parameter. `act replay` runs the steps in order without their `after`, skipping the nearest one already reached with every one before it. `--requires <path>` names a fixture in `<section>/fixtures/`; replay prints it under the verdict and never runs it.
+- `act click` / `dblclick` / `rightclick` / `drag` take `testid=<id>` and `css=<selector>` besides a row number, and `@x,y` — a point from the element's top-left instead of its centre: a spot on a canvas, a selection frame, a tree row dropped at a point. `act scroll up|down <row | testid= | css=>` wheels over that element, so a panel scrolls instead of the page. Recorded and replayed as such.
+- `--timeout <seconds>` on `act save` / `act start`: how long replay waits for the until after the steps (default 15), for a long import or build; a use-case entry overrides it with `timeout=`.
+
+### Changed
+- A control is saved with which of the visible controls sharing its test id (or, without one, its role + name) it is, so the × of the second tab replays on the second tab, not the first.
+- `act start --save` refuses a bad name, a missing `--in` or a name that lies in another section before the run, not at DONE. `--timeout` refuses anything but a positive number of seconds.
+- A step's name may not end in `-use-case`, nor start with `.`.
+
+### Fixed
+- `act replay` rejects an `after` that is not a script name (a hand-edited `../x`) instead of reading a file outside the store.
+- `act replay` finds a control laid out just outside the viewport (a field below the fold of a scrollable panel) and scrolls it into view instead of reporting STALE "not on screen".
+- After `act replay`, the next `dom` reads the page as the replay left it; it could get the accessibility tree from before the last replayed action for up to 300 ms.
+
 ## [0.20.1] - 2026-09-29
 
 ### Fixed

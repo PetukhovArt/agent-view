@@ -1,4 +1,3 @@
-import type { Rect } from '../cdp/types.js'
 import { isDeadSocket } from '../cdp/transport.js'
 import type { ServerResponse } from '../types.js'
 import {
@@ -11,25 +10,30 @@ import {
   resolveRow,
   type Control,
 } from '../inspectors/controls/index.js'
-import { findByLocator, locatorFromArgs, testIdAttributes, testIdLocator, type Locator } from './locator.js'
+import { findByLocator, locatorFromArgs, testIdAttributes, type Locator } from './locator.js'
 import {
-  CLICKS,
   EDGES,
-  edgePoint,
+  clickNode,
+  describeAt,
+  describeTarget,
+  dragNode,
+  elementLocator,
   isClickOp,
   isEdge,
   isScriptName,
-  listScripts,
   markParams,
-  renderScripts,
+  parseTarget,
+  pointIn,
   scriptStore,
-  viewportBox,
   writeScript,
-  type DropTarget,
+  type CliTarget,
+  type ClickOp,
   type RecordedStep,
-  type StepTarget,
+  type RowTarget,
+  type Target,
   type UntilArgs,
 } from './act-script.js'
+import { cwdOf, refuseStepSave, str, strs } from './act-store.js'
 import { replay, type ActDeps } from './act-replay.js'
 
 const DEFAULT_MAX_STEPS = 30
@@ -43,7 +47,13 @@ const ROW_OPS = ['click', 'dblclick', 'rightclick', 'type', 'select'] as const
 type RowOp = typeof ROW_OPS[number]
 type RowStepArgs = { op: RowOp; n: number; text: string }
 
-const stepTarget = (c: Control): StepTarget => ({ testid: c.testid, role: c.role, name: c.name })
+/** How a replay finds `c` again, and which of the visible controls answering to the same it is. */
+function stepTarget(c: Control, controls: Control[]): RowTarget {
+  // Counted the way replay looks it up: by test id when there is one, else every control of that role + name.
+  const same = controls.filter(o => (c.testid ? o.testid === c.testid : o.role === c.role && o.name === c.name))
+  const nth = same.findIndex(o => o.backendDOMNodeId === c.backendDOMNodeId)
+  return { testid: c.testid, role: c.role, name: c.name, nth: nth > 0 ? nth : undefined }
+}
 
 /** Step-protocol state for one CDP port. Rows are those of the LAST printed table. */
 export type ActSession = {
@@ -58,6 +68,10 @@ export type ActSession = {
   saveAs?: string
   /** The project dir the CLI ran in: where the script store is resolved on save. */
   cwd: string
+  /** Store section `--save` writes to (`start --in`). */
+  section?: string
+  /** Seconds a replay gives the until (`start --timeout`). */
+  timeout?: number
   note?: string
   start?: string
   after?: string
@@ -70,27 +84,11 @@ export type ActSession = {
 /** One act call: the port's session and this request's handles on the server. */
 type Run = { session: ActSession; deps: ActDeps }
 
-const str = (args: Record<string, unknown>, key: string): string | undefined =>
-  typeof args[key] === 'string' ? args[key] as string : undefined
-/** A repeatable flag; none given is undefined, so `act save` keeps the `--param`s of `act start`. */
-const strs = (args: Record<string, unknown>, key: string): string[] | undefined => {
-  const values = Array.isArray(args[key]) ? (args[key] as unknown[]).filter(v => typeof v === 'string') : []
-  return values.length ? values : undefined
-}
 const num = (value: unknown): number => (typeof value === 'number' ? value : NaN)
+const seconds = (value: unknown): number | undefined => (typeof value === 'number' && value > 0 ? value : undefined)
 const isRowOp = (op: string): op is RowOp => (ROW_OPS as readonly string[]).includes(op)
-const cwdOf = (args: Record<string, unknown>): string => str(args, 'cwd') ?? process.cwd()
 /** Machine-agnostic: the hash route, else path + query of a web page; never origin or a file path. */
 const START_EXPRESSION = "location.hash || (/^https?:$/.test(location.protocol) ? location.pathname + location.search : '')"
-
-/** `act list`: needs no app, so the server runs it before resolving a window. */
-export async function listSaved(args: Record<string, unknown>): Promise<ServerResponse> {
-  const store = await scriptStore(cwdOf(args))
-  const entries = await listScripts(store)
-  if (entries.length === 0) return { ok: true, data: `No saved scripts in ${store} — record one with act start … --save <name>` }
-  return { ok: true, data: `${store} · replay: agent-view act replay <name>
-${renderScripts(entries)}` }
-}
 
 export async function runAct(
   holder: { act: ActSession | null },
@@ -110,6 +108,10 @@ export async function runAct(
     if ((str(args, 'untilTestid') === undefined) === (str(args, 'untilSelector') === undefined)) {
       return { ok: false, error: 'act start --until-testid <id> | --until-selector <css> — exactly one' }
     }
+    if (str(args, 'save') !== undefined) {
+      const refused = await refuseStepSave(await scriptStore(cwdOf(args)), str(args, 'save'), str(args, 'in'))
+      if (refused) return refused
+    }
     const start = await deps.conn.evaluate(START_EXPRESSION).catch(() => undefined)
     holder.act = { ...createSession(args), start: typeof start === 'string' && start ? start : undefined }
     return tableOrDone({ session: holder.act, deps })
@@ -119,14 +121,28 @@ export async function runAct(
   const run: Run = { session, deps }
 
   if (op === 'table') return tableOrDone(run)
-  if (op === 'save') return save(session, str(args, 'name'), { note: str(args, 'note'), after: str(args, 'after'), params: strs(args, 'params') })
+  if (op === 'save') {
+    return save(session, str(args, 'name'), {
+      note: str(args, 'note'),
+      after: str(args, 'after'),
+      params: strs(args, 'params'),
+      section: str(args, 'in'),
+      timeout: seconds(args.timeout),
+    })
+  }
   if (op === 'wait') return finishStep(run, { before: tableKey(await snapshot(run)), done: 'wait', quietPolls: Infinity })
   if (session.isDone) return { ok: false, error: 'this act run is DONE — `agent-view act start` for a new one' }
   if (session.steps.length >= session.maxSteps) {
     return { ok: true, data: `BLOCKED: step budget ${session.maxSteps} exhausted\n${await printTable(run)}` }
   }
-  if (op === 'scroll') return scrollStep(run, str(args, 'direction'))
-  if (op === 'drag') return dragStep(run, { n: num(args.n), to: str(args, 'to'), edge: str(args, 'edge') })
+  if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
+  if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge') })
+  if (isClickOp(op) && str(args, 'target') !== undefined) {
+    const target = parseTarget(str(args, 'target')!)
+    if (!target) return { ok: false, error: `act ${op} <n | testid=<id> | css=<selector>>[@x,y]` }
+    if ('n' in target && !target.at) return rowStep(run, { op, n: target.n, text: '' })
+    return clickStep(run, op, target)
+  }
   if (isRowOp(op)) return rowStep(run, { op, n: num(args.n), text: str(args, 'text') ?? '' })
   if (op === 'do') return batchStep(run, args.steps)
   return { ok: false, error: `Unknown act op: ${op}` }
@@ -146,6 +162,8 @@ function createSession(args: Record<string, unknown>): ActSession {
     startedAt: Date.now(),
     saveAs: str(args, 'save'),
     cwd: cwdOf(args),
+    section: str(args, 'in'),
+    timeout: seconds(args.timeout),
     note: str(args, 'note'),
     after: str(args, 'after'),
     params: strs(args, 'params'),
@@ -198,7 +216,7 @@ async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerRe
   let isReloaded = false
   try {
     if (isClickOp(op)) {
-      await deps.conn.clickByNodeId(target.backendDOMNodeId, CLICKS[op])
+      await clickNode(deps.conn, target.backendDOMNodeId, op)
     } else if (op === 'type') {
       await deps.conn.fillByNodeId(target.backendDOMNodeId, text)
     } else {
@@ -212,7 +230,7 @@ async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerRe
     isReloaded = true
   }
   deps.invalidateAxCache()
-  session.steps.push({ op, target: stepTarget(target), value: isClickOp(op) ? undefined : text, isPassword: target.isPassword })
+  session.steps.push({ op, target: stepTarget(target, fresh), value: isClickOp(op) ? undefined : text, isPassword: target.isPassword })
   return finishStep(run, { before: tableKey(fresh), done: isReloaded ? `${done} · window reloaded` : done })
 }
 
@@ -260,52 +278,72 @@ async function locate(run: Run, n: number): Promise<{ target: Control; fresh: Co
   return { target: resolved.control, fresh }
 }
 
+type Picked = { nodeId: number; target: Target; label: string; before: string }
+
+/** Row n of the last table (stale guard, hit check), or any visible element by test id / CSS — a canvas is no row. */
+async function pick(run: Run, target: CliTarget): Promise<Picked | ServerResponse> {
+  if ('n' in target) {
+    const located = await locate(run, target.n)
+    if (!('target' in located)) return located
+    const { target: control, fresh } = located
+    const label = `[${target.n}] ${describeControl(control)}${control.testid ? ` testid=${control.testid}` : ''}`
+    return { nodeId: control.backendDOMNodeId, target: stepTarget(control, fresh), label, before: tableKey(fresh) }
+  }
+  const found = await findByLocator(run.deps.conn, elementLocator(target.element, run.session.testIdAttribute))
+  if ('error' in found) return { ok: false, error: found.error }
+  return { nodeId: found.backendDOMNodeId, target: target.element, label: describeTarget(target.element), before: tableKey(await snapshot(run)) }
+}
+
+/** A click op on an element, or at `at` px from its top-left corner (a spot on a canvas). */
+async function clickStep(run: Run, op: ClickOp, target: CliTarget): Promise<ServerResponse> {
+  const picked = await pick(run, target)
+  if (!('nodeId' in picked)) return picked
+  const { session, deps } = run
+  const { at } = target
+  await clickNode(deps.conn, picked.nodeId, op, at)
+  deps.invalidateAxCache()
+  session.steps.push({ op, target: picked.target, isPassword: false, at })
+  return finishStep(run, { before: picked.before, done: `${op} ${picked.label}${describeAt(at)}` })
+}
+
 /**
- * Pointer drag of row n onto an edge of: row `to`, any visible element `testid=<id>`
- * (drop zones are rarely controls), or the viewport.
+ * Pointer drag of a row or element (from its centre, or `@x,y`) onto: an edge of row `to` or
+ * of any element (drop zones are rarely controls), a point `@x,y` in it, or the viewport.
  */
 async function dragStep(
   run: Run,
-  { n, to, edge = 'center' }: { n: number; to?: string; edge?: string },
+  { from, to, edge = 'center' }: { from: string; to?: string; edge?: string },
 ): Promise<ServerResponse> {
-  if (!isEdge(edge)) return { ok: false, error: `act drag <n> [to] [edge] — edge is one of ${EDGES.join('|')}` }
+  const usage = `act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] — edge is one of ${EDGES.join('|')}`
+  const source = parseTarget(from)
+  const dest = to === undefined || to === 'center' ? undefined : parseTarget(to)
+  if (!isEdge(edge) || !source || (to !== undefined && to !== 'center' && !dest)) return { ok: false, error: usage }
   const { session, deps } = run
-  const located = await locate(run, n)
-  if (!('target' in located)) return located
-  let destId: number | undefined
-  let toLabel = 'viewport'
-  let toTarget: DropTarget | undefined
-  if (to !== undefined && to !== 'center' && to.startsWith('testid=')) {
-    const testid = to.slice('testid='.length)
-    const found = await findByLocator(deps.conn, testIdLocator(testid, session.testIdAttribute))
-    if ('error' in found) return { ok: false, error: found.error }
-    destId = found.backendDOMNodeId
-    toLabel = to
-    toTarget = { testid }
-  } else if (to !== undefined && to !== 'center') {
-    const dest = await locate(run, Number(to))
-    if (!('target' in dest)) return dest
-    destId = dest.target.backendDOMNodeId
-    toLabel = `[${to}] ${describeControl(dest.target)}`
-    toTarget = stepTarget(dest.target)
-  }
-  // Source first: scrolling it into view may move the target, so the target is measured after.
-  const from = await deps.conn.getBoxCenter(located.target.backendDOMNodeId)
-  const box: Rect = destId === undefined ? await viewportBox(deps.conn) : await deps.conn.getBoxRect(destId, { scrollIntoView: false })
-  await deps.conn.dragBetweenPositions(from, edgePoint(box, edge), { mode: 'pointer' })
+  const picked = await pick(run, source)
+  if (!('nodeId' in picked)) return picked
+  const drop = dest && await pick(run, dest)
+  if (drop && !('nodeId' in drop)) return drop
+  await dragNode(deps.conn, picked.nodeId, { at: source.at, dropId: drop?.nodeId, toAt: dest?.at, edge })
   deps.invalidateAxCache()
-  session.steps.push({ op: 'drag', target: stepTarget(located.target), to: toTarget, edge })
-  const source = `${describeControl(located.target)}${located.target.testid ? ` testid=${located.target.testid}` : ''}`
-  return finishStep(run, { before: tableKey(located.fresh), done: `drag [${n}] ${source} → ${toLabel} ${edge}` })
+  session.steps.push({ op: 'drag', target: picked.target, at: source.at, to: drop?.target, edge, toAt: dest?.at })
+  const toLabel = `${drop?.label ?? 'viewport'}${dest?.at ? describeAt(dest.at) : ` ${edge}`}`
+  return finishStep(run, { before: picked.before, done: `drag ${picked.label}${describeAt(source.at)} → ${toLabel}` })
 }
 
-async function scrollStep(run: Run, direction: string | undefined): Promise<ServerResponse> {
-  if (direction !== 'up' && direction !== 'down') return { ok: false, error: 'act scroll <up|down>' }
-  const before = tableKey(await snapshot(run))
-  await run.deps.conn.scrollViewport(direction)
+/** Wheel at the viewport centre, or over a row / element — a panel scrolls only under the pointer. */
+async function scrollStep(run: Run, direction: string | undefined, over: string | undefined): Promise<ServerResponse> {
+  const target = over === undefined ? undefined : parseTarget(over)
+  if ((direction !== 'up' && direction !== 'down') || (over !== undefined && (!target || target.at))) {
+    return { ok: false, error: 'act scroll <up|down> [n | testid=<id> | css=<selector>]' }
+  }
+  const picked = target && await pick(run, target)
+  if (picked && !('nodeId' in picked)) return picked
+  const before = picked?.before ?? tableKey(await snapshot(run))
+  const at = picked ? pointIn(await run.deps.conn.getBoxRect(picked.nodeId, { scrollIntoView: false })) : undefined
+  await run.deps.conn.scrollWheel(direction, at)
   run.deps.invalidateAxCache()
-  run.session.steps.push({ op: 'scroll', direction })
-  return finishStep(run, { before, done: `scroll ${direction}` })
+  run.session.steps.push({ op: 'scroll', direction, target: picked?.target })
+  return finishStep(run, { before, done: `scroll ${direction}${picked ? ` ${picked.label}` : ''}` })
 }
 
 async function blocked(run: Run, reason: string, fresh: Control[]): Promise<ServerResponse> {
@@ -377,14 +415,22 @@ async function finishStep(
 async function save(
   session: ActSession,
   name: string | undefined,
-  { note = session.note, after = session.after, params = session.params ?? [] }: { note?: string; after?: string; params?: string[] } = {},
+  {
+    note = session.note,
+    after = session.after,
+    params = session.params ?? [],
+    section = session.section,
+    timeout = session.timeout,
+  }: Partial<Pick<ActSession, 'note' | 'after' | 'params' | 'section' | 'timeout'>> = {},
 ): Promise<ServerResponse> {
-  if (!isScriptName(name)) return { ok: false, error: 'act save <name> — letters, digits, . _ - only' }
+  const store = await scriptStore(session.cwd)
+  const refused = await refuseStepSave(store, name, section)
+  if (refused) return refused
   if (after !== undefined && (!isScriptName(after) || after === name)) {
     return { ok: false, error: '--after <name> — another saved script, letters, digits, . _ - only' }
   }
-  const script = markParams({ until: session.untilArgs, steps: session.steps, note, start: session.start, after }, params)
+  const script = markParams({ until: session.untilArgs, steps: session.steps, note, start: session.start, after, timeout }, params)
   if ('error' in script) return { ok: false, error: script.error }
-  const path = await writeScript(await scriptStore(session.cwd), name, script)
+  const path = await writeScript({ store, name: name!, section }, script)
   return { ok: true, data: `${path} · replay: agent-view act replay ${name}` }
 }

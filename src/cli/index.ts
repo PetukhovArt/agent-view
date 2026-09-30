@@ -6,11 +6,12 @@ if (nodeMajor < 18) {
   process.exit(1)
 }
 
-import { Command } from 'commander'
+import { Command, InvalidArgumentError } from 'commander'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { findConfig } from '../config/manager.js'
+import { DEFAULT_UNTIL_TIMEOUT_S } from '../server/act-script.js'
 import { runInit } from './commands/init.js'
 import { runDiscover } from './commands/discover.js'
 import { runLaunch } from './commands/launch.js'
@@ -417,6 +418,16 @@ heap
 const PARAM_FLAG = '--param <NAME=value>'
 const PARAM_HELP = 'Save every occurrence of value as ${NAME}, filled from $NAME at replay; repeatable'
 const collectParam = (value: string, previous: string[]) => [...previous, value]
+const IN_FLAG = '--in <section>'
+const IN_HELP = 'Store section to save into: the product area (auth, libraries, editor/canvas)'
+const TIMEOUT_FLAG = '--timeout <seconds>'
+const TIMEOUT_HELP = `How long replay waits for the until after the steps (a long operation); default ${DEFAULT_UNTIL_TIMEOUT_S}`
+const parseSeconds = (value: string): number => {
+  const seconds = Number(value)
+  if (!(seconds > 0)) throw new InvalidArgumentError('a positive number of seconds')
+  return seconds
+}
+const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre'
 /** Candidates for `${NAME}`: the server keeps only the names a script uses. */
 const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
 
@@ -430,25 +441,27 @@ act
   .option('--until-testid <id>', 'Done when an element with this test id is visible')
   .option('--until-selector <css>', 'Done when a match of this selector is visible')
   .option('--max-steps <n>', 'Step budget (default 30)', (v: string) => parseInt(v, 10))
-  .option('--save <name>', 'Write the replay script on DONE (same as act save <name>)')
-  .option('--note <text>', 'One line saying what the script does, shown in act list and INDEX.md')
+  .option('--save <name>', 'Write the replay script on DONE (same as act save <name>); needs --in')
+  .option(IN_FLAG, IN_HELP)
+  .option('--note <text>', 'One line saying what the script does, shown in act list and index.md')
   .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
   .option(PARAM_FLAG, PARAM_HELP, collectParam, [])
+  .option(TIMEOUT_FLAG, TIMEOUT_HELP, parseSeconds)
   .action(async (options) => {
-    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, note: options.note, after: options.after, params: options.param })
+    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, in: options.in, note: options.note, after: options.after, params: options.param, timeout: options.timeout })
   })
 
 act.command('table').description('Re-snapshot and print the control table')
   .action(async () => { await runAct(requireConfig(), { op: 'table' }) })
 
-act.command('click <n>').description('Click row n of the last table')
-  .action(async (n: string) => { await runAct(requireConfig(), { op: 'click', n: Number(n) }) })
+act.command('click <target>').description(`Click ${TARGET_HELP}`)
+  .action(async (target: string) => { await runAct(requireConfig(), { op: 'click', target }) })
 
-act.command('dblclick <n>').description('Double-click row n of the last table (fires dblclick)')
-  .action(async (n: string) => { await runAct(requireConfig(), { op: 'dblclick', n: Number(n) }) })
+act.command('dblclick <target>').description(`Double-click (fires dblclick) ${TARGET_HELP}`)
+  .action(async (target: string) => { await runAct(requireConfig(), { op: 'dblclick', target }) })
 
-act.command('rightclick <n>').description('Right-click row n of the last table (fires contextmenu)')
-  .action(async (n: string) => { await runAct(requireConfig(), { op: 'rightclick', n: Number(n) }) })
+act.command('rightclick <target>').description(`Right-click (fires contextmenu) ${TARGET_HELP}`)
+  .action(async (target: string) => { await runAct(requireConfig(), { op: 'rightclick', target }) })
 
 act.command('type <n> <text>').description('Fill row n with text')
   .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'type', n: Number(n), text }) })
@@ -456,11 +469,11 @@ act.command('type <n> <text>').description('Fill row n with text')
 act.command('select <n> <option>').description('Pick an option of a native <select> by its text')
   .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'select', n: Number(n), text }) })
 
-act.command('scroll <direction>').description('Wheel up or down by ~0.8 viewport')
-  .action(async (direction: string) => { await runAct(requireConfig(), { op: 'scroll', direction }) })
+act.command('scroll <direction> [over]').description('Wheel up or down by ~0.8 viewport, at the viewport centre or over `over` (a row, testid=<id>, css=<selector>) — a panel scrolls only under the pointer')
+  .action(async (direction: string, over: string | undefined) => { await runAct(requireConfig(), { op: 'scroll', direction, target: over }) })
 
-act.command('drag <n> [to] [edge]').description('Pointer-drag row n onto `to` (a row, testid=<id>, or `center`/omitted = the viewport), near its left|right|top|bottom edge or center (default)')
-  .action(async (n: string, to: string | undefined, edge: string | undefined) => { await runAct(requireConfig(), { op: 'drag', n: Number(n), to, edge }) })
+act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, testid=<id>, css=<selector>; @x,y = px from its top-left, else its centre) onto `to` (same forms, or `center`/omitted = the viewport): at its @x,y, else near its left|right|top|bottom edge or center (default)')
+  .action(async (from: string, to: string | undefined, edge: string | undefined) => { await runAct(requireConfig(), { op: 'drag', target: from, to, edge }) })
 
 act.command('do <steps...>').description('Several ops decided from one table, e.g. act do "type 2 root" "type 3 secret" "click 1"')
   .action(async (steps: string[]) => { await runAct(requireConfig(), { op: 'do', steps }) })
@@ -471,14 +484,26 @@ act.command('wait').description('No action: settle up to 3 s for the app to reac
 act.command('replay <name>').description('Run a saved act script with no model. Exit 0 DONE, 1 FAIL (until never came), 3 STALE (a control is gone). Passwords from $AGENT_VIEW_SECRET, ${NAME} parameters from $NAME')
   .action(async (name: string) => { await runAct(requireConfig(), { op: 'replay', name, secret: process.env.AGENT_VIEW_SECRET, params: envParams() }) })
 
-act.command('save <name>').description('Write the recorded steps as a replay script; prints its path')
-  .option('--note <text>', 'One line saying what the script does, shown in act list and INDEX.md')
+act.command('save <name>').description('Write the recorded steps as a replay script (a step); prints its path')
+  .option(IN_FLAG, IN_HELP)
+  .option('--note <text>', 'One line saying what the script does, shown in act list and index.md')
   .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
   .option(PARAM_FLAG, PARAM_HELP, collectParam, [])
-  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, note: options.note, after: options.after, params: options.param }) })
+  .option(TIMEOUT_FLAG, TIMEOUT_HELP, parseSeconds)
+  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, in: options.in, note: options.note, after: options.after, params: options.param, timeout: options.timeout }) })
 
-act.command('list').description('Saved scripts of this project, one line each; needs no running app')
-  .action(async () => { await runAct(requireConfig(), { op: 'list' }) })
+act.command('save-use-case <name> <steps...>').description('Save a use case: saved steps in order, each "<step> [NAME=value …] [timeout=<s>]", a value may be ${NAME} from env; the name ends in -use-case; needs no running app')
+  .option(IN_FLAG, `${IN_HELP}; integration when it crosses areas`)
+  .option('--until-testid <id>', 'Done when an element with this test id is visible')
+  .option('--until-selector <css>', 'Done when a match of this selector is visible')
+  .option('--note <text>', 'One line saying what the use case checks, shown in act list and index.md')
+  .option('--requires <path>', 'A fixture in the store (auth/fixtures/…) to run first; replay names it, never runs it; repeatable', collectParam, [])
+  .action(async (name: string, steps: string[], options) => {
+    await runAct(requireConfig(), { op: 'save-use-case', name, steps, in: options.in, untilTestid: options.untilTestid, untilSelector: options.untilSelector, note: options.note, requires: options.requires })
+  })
+
+act.command('list [section]').description('Sections of the script store, or the steps and use cases of one; needs no running app')
+  .action(async (section: string | undefined) => { await runAct(requireConfig(), { op: 'list', section }) })
 
 program
   .command('listeners')

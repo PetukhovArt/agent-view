@@ -307,8 +307,8 @@ export type PageSession = RuntimeSession & {
   hitTest: (backendDOMNodeId: number, testIdAttributes: readonly string[]) => Promise<string | null>
   /** Pick an option of a native `<select>` by its visible text. */
   selectOption: (backendDOMNodeId: number, optionText: string) => Promise<'ok' | 'not-select' | 'no-option'>
-  /** Mouse wheel at the viewport centre, ~0.8 viewport height. */
-  scrollViewport: (direction: 'up' | 'down') => Promise<void>
+  /** Mouse wheel, ~0.8 viewport height, at `at` (a scrollable panel) or the viewport centre. */
+  scrollWheel: (direction: 'up' | 'down', at?: Point) => Promise<void>
 }
 
 export type LayoutNode = {
