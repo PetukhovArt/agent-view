@@ -46,6 +46,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
 
     const mockCaptureScreenshot = vi.fn().mockResolvedValue({ data: '' })
     const mockGetLayoutMetrics = vi.fn().mockResolvedValue({
+      layoutViewport: { clientWidth: 1280 },
       cssLayoutViewport: { clientWidth: 1280, clientHeight: 720 },
     })
 
@@ -53,6 +54,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       Runtime: {
         enable: vi.fn().mockResolvedValue({}),
         callFunctionOn: mockCallFunctionOn,
+        runIfWaitingForDebugger: vi.fn().mockResolvedValue({}),
         evaluate: vi.fn().mockResolvedValue({ result: { value: undefined } }),
         consoleAPICalled: vi.fn().mockReturnValue(() => {}),
       },
@@ -166,6 +168,16 @@ describe('captureScreenshot', () => {
     const result = await conn.captureScreenshot()
     expect(mockCaptureScreenshot).toHaveBeenCalledWith({ format: 'png' })
     expect(result.buffer.toString('base64')).toBe(twoColorPng())
+  })
+
+  // At an OS scale of 125% a point read off a device-pixel screenshot clicked 1.25× too far.
+  it('comes out in CSS pixels at a DPR above 1', async () => {
+    mockCaptureScreenshot.mockResolvedValueOnce({ data: twoColorPng() })
+    mockGetLayoutMetrics.mockResolvedValueOnce({ layoutViewport: { clientWidth: 4 }, cssLayoutViewport: { clientWidth: 2 } })
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const { buffer } = await conn.captureScreenshot()
+
+    expect([buffer.readUInt32BE(16), buffer.readUInt32BE(20)]).toEqual([2, 1])
   })
 
   // A clip makes Chromium resize the render view until the capture completes;
@@ -461,6 +473,20 @@ describe('connectToRuntime', () => {
     expect(typeof session.onConsole).toBe('function')
     expect(typeof session.close).toBe('function')
     expect(session.target.type).toBe(TargetType.SharedWorker)
+  })
+
+  // A page reload re-created the shared worker paused (waitForDebugger) behind the attached session.
+  it('resumes a shared worker Chromium restarts paused behind the session', async () => {
+    await connectToRuntime(9222, workerTarget)
+    const client = await mockCDP.mock.results[mockCDP.mock.results.length - 1].value as {
+      on: ReturnType<typeof vi.fn>
+      Runtime: { runIfWaitingForDebugger: ReturnType<typeof vi.fn> }
+    }
+    client.Runtime.runIfWaitingForDebugger.mockClear()
+    const [, restarted] = client.on.mock.calls.findLast(([event]) => event === 'Inspector.targetReloadedAfterCrash')!
+    restarted()
+
+    expect(client.Runtime.runIfWaitingForDebugger).toHaveBeenCalledOnce()
   })
 })
 

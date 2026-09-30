@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `screenshot` (and the one in `snap`) comes out in CSS pixels at any OS display scale, so a point read off it is a `click --pos` / `drag --*-pos` coordinate. At 125% it was in device pixels, and a click on a spot read off it landed 1.25× further right and down: on a window's close button. On a HiDPI screen the image is smaller than before (cheaper in tokens); `--scale` now scales the CSS-pixel image. Saved `act` scripts are unaffected: their `@x,y` were always CSS pixels.
+
+### Fixed
+- A shared worker no longer stays paused after a window reload. While agent-view held a session on it, Chromium started the worker the reloaded page re-created paused on `waitForDebugger` (its `onconnect` never set, its module never run) until the session resumed it; agent-view now does, and resumes one it finds paused when it attaches.
+
 ## [0.21.1] - 2026-09-30
 
 ### Added

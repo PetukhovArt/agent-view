@@ -194,6 +194,7 @@ type RawCDPClient = {
       exceptionDetails?: { text?: string; exception?: { description?: string }; stackTrace?: { description?: string } }
     }>
     callFunctionOn: (params: Record<string, unknown>) => Promise<unknown>
+    runIfWaitingForDebugger: () => Promise<unknown>
     consoleAPICalled: (cb: (params: ConsoleAPICalledEvent) => void) => () => void
   }
   Log: {
@@ -995,9 +996,16 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   const networkSub = attachNetworkSubscription(client.Network)
   const onDisconnect = attachDisconnectSubscription(client)
   const coverage = attachCoverage(client)
+  // While a client stays attached, Chromium keeps a shared worker's DevTools host and starts the
+  // worker re-created behind it (a page reload) paused until that client resumes it, as DevTools does.
+  client.on('Inspector.targetReloadedAfterCrash', () => {
+    client.Runtime.runIfWaitingForDebugger().catch(() => { /* worker gone again */ })
+  })
   await bringUpSession(client, target, async () => {
     await client.Runtime.enable()
     await client.Log.enable()
+    // A worker another client left paused.
+    await client.Runtime.runIfWaitingForDebugger()
   })
 
   return {
@@ -1345,14 +1353,15 @@ export async function connectToPage(
       // Never pass `clip` to Chromium: see cropScalePng for why.
       const { data } = await Page.captureScreenshot({ format: 'png' })
       const png = Buffer.from(data, 'base64')
-      const scale = opts?.scale ?? 1
-      if (opts?.clip === undefined && scale >= 1) return { buffer: png, format: 'png' }
-
-      // The capture is in device pixels, clip rects are in CSS pixels.
+      // The capture is in device pixels. It comes out in CSS pixels, the unit of clip rects and of
+      // every click and drag coordinate, so a point read off a screenshot clicks that spot.
       const dpr = devicePixelRatio(await Page.getLayoutMetrics())
+      const scale = Math.min(opts?.scale ?? 1, 1) / dpr
       const clip = opts?.clip
+      if (clip === undefined && scale === 1) return { buffer: png, format: 'png' }
+
       const rect = clip && { x: clip.x * dpr, y: clip.y * dpr, width: clip.width * dpr, height: clip.height * dpr }
-      return { buffer: cropScalePng(png, rect, Math.min(scale, 1)), format: 'png' }
+      return { buffer: cropScalePng(png, rect, scale), format: 'png' }
     },
 
     async clickByNodeId(backendNodeId: number, opts?: ClickOpts): Promise<void> {

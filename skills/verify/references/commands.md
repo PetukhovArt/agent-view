@@ -372,6 +372,8 @@ agent-view screenshot                          # Full-res PNG (expensive: ~19k t
 
 `--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing. `--testid` / `--selector` crop the same way and take `--crop-up`, but a miss exits 1 instead: an exact address that misses is a wrong address, and a full-window capture would spend ~19k tokens on it. Pass at most one of `--crop`, `--testid`, `--selector`.
 
+Screenshot pixels are CSS pixels, whatever the OS display scale: a point read off a full-window screenshot is the `click --pos` / `drag --from-pos` coordinate as is. Divide it by `--scale` when you passed one; on a `--crop` it is an offset from the element's top-left (the `act … @x,y` form).
+
 A text filter usually matches the text-bearing node, so cropping on a section title returns a thin strip of that title. `--crop-up <n>` climbs `n` element ancestors before cropping — use `1` (sometimes `2`) to get the surrounding card/section. When a crop comes back text-sized, the command says so on stderr.
 
 ### Runtime State (`eval`)
