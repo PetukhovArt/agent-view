@@ -25,7 +25,7 @@ npx tsx bench/run.ts              # token / latency benchmark across scenarios
 ```
 
 Each smoke stops whatever server holds port 47922 before starting its own — a leftover server keeps serving the code it
-was started with and produces failures the current source does not have.
+was started with and produces failures the current source does not have. With a live server on 47922, prefix `AGENT_VIEW_SERVER_PORT=<free port>`.
 
 </important>
 

@@ -1,17 +1,15 @@
 import { createConnection } from 'node:net'
 import { readFile, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { AgentViewServer } from '../src/server/server.js'
+import { SERVER_PORT, TOKEN_PATH } from '../src/server/port.js'
 import { RuntimeType } from '../src/types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const SERVER_PORT = 47922
 const BENCH_ELECTRON_PORT = 19222
-const TOKEN_PATH = join(homedir(), '.agent-view', 'token')
 const RESULTS_PATH = join(__dirname, 'results.json')
 const BASELINE_PATH = join(__dirname, 'baseline.json')
 const N = 10
