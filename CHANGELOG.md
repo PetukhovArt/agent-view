@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.21.1] - 2026-09-30
 
 ### Added
 - `act drag … --html5`: a native HTML5 drag-and-drop (a `draggable` tree row onto a canvas point or another row) instead of pointer events; recorded and replayed as such.
