@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.23.0] - 2026-10-01
 
 ### Added
 - `act delete <name>`: removes a saved script and regenerates the indexes. Refused while a use case lists it as a step or a step names it as `after`; the refusal lists every one.
