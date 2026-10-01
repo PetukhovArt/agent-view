@@ -1,6 +1,6 @@
 # 0004. Act scripts live in the main checkout of the project
 
-- Status: Accepted
+- Status: Accepted; what an index line carries is superseded by [ADR 0006](./0006-store-index-is-for-picking-scripts-hold-no-uuid.md)
 - Date: 2026-09-25
 
 ## Context
