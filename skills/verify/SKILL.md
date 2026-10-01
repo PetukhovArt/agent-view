@@ -127,8 +127,8 @@ Navigation is a recorded path, re-explored only when it broke:
 
 1. `agent-view act list` prints the sections of the project's script store, one per product area (`auth`, `tree`,
    `editor/canvas`) plus `integration`; `act list <section>` prints its **steps** (one small action each) and
-   **use cases** (a user goal built from steps, name ending in `-use-case`), one line each: note, start route,
-   prerequisite, parameters, done condition. Scripts live in the main checkout, so every worktree sees the same store.
+   **use cases** (a user goal built from steps, name ending in `-use-case`), one line each: goal, parameters,
+   prerequisite, fixture; the done condition and the steps are in its JSON, linked from the line. Scripts live in the main checkout, so every worktree sees the same store.
 2. A script lands where you need: `agent-view act replay <name>`. Its `after` prerequisite (a login), or a use case's
    steps, run first and are skipped when already met. DONE: go on. STALE: re-record under the same name.
 3. No script fits: record the missing steps, one small action each, into the section of the area they drive. Hand

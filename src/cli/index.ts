@@ -422,6 +422,10 @@ heap
 const PARAM_FLAG = '--param <NAME=value>'
 const PARAM_HELP = 'Save every occurrence of value as ${NAME}, filled from $NAME at replay; repeatable'
 const collectParam = (value: string, previous: string[]) => [...previous, value]
+const PARAM_NOTE_FLAG = '--param-note <NAME=text>'
+const PARAM_NOTE_HELP = 'What ${NAME} stands for, kept in the JSON for whoever binds it; repeatable'
+const NOTE_FLAG = '--note <text>'
+const NOTE_HELP = 'The goal, shown in act list and index.md: one sentence of at most 120 characters, what it does; how it ends'
 const IN_FLAG = '--in <section>'
 const IN_HELP = 'Store section to save into: the product area (auth, libraries, editor/canvas)'
 const TIMEOUT_FLAG = '--timeout <seconds>'
@@ -447,12 +451,13 @@ act
   .option('--max-steps <n>', 'Step budget (default 30)', (v: string) => parseInt(v, 10))
   .option('--save <name>', 'Write the replay script on DONE (same as act save <name>); needs --in')
   .option(IN_FLAG, IN_HELP)
-  .option('--note <text>', 'One line saying what the script does, shown in act list and index.md')
+  .option(NOTE_FLAG, NOTE_HELP)
   .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
   .option(PARAM_FLAG, PARAM_HELP, collectParam, [])
+  .option(PARAM_NOTE_FLAG, PARAM_NOTE_HELP, collectParam, [])
   .option(TIMEOUT_FLAG, TIMEOUT_HELP, parseSeconds)
   .action(async (options) => {
-    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, in: options.in, note: options.note, after: options.after, params: options.param, timeout: options.timeout })
+    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, in: options.in, note: options.note, after: options.after, params: options.param, paramNotes: options.paramNote, timeout: options.timeout })
   })
 
 act.command('table').description('Re-snapshot and print the control table')
@@ -496,20 +501,22 @@ act.command('replay <name>').description('Run a saved act script with no model. 
 
 act.command('save <name>').description('Write the recorded steps as a replay script (a step); prints its path')
   .option(IN_FLAG, IN_HELP)
-  .option('--note <text>', 'One line saying what the script does, shown in act list and index.md')
+  .option(NOTE_FLAG, NOTE_HELP)
   .option('--after <name>', 'Prerequisite script replay runs first (a login), skipped when its until already holds')
   .option(PARAM_FLAG, PARAM_HELP, collectParam, [])
+  .option(PARAM_NOTE_FLAG, PARAM_NOTE_HELP, collectParam, [])
   .option(TIMEOUT_FLAG, TIMEOUT_HELP, parseSeconds)
-  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, in: options.in, note: options.note, after: options.after, params: options.param, timeout: options.timeout }) })
+  .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, in: options.in, note: options.note, after: options.after, params: options.param, paramNotes: options.paramNote, timeout: options.timeout }) })
 
 act.command('save-use-case <name> <steps...>').description('Save a use case: saved steps in order, each "<step> [NAME=value …] [timeout=<s>]", a value may be ${NAME} from env; the name ends in -use-case; needs no running app')
   .option(IN_FLAG, `${IN_HELP}; integration when it crosses areas`)
   .option('--until-testid <id>', 'Done when an element with this test id is visible')
   .option('--until-selector <css>', 'Done when a match of this selector is visible')
-  .option('--note <text>', 'One line saying what the use case checks, shown in act list and index.md')
+  .option(NOTE_FLAG, NOTE_HELP)
+  .option(PARAM_NOTE_FLAG, PARAM_NOTE_HELP, collectParam, [])
   .option('--requires <path>', 'A fixture in the store (auth/fixtures/…) to run first; replay names it, never runs it; repeatable', collectParam, [])
   .action(async (name: string, steps: string[], options) => {
-    await runAct(requireConfig(), { op: 'save-use-case', name, steps, in: options.in, untilTestid: options.untilTestid, untilSelector: options.untilSelector, note: options.note, requires: options.requires })
+    await runAct(requireConfig(), { op: 'save-use-case', name, steps, in: options.in, untilTestid: options.untilTestid, untilSelector: options.untilSelector, note: options.note, paramNotes: options.paramNote, requires: options.requires })
   })
 
 act.command('list [section]').description('Sections of the script store, or the steps and use cases of one; needs no running app')

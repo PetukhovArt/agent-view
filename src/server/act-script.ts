@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { basename, dirname, isAbsolute, join, posix, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { MouseButton, type ClickOpts, type Modifier, type PageSession, type Point, type Rect } from '../cdp/types.js'
-import { locatorFromArgs, testIdLocator, type Locator } from './locator.js'
+import { testIdLocator, type Locator } from './locator.js'
 import { AGENT_VIEW_DIR } from './port.js'
 
 /**
@@ -44,6 +44,8 @@ export type ActScript = {
   until: UntilArgs
   steps: RecordedStep[]
   note?: string
+  /** What each `${NAME}` stands for (`ROW`: tree id of the row); kept out of the index. */
+  paramNotes?: Record<string, string>
   /** Where the recording began: hash route, else path + query. Informational; replay does not navigate. */
   start?: string
   /** Script replayed first unless its own until already holds (a login). */
@@ -62,6 +64,7 @@ export type UseCase = {
   until: UntilArgs
   use: UseEntry[]
   note?: string
+  paramNotes?: Record<string, string>
   /** Fixtures (store-relative paths) to run before; replay names them, never runs them. */
   requires?: string[]
 }
@@ -140,6 +143,44 @@ export function paramsOf(script: SavedScript): string[] {
   return [...names].sort()
 }
 
+/** `--param-note NAME=text`, repeatable. */
+export function parseParamNotes(args: string[] | undefined): Record<string, string> | { error: string } | undefined {
+  if (!args) return undefined
+  const notes: Record<string, string> = {}
+  for (const arg of args) {
+    const match = PARAM_ARG.exec(arg)
+    if (!match) return { error: `--param-note ${arg} — NAME=text, NAME of A-Z 0-9 _` }
+    notes[match[1]] = match[2]
+  }
+  return notes
+}
+
+/** The index line of a script is its goal: what it does; how it ends. */
+const NOTE_MAX = 120
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
+/**
+ * Why `script` may not be saved. A uuid differs between projects and machines, so a script holding
+ * one fits only where it was recorded; `values` are the `--param` values it was marked from, no
+ * longer in its strings.
+ */
+export function refuseScript(script: SavedScript, values: string[] = []): string | undefined {
+  const { note, paramNotes = {} } = script
+  if (note !== undefined && (note.length > NOTE_MAX || /[\r\n]/.test(note))) {
+    return `--note: one sentence of at most ${NOTE_MAX} characters, what the script does; how it ends — this one has ${note.length}`
+  }
+  const takes = paramsOf(script)
+  const stray = Object.keys(paramNotes).filter(n => !takes.includes(n))
+  if (stray.length) return `--param-note ${stray.join(', ')}: the script takes no such parameter${takes.length ? ` — it takes ${takes.join(', ')}` : ''}`
+  const strings = [...values, note ?? '', ...Object.values(paramNotes)]
+  mapScript(script, s => {
+    strings.push(s)
+    return s
+  })
+  const withUuid = strings.find(s => UUID.test(s))
+  return withUuid && `"${withUuid}" holds a uuid, which differs between projects and machines — target by visible text or a path`
+}
+
 /** Placeholders replaced by `values`; call only once `paramsOf` is covered. */
 export const fillParams = <S extends SavedScript>(script: S, values: Record<string, string>): S =>
   mapScript(script, s => s.replace(PLACEHOLDER, (m, name: string) => values[name] ?? m))
@@ -203,6 +244,9 @@ export const sectionsOf = (entries: StoreEntry[]): string[] => [...new Set(entri
 /** `entry` lies in `section` or below it: `editor` covers `editor/canvas`. */
 export const isUnder = (entry: StoreEntry, section: string): boolean => entry.section === section || entry.section.startsWith(`${section}/`)
 
+export const withoutPasswords = (steps: RecordedStep[]): RecordedStep[] =>
+  steps.map(s => ('isPassword' in s && s.isPassword ? { ...s, value: undefined } : s))
+
 /**
  * Steps are stored by what identifies a control across runs, never by row number. Passwords are
  * not stored. Every save regenerates the index.md of each section and of the store root, and drops
@@ -211,9 +255,7 @@ export const isUnder = (entry: StoreEntry, section: string): boolean => entry.se
 export async function writeScript({ store, name, section = '' }: { store: string; name: string; section?: string }, script: SavedScript): Promise<string> {
   const dir = join(store, section)
   await mkdir(dir, { recursive: true })
-  const saved = isUseCase(script)
-    ? script
-    : { ...script, steps: script.steps.map(s => ('isPassword' in s && s.isPassword ? { ...s, value: undefined } : s)) }
+  const saved = isUseCase(script) ? script : { ...script, steps: withoutPasswords(script.steps) }
   const path = join(dir, `${name}.json`)
   await writeFile(path, JSON.stringify(saved, null, 1))
   const entries = await listScripts(store)
@@ -251,13 +293,15 @@ export function renderSection(entries: LoadedScript[]): string {
     .filter(Boolean).join('\n\n')
 }
 
-export const renderScripts = (entries: { name: string; script: SavedScript }[]): string => entries.map(({ name, script: s }) => {
+/** What picking a script needs, one line each; the until, the steps and the param notes are in its JSON. */
+const renderScripts = (entries: { name: string; script: SavedScript }[]): string => entries.map(({ name, script: s }) => {
   const params = paramsOf(s)
-  const tail = [params.length && `params ${params.join(' ')}`, `until ${locatorFromArgs(s.until)?.label}`]
-  const parts = isUseCase(s)
-    ? [s.note, ...tail, s.requires?.length && `requires ${s.requires.join(', ')}`, s.use.map(e => e.step).join(' → ')]
-    : [s.note, s.start && `start \`${s.start}\``, s.after && `after \`${s.after}\``, ...tail, s.timeout && `timeout ${s.timeout}s`, plural(s.steps.length, 'step')]
-  return `- \`${name}\` — ${parts.filter(Boolean).join(' · ')}`
+  const fields = [
+    params.length && `params ${params.join(' ')}`,
+    !isUseCase(s) && s.after && `after ${s.after}`,
+    isUseCase(s) && s.requires?.length && `requires ${s.requires.join(' ')}`,
+  ]
+  return [`- [${name}](${name}.json)${s.note ? ` — ${s.note}` : ''}`, ...fields].filter(Boolean).join(' · ')
 }).join('\n')
 
 export const EDGES = ['left', 'right', 'top', 'bottom', 'center'] as const

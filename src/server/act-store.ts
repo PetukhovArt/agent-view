@@ -12,6 +12,8 @@ import {
   isUseCase,
   listScripts,
   paramsOf,
+  parseParamNotes,
+  refuseScript,
   renderSection,
   renderStore,
   scriptFiles,
@@ -138,9 +140,13 @@ export async function saveUseCase(args: Record<string, unknown>): Promise<Server
     if (!isFixturePath(path)) return { ok: false, error: `--requires ${path} — a file under <section>/fixtures/ in the store` }
     if (!await stat(join(store, path)).then(s => s.isFile(), () => false)) return { ok: false, error: `--requires ${path}: no such file in ${store}` }
   }
+  const paramNotes = parseParamNotes(strs(args, 'paramNotes'))
+  if (paramNotes && 'error' in paramNotes) return { ok: false, error: paramNotes.error }
   const clash = await sectionClash(store, name, section)
   if (clash) return clash
-  const script: UseCase = { until, use, note: str(args, 'note'), requires: requires.length ? requires : undefined }
+  const script: UseCase = { until, use, note: str(args, 'note'), paramNotes, requires: requires.length ? requires : undefined }
+  const refused = refuseScript(script)
+  if (refused) return { ok: false, error: refused }
   const path = await writeScript({ store, name, section }, script)
   return { ok: true, data: `${path} · replay: agent-view act replay ${name}` }
 }

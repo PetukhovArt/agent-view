@@ -24,6 +24,9 @@ import {
   isEdge,
   isScriptName,
   markParams,
+  parseParamNotes,
+  refuseScript,
+  withoutPasswords,
   parseTarget,
   pointIn,
   scriptStore,
@@ -79,6 +82,8 @@ export type ActSession = {
   after?: string
   /** `--param NAME=value` of `start`: marked in the script `--save` writes. */
   params?: string[]
+  /** `--param-note NAME=text` of `start`. */
+  paramNotes?: string[]
   /** DONE was printed: the recording is complete and takes no more steps. */
   isDone: boolean
 }
@@ -128,6 +133,7 @@ export async function runAct(
       note: str(args, 'note'),
       after: str(args, 'after'),
       params: strs(args, 'params'),
+      paramNotes: strs(args, 'paramNotes'),
       section: str(args, 'in'),
       timeout: seconds(args.timeout),
     })
@@ -171,6 +177,7 @@ function createSession(args: Record<string, unknown>): ActSession {
     note: str(args, 'note'),
     after: str(args, 'after'),
     params: strs(args, 'params'),
+    paramNotes: strs(args, 'paramNotes'),
     isDone: false,
   }
 }
@@ -423,9 +430,10 @@ async function save(
     note = session.note,
     after = session.after,
     params = session.params ?? [],
+    paramNotes = session.paramNotes,
     section = session.section,
     timeout = session.timeout,
-  }: Partial<Pick<ActSession, 'note' | 'after' | 'params' | 'section' | 'timeout'>> = {},
+  }: Partial<Pick<ActSession, 'note' | 'after' | 'params' | 'paramNotes' | 'section' | 'timeout'>> = {},
 ): Promise<ServerResponse> {
   const store = await scriptStore(session.cwd)
   const refused = await refuseStepSave(store, name, section)
@@ -433,8 +441,13 @@ async function save(
   if (after !== undefined && (!isScriptName(after) || after === name)) {
     return { ok: false, error: '--after <name> — another saved script, letters, digits, . _ - only' }
   }
-  const script = markParams({ until: session.untilArgs, steps: session.steps, note, start: session.start, after, timeout }, params)
+  const notes = parseParamNotes(paramNotes)
+  if (notes && 'error' in notes) return { ok: false, error: notes.error }
+  // Passwords out before the checks, so no refusal can echo one.
+  const script = markParams({ until: session.untilArgs, steps: withoutPasswords(session.steps), note, paramNotes: notes, start: session.start, after, timeout }, params)
   if ('error' in script) return { ok: false, error: script.error }
+  const unfit = refuseScript(script, params)
+  if (unfit) return { ok: false, error: unfit }
   const path = await writeScript({ store, name: name!, section }, script)
   return { ok: true, data: `${path} · replay: agent-view act replay ${name}` }
 }

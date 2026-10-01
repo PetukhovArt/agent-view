@@ -223,6 +223,7 @@ agent-view act start --until-testid x --save auth-login --in auth   # same, writ
 agent-view act start --until-testid settings-root --save settings-open --in settings --after auth-login --note "open settings"
 agent-view act save settings-open --in settings --after auth-login --note "open settings"   # --note / --after on either
 agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
+agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос --param-note "ROW=tree id of the row"   # what ${ROW} stands for: in the JSON, not the index; on start and save-use-case too
 agent-view act save project-import --in projects --timeout 120   # replay waits up to 120 s for the until (default 15)
 AGENT_VIEW_SECRET=… agent-view act replay auth-login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
 ROW=library/Насосы/Пожарный agent-view act replay tree-row-select   # ${ROW} filled from $ROW, in the after chain too
@@ -254,11 +255,19 @@ C:\proj\.agent-view\scripts · replay: agent-view act replay <name> · one secti
 
 C:\proj\.agent-view\scripts\libraries · replay: agent-view act replay <name>
 Steps:
-- `project-open` — open the project · start `#/` · params PROJECT · until testid "tree-root" · timeout 60s · 2 steps
-- `tree-row-select` — select a tree row · params ROW · until selector "[data-testid="row-${ROW}"][aria-selected]" · 1 step
+- [project-open](project-open.json) — opens the project; the tree is shown · params PROJECT · after auth-login
+- [tree-row-select](tree-row-select.json) — selects a tree row; the row is highlighted · params ROW
 Use cases:
-- `pump-open-use-case` — open the pump card · params PROJECT · until testid "pump-card" · auth-login → project-open → tree-row-select
+- [pump-open-use-case](pump-open-use-case.json) — opens the pump card; the card is shown · params PROJECT · requires libraries/fixtures/pumps.sh
 ```
+
+A line is `- [<name>](<name>.json) — <note> · params … · after <step> · requires <fixture>`, empty fields
+left out; the until, the steps, the start route, the timeout and the param notes are only in the JSON.
+Save refuses, with nothing written:
+- a `--note` over 120 characters or on several lines — one sentence, what it does; how it ends;
+- a `--param-note` for a parameter the script does not take;
+- a uuid anywhere in the script — until, steps, a `--param` value, the note, a param note
+  (`"…" holds a uuid, which differs between projects and machines — target by visible text or a path`).
 
 **Use cases.** A saved `act` run is a **step**: one small action, reusable. A **use case** is a user
 goal made of saved steps, in order, with a done condition of its own; its name ends in `-use-case` (a
