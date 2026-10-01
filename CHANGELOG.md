@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.22.0] - 2026-10-01
 
 ### Changed
 - The script store `index.md` (and `act list`) prints one short line per script: `- [<name>](<name>.json) — <note> · params … · after <step> · requires <fixture>`. The until, the step count, a use case's step chain, the start route and the timeout are left to the JSON — a section index no longer has to be read whole to pick one script.
