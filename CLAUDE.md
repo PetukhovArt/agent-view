@@ -140,6 +140,9 @@ sibling directories; `src/server/` and `src/config/` colocate them next to the s
 
 ## Releasing
 
+A feature or fix ships in four steps: commit it, run `/review-smells` from the last release commit, commit the fixes
+it calls for, release.
+
 A version bump landing on `main` *is* the release. Write the `## [x.y.z]` section in `CHANGELOG.md`, run
 `npm version <major|minor|patch>` (the `version` hook syncs `.claude-plugin/plugin.json`), then push.
 `.github/workflows/release.yml` publishes to npm, creates the tag and writes the GitHub release with that
