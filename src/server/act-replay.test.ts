@@ -38,6 +38,19 @@ describe('replay', () => {
     expect(conn.clickByNodeId).toHaveBeenCalledExactlyOnceWith(NODE_ID, opts)
   })
 
+  it('acts again on a control found before its box is drawn (a virtual list row), instead of STALE', async () => {
+    const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
+    await writeScript({ store, name: 'open' }, { until: { testid: 'done' }, steps: [{ op: 'click', target: { role: 'button', name: 'Сцена' }, isPassword: false }] })
+    const conn = fakeConn()
+    conn.clickByNodeId.mockRejectedValueOnce(new Error('Could not compute box model.'))
+    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn }
+
+    const result = await replay({ store, name: 'open' }, deps)
+
+    expect(result).toMatchObject({ ok: true, exitCode: 0 })
+    expect(conn.clickByNodeId).toHaveBeenCalledTimes(2)
+  })
+
   const saveRowClick = async () => {
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
     const step = { op: 'click' as const, target: { testid: 'row-${ROW}', role: 'button', name: '' }, isPassword: false }

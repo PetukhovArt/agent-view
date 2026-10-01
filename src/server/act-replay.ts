@@ -19,6 +19,7 @@ import {
   pointIn,
   type ActScript,
   type ElementTarget,
+  type RecordedStep,
   type RowTarget,
   type SavedScript,
   type Target,
@@ -39,6 +40,8 @@ export type ActDeps = {
   /** Fresh session after the window reloaded under us. */
   reconnect: () => Promise<PageSession>
 }
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /** One script of a run with the time its until may take. */
 type Link = { name: string; script: ActScript; untilMs: number }
@@ -136,11 +139,11 @@ export async function replay(
         deps.conn = await deps.reconnect().catch(() => deps.conn)
       }
       if (Date.now() > end) return undefined
-      await new Promise(r => setTimeout(r, POLL_MS))
+      await sleep(POLL_MS)
     }
   }
   /** The control, or why it is not usable yet: absent, or present but disabled / covered. */
-  const find = async (target: RowTarget, { isEnabledRequired }: { isEnabledRequired: boolean }) => {
+  const find = async (target: RowTarget, { isEnabledRequired, timeoutMs }: { isEnabledRequired: boolean; timeoutMs: number }) => {
     let seen: string | undefined
     const control = await poll(async (c): Promise<Control | undefined> => {
       deps.invalidateAxCache()
@@ -166,20 +169,44 @@ export async function replay(
       }
       if (covering) seen = `covered by ${covering}`
       return covering ? undefined : hit
-    }, STEP_TIMEOUT_MS)
+    }, timeoutMs)
     return { control, seen }
   }
-  const findElement = (target: ElementTarget) => poll(async (c) => {
+  const findElement = (target: ElementTarget, timeoutMs: number) => poll(async (c) => {
     const found = await findByLocator(c, elementLocator(target, testIdAttribute))
     return 'error' in found ? undefined : found.backendDOMNodeId
-  }, STEP_TIMEOUT_MS)
+  }, timeoutMs)
   /** The node a step acts on: a row found again, or any visible element (a canvas has no row). */
-  const resolve = async (target: Target, isEnabledRequired: boolean): Promise<{ nodeId?: number; seen?: string }> => {
-    if (!isRowTarget(target)) return { nodeId: await findElement(target) }
-    const { control, seen } = await find(target, { isEnabledRequired })
+  const resolve = async (target: Target, isEnabledRequired: boolean, timeoutMs = STEP_TIMEOUT_MS): Promise<{ nodeId?: number; seen?: string }> => {
+    if (!isRowTarget(target)) return { nodeId: await findElement(target, timeoutMs) }
+    const { control, seen } = await find(target, { isEnabledRequired, timeoutMs })
     return { nodeId: control?.backendDOMNodeId, seen }
   }
   const isShown = (until: Locator) => async (c: PageSession) => ('error' in await findByLocator(c, until) ? undefined : true)
+
+  type ActionStep = Exclude<RecordedStep, { op: 'scroll' }>
+  /** Acts on the found node: a verdict when the app cannot take the step, the message of what threw, or undefined. */
+  const actOn = async (step: ActionStep, nodeId: number, at: string): Promise<ServerResponse | string | undefined> => {
+    try {
+      if (step.op === 'drag') {
+        const dropId = step.to && (await resolve(step.to, false)).nodeId
+        if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
+        await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
+      } else if (isClickOp(step.op)) {
+        await clickNode(deps.conn, nodeId, step.op, { at: step.at, modifiers: step.modifiers })
+      } else if (step.op === 'type') {
+        await deps.conn.fillByNodeId(nodeId, step.isPassword ? secret! : step.value ?? '')
+      } else {
+        const outcome = await deps.conn.selectOption(nodeId, step.value ?? '')
+        const reason = outcome === 'no-option' ? `no option "${step.value}"` : 'not a native select'
+        if (outcome !== 'ok') return verdict(EXIT_STALE, `STALE: ${at} select ${describeTarget(step.target)} — ${reason}`)
+      }
+    } catch (err) {
+      // The window reloaded under the action (login, logout): it went out; the next poll reconnects.
+      if (!isDeadSocket(err)) return err instanceof Error ? err.message : String(err)
+    }
+    return undefined
+  }
 
   /** A FAIL / STALE verdict for the first step that could not run, or undefined when all ran. */
   const runSteps = async (script: ActScript, prefix: string): Promise<ServerResponse | undefined> => {
@@ -196,35 +223,25 @@ export async function replay(
         deps.invalidateAxCache()
         continue
       }
-      const { nodeId, seen } = await resolve(step.target, step.op !== 'drag')
-      if (!nodeId) {
-        // Present but unusable is the app misbehaving; absent is the script out of date.
-        return seen
-          ? verdict(EXIT_FAIL, `FAIL: ${at} ${step.op} ${describeTarget(step.target)} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
-          : verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describeTarget(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
-      }
-      try {
-        if (step.op === 'drag') {
-          const dropId = step.to && (await resolve(step.to, false)).nodeId
-          if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
-          await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
-        } else if (isClickOp(step.op)) {
-          await clickNode(deps.conn, nodeId, step.op, { at: step.at, modifiers: step.modifiers })
-        } else if (step.op === 'type') {
-          await deps.conn.fillByNodeId(nodeId, step.isPassword ? secret! : step.value ?? '')
-        } else {
-          const outcome = await deps.conn.selectOption(nodeId, step.value ?? '')
-          const reason = outcome === 'no-option' ? `no option "${step.value}"` : 'not a native select'
-          if (outcome !== 'ok') return verdict(EXIT_STALE, `STALE: ${at} select ${describeTarget(step.target)} — ${reason}`)
+      const deadline = Date.now() + STEP_TIMEOUT_MS
+      for (;;) {
+        const { nodeId, seen } = await resolve(step.target, step.op !== 'drag', deadline - Date.now())
+        if (!nodeId) {
+          // Present but unusable is the app misbehaving; absent is the script out of date.
+          return seen
+            ? verdict(EXIT_FAIL, `FAIL: ${at} ${step.op} ${describeTarget(step.target)} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
+            : verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describeTarget(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
         }
-      } catch (err) {
-        // The window reloaded under the action (login, logout): it went out; the next poll reconnects.
-        // Any other failure means the control vanished between finding and acting (a panel
-        // that toggled shut): the app is not in the state the script was recorded in.
-        if (!isDeadSocket(err)) {
-          const reason = err instanceof Error ? err.message : String(err)
-          return verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describeTarget(step.target)} — ${reason}`)
+        const outcome = await actOn(step, nodeId, at)
+        if (typeof outcome !== 'string') {
+          if (outcome) return outcome
+          break
         }
+        // Thrown before any input went out: a box not computed yet (a row a virtual list draws a frame
+        // later) or a node replaced by a re-render. Found again until the step's time is up; then the
+        // app is not in the state the script was recorded in (a panel that toggled shut).
+        if (Date.now() >= deadline) return verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describeTarget(step.target)} — ${outcome}`)
+        await sleep(POLL_MS)
       }
       // A `dom` right after the replay must not get the tree from before the last action.
       deps.invalidateAxCache()

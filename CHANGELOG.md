@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.24.0] - 2026-10-01
+
+### Fixed
+- `act replay` no longer ends STALE when a step's control is found before it is drawn — a row a virtual list draws a frame after opening, a list re-rendered by a data refresh (`Could not compute box model`). It finds the control again and acts within the step's 10 s; STALE only if it still throws then.
+
 ## [0.23.0] - 2026-10-01
 
 ### Added
