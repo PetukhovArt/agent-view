@@ -280,6 +280,17 @@ describe('clickByNodeId', () => {
     ])
   })
 
+  it('holds the modifier keys through press and release, as the CDP bit mask', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.clickByNodeId(42, { modifiers: ['ctrl', 'shift'] })
+
+    const mouseEvents = mockDispatchMouse.mock.calls.map((c) => ({ type: c[0].type, modifiers: c[0].modifiers }))
+    expect(mouseEvents).toEqual([
+      { type: 'mousePressed', modifiers: 10 },
+      { type: 'mouseReleased', modifiers: 10 },
+    ])
+  })
+
   it('clickAtPosition with clicks: 2 also produces 4 events', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickAtPosition(50, 60, { clicks: 2 })

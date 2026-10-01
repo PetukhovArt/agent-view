@@ -65,6 +65,7 @@ agent-view click --filter "Save"        # Find element by text and click
 agent-view click --pos 100,200          # Click by coordinates — CANVAS ONLY, see below
 agent-view click <ref> --double         # Double-click (fires dblclick handlers); works with --filter / --pos too
 agent-view click <ref> --right          # Right-click (fires contextmenu); works with --filter / --pos too
+agent-view click <ref> --modifiers ctrl # Keys held through the click: alt|ctrl|meta|shift, comma-separated (ctrl = multi-select)
 agent-view click --testid save-btn      # By test id (see "Test ids" above)
 agent-view click --selector "tr:nth-child(3) button"  # By CSS selector
 agent-view fill <ref> "text"            # Type into input field
@@ -86,6 +87,9 @@ ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targe
 `--from-pos`/`--to-pos` — derive the centroid via `agent-view eval` from the scene graph.
 Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.
 Increase `--steps` for handlers using `globalpointermove` so intermediate frames are not skipped.
+
+With `--modifiers` the output ends in `holding ctrl+shift` (`Clicked ref 3 holding ctrl`); an unknown
+key exits 1 with `--modifiers x — comma-separated alt|ctrl|meta|shift`.
 
 `--testid` / `--selector` act on the **first visible** match; hidden copies (`v-show`, a closed
 popover) are skipped. When several match, the output says so — `Clicked testid "row" (first visible
@@ -200,6 +204,7 @@ agent-view act dblclick 3               # double-click (fires dblclick); recorde
 agent-view act rightclick 3             # right-click (fires contextmenu); then pick the menu row from the next table
 agent-view act click "css=#content-area canvas@120,80"   # what is no row: testid=<id> | css=<selector>; @x,y = px from its top-left
 agent-view act rightclick 3@10,5        # a row, at a point of it; without @ — its centre
+agent-view act click 4 --modifiers ctrl # keys held: alt|ctrl|meta|shift, comma-separated; recorded and replayed (ctrl = add to a selection)
 agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
 agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
@@ -300,6 +305,7 @@ First line of an op's output:
 |---|---|
 | `✓ click [3] button "Войти" · 240ms` | acted and settled; the new table follows |
 | `✓ rightclick [5] treeitem "Сцена 1" · 180ms` | same for `dblclick` / `rightclick`: the line names the op |
+| `✓ ctrl+click [4] treeitem "Индикатор" · 160ms` | `--modifiers`: the keys held prefix the op |
 | `✓ click [3] button "Войти" · window reloaded · 900ms` | the window reloaded under the action (login); settled on the new document |
 | `✓ drag [7] item "ГИС" testid=nav__widgetbar__item-GisWidget → testid=video-panel right · 310ms` | dragged: `→` names the target and edge |
 | `✓ click css=#cv @120,80 · 150ms` | a point of an element: `@x,y` from its top-left |
@@ -322,7 +328,7 @@ First line of an op's output:
   failing step prints the `✓` lines of the ones before it)
 - `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
   `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of left|right|top|bottom|center ``,
-  `act click <n | testid=<id> | css=<selector>>[@x,y]`
+  `act click <n | testid=<id> | css=<selector>>[@x,y]`, `--modifiers x — comma-separated alt|ctrl|meta|shift`
 - `No element matches testid "x"` / `None of 3 element(s) matching selector "…" is visible` (a `testid=` / `css=` target)
 - `act save <name> --in <section>: the product area it belongs to …` (no or bad `--in`; `act start --save` checks it
   up front), `"x" already lies in tree — save it into --in tree, or move or delete <path>`,

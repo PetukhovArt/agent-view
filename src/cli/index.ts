@@ -92,6 +92,9 @@ program
     await runDom(config, options)
   })
 
+const MODIFIERS_FLAG = '--modifiers <keys>'
+const MODIFIERS_HELP = 'Keys held through the click, comma-separated: alt|ctrl|meta|shift (ctrl = multi-select)'
+
 program
   .command('click [ref]')
   .description('Click DOM element by ref, filter, test id, selector, or position')
@@ -102,6 +105,7 @@ program
   .option('-w, --window <id>', 'Target window ID or name')
   .option('--double', 'Double-click (fires dblclick handlers)')
   .option('--right', 'Right-click (fires contextmenu)')
+  .option(MODIFIERS_FLAG, MODIFIERS_HELP)
   .action(async (ref, options) => {
     const config = requireConfig()
     await runClick(config, ref, options)
@@ -455,13 +459,16 @@ act.command('table').description('Re-snapshot and print the control table')
   .action(async () => { await runAct(requireConfig(), { op: 'table' }) })
 
 act.command('click <target>').description(`Click ${TARGET_HELP}`)
-  .action(async (target: string) => { await runAct(requireConfig(), { op: 'click', target }) })
+  .option(MODIFIERS_FLAG, `${MODIFIERS_HELP}; recorded and replayed`)
+  .action(async (target: string, opts: { modifiers?: string }) => { await runAct(requireConfig(), { op: 'click', target, modifiers: opts.modifiers }) })
 
 act.command('dblclick <target>').description(`Double-click (fires dblclick) ${TARGET_HELP}`)
-  .action(async (target: string) => { await runAct(requireConfig(), { op: 'dblclick', target }) })
+  .option(MODIFIERS_FLAG, `${MODIFIERS_HELP}; recorded and replayed`)
+  .action(async (target: string, opts: { modifiers?: string }) => { await runAct(requireConfig(), { op: 'dblclick', target, modifiers: opts.modifiers }) })
 
 act.command('rightclick <target>').description(`Right-click (fires contextmenu) ${TARGET_HELP}`)
-  .action(async (target: string) => { await runAct(requireConfig(), { op: 'rightclick', target }) })
+  .option(MODIFIERS_FLAG, `${MODIFIERS_HELP}; recorded and replayed`)
+  .action(async (target: string, opts: { modifiers?: string }) => { await runAct(requireConfig(), { op: 'rightclick', target, modifiers: opts.modifiers }) })
 
 act.command('type <n> <text>').description('Fill row n with text')
   .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'type', n: Number(n), text }) })

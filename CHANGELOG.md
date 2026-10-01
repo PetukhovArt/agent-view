@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `--modifiers ctrl,shift` on `click` and on `act click` / `dblclick` / `rightclick`: keys held through the click (`alt|ctrl|meta|shift`), so the page sees `ctrlKey` and the like — a ctrl-click adds a tree row to the selection. `act` records the keys with the step and `act replay` holds them again.
+
 ## [0.21.2] - 2026-09-30
 
 ### Changed

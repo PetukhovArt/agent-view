@@ -49,11 +49,16 @@ export enum MouseButton {
   Middle = 'middle',
 }
 
+export const MODIFIERS = ['alt', 'ctrl', 'meta', 'shift'] as const
+export type Modifier = typeof MODIFIERS[number]
+
 export type ClickOpts = {
   /** Number of clicks at the same position (1 = single, 2 = double-click). Default 1. */
   clicks?: number
   /** Mouse button. Default left. `right` also fires `contextmenu`. */
   button?: MouseButton
+  /** Keys held through the click: the page sees them as `ctrlKey` etc. (multi-select). */
+  modifiers?: Modifier[]
 }
 
 export type DragOpts = {

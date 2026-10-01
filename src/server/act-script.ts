@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, posix, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { MouseButton, type ClickOpts, type PageSession, type Point, type Rect } from '../cdp/types.js'
+import { MouseButton, type ClickOpts, type Modifier, type PageSession, type Point, type Rect } from '../cdp/types.js'
 import { locatorFromArgs, testIdLocator, type Locator } from './locator.js'
 import { AGENT_VIEW_DIR } from './port.js'
 
@@ -31,7 +31,7 @@ export const isClickOp = (op: string): op is ClickOp => Object.keys(CLICKS).incl
 
 /** `at`: a point from the target's top-left corner, px, instead of its centre (a spot on a canvas). */
 export type RecordedStep =
-  | { op: ClickOp | 'type' | 'select'; target: Target; value?: string; isPassword: boolean; at?: Point }
+  | { op: ClickOp | 'type' | 'select'; target: Target; value?: string; isPassword: boolean; at?: Point; modifiers?: Modifier[] }
   /** `target`: the element under the wheel; absent = the viewport centre. */
   | { op: 'scroll'; direction: 'up' | 'down'; target?: Target }
   /** `to`: a row, any element, or absent = the viewport; `toAt` replaces the `edge` point. */
@@ -91,7 +91,7 @@ export const isSection = (section: string | undefined): section is string =>
 const PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)\}/g
 const PARAM_ARG = /^([A-Z][A-Z0-9_]*)=(.+)$/s
 /** Protocol words: never a parameter, so a value that happens to equal `click` stays an op. */
-const FIXED_KEYS = new Set(['op', 'role', 'edge', 'direction'])
+const FIXED_KEYS = new Set(['op', 'role', 'edge', 'direction', 'modifiers'])
 
 /** Every string replay matches or types: test ids, names, typed text, the until. */
 function mapStrings<T>(value: T, fn: (s: string) => string): T {
@@ -301,11 +301,17 @@ export function parseTarget(raw: string): CliTarget | undefined {
   return undefined
 }
 
-/** Click op on a node: at `at` px from its top-left, else as a control (its centre). */
-export async function clickNode(conn: PageSession, nodeId: number, op: ClickOp, at?: Point): Promise<void> {
-  if (!at) return conn.clickByNodeId(nodeId, CLICKS[op])
+/** Click op on a node, `modifiers` held: at `at` px from its top-left, else as a control (its centre). */
+export async function clickNode(
+  conn: PageSession,
+  nodeId: number,
+  op: ClickOp,
+  { at, modifiers }: { at?: Point; modifiers?: Modifier[] } = {},
+): Promise<void> {
+  const opts = { ...CLICKS[op], modifiers }
+  if (!at) return conn.clickByNodeId(nodeId, opts)
   const { x, y } = pointIn(await conn.getBoxRect(nodeId), at)
-  await conn.clickAtPosition(x, y, CLICKS[op])
+  await conn.clickAtPosition(x, y, opts)
 }
 
 /**
@@ -330,6 +336,9 @@ export const describeTarget = (target: Target): string => {
 }
 
 export const describeAt = (at: Point | undefined): string => (at ? ` @${at.x},${at.y}` : '')
+
+/** `ctrl+click`: the op with the keys it held. */
+export const describeOp = (op: string, modifiers: Modifier[] | undefined): string => [...(modifiers ?? []), op].join('+')
 
 export async function viewportBox(conn: PageSession): Promise<Rect> {
   const { viewport } = await conn.getLayoutSnapshot()

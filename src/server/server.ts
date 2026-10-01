@@ -43,7 +43,7 @@ import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
 import { runAct, type ActSession } from './act-session.js'
-import { listSaved, saveUseCase } from './act-store.js'
+import { listSaved, modifiersOf, saveUseCase } from './act-store.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -720,11 +720,14 @@ export class AgentViewServer {
 
     const clicks = argBool(req.args, 'double') ? 2 : 1
     const right = argBool(req.args, 'right')
+    const modifiers = modifiersOf(req.args)
+    if (modifiers && 'error' in modifiers) return { ok: false, error: modifiers.error }
     const clickOpts: ClickOpts | undefined =
-      clicks > 1 || right
-        ? { ...(clicks > 1 ? { clicks } : {}), ...(right ? { button: MouseButton.Right } : {}) }
+      clicks > 1 || right || modifiers
+        ? { ...(clicks > 1 ? { clicks } : {}), ...(right ? { button: MouseButton.Right } : {}), ...(modifiers ? { modifiers } : {}) }
         : undefined
     const verb = right ? 'Right-clicked' : clicks > 1 ? 'Double-clicked' : 'Clicked'
+    const held = modifiers ? ` holding ${modifiers.join('+')}` : ''
 
     if (req.args.pos && typeof req.args.pos === 'object') {
       const pos = req.args.pos as Record<string, unknown>
@@ -732,7 +735,7 @@ export class AgentViewServer {
       const y = typeof pos.y === 'number' ? pos.y : 0
       await conn.clickAtPosition(x, y, clickOpts)
       this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} at (${x}, ${y})` }
+      return { ok: true, data: `${verb} at (${x}, ${y})${held}` }
     }
 
     const locator = locatorFromArgs(req.args)
@@ -741,7 +744,7 @@ export class AgentViewServer {
       if ('error' in found) return { ok: false, error: found.error }
       await conn.clickByNodeId(found.backendDOMNodeId, clickOpts)
       this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} ${found.label}` }
+      return { ok: true, data: `${verb} ${found.label}${held}` }
     }
 
     const clickFilter = argStr(req.args, 'filter')
@@ -754,7 +757,7 @@ export class AgentViewServer {
       }
       await conn.clickByNodeId(found.backendDOMNodeId, clickOpts)
       this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} "${found.name}"` }
+      return { ok: true, data: `${verb} "${found.name}"${held}` }
     }
 
     const ref = argNum(req.args, 'ref')
@@ -768,7 +771,7 @@ export class AgentViewServer {
 
     await conn.clickByNodeId(entry.backendDOMNodeId, clickOpts)
     this.axTreeCache.invalidate(cacheKey)
-    return { ok: true, data: `${verb} ref ${ref}` }
+    return { ok: true, data: `${verb} ref ${ref}${held}` }
   }
 
   private async handleAct(req: ServerRequest): Promise<ServerResponse> {

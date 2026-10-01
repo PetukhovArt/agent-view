@@ -209,7 +209,7 @@ export async function replay(
           if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
           await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
         } else if (isClickOp(step.op)) {
-          await clickNode(deps.conn, nodeId, step.op, step.at)
+          await clickNode(deps.conn, nodeId, step.op, { at: step.at, modifiers: step.modifiers })
         } else if (step.op === 'type') {
           await deps.conn.fillByNodeId(nodeId, step.isPassword ? secret! : step.value ?? '')
         } else {

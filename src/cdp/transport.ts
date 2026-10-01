@@ -29,6 +29,7 @@ import {
   type DragData,
   type DragResult,
   type ClickOpts,
+  type Modifier,
   type Point,
   type NetworkEvent,
   type JsDialogInfo,
@@ -1025,6 +1026,8 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   }
 }
 
+/** CDP `Input.dispatchMouseEvent` `modifiers` bits. */
+const MODIFIER_BITS: Record<Modifier, number> = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 const DRAG_INTERCEPT_TIMEOUT_MS = 1000
 const DRAG_NOT_INTERCEPTED =
   'no HTML5 drag started (Input.dragIntercepted not fired within 1 s): the element at --from is not draggable, or a control (input/select/button) under the cursor swallowed dragstart'
@@ -1099,15 +1102,16 @@ export async function connectToPage(
   async function dispatchClick(x: number, y: number, opts?: ClickOpts): Promise<void> {
     const clicks = Math.max(1, opts?.clicks ?? 1)
     const button = opts?.button ?? MouseButton.Left
+    const modifiers = (opts?.modifiers ?? []).reduce((mask, key) => mask | MODIFIER_BITS[key], 0)
     if (clicks === 1) {
-      const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: 1 })
-      const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: 1 })
+      const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: 1, modifiers })
+      const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: 1, modifiers })
       await Promise.all([pressed, released])
       return
     }
     for (let i = 1; i <= clicks; i++) {
-      await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: i })
-      await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: i })
+      await Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: i, modifiers })
+      await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: i, modifiers })
     }
   }
 

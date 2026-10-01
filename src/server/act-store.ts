@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { MODIFIERS, type Modifier } from '../cdp/types.js'
 import type { ServerResponse } from '../types.js'
 import {
   USE_CASE_SUFFIX,
@@ -32,6 +33,15 @@ export const strs = (args: Record<string, unknown>, key: string): string[] | und
   return values.length ? values : undefined
 }
 export const cwdOf = (args: Record<string, unknown>): string => str(args, 'cwd') ?? process.cwd()
+/** `--modifiers ctrl,shift` of `click` and the act click ops. */
+export function modifiersOf(args: Record<string, unknown>): Modifier[] | { error: string } | undefined {
+  const raw = str(args, 'modifiers')
+  if (raw === undefined) return undefined
+  const keys = raw.split(',').map(k => k.trim())
+  return keys.every((k): k is Modifier => (MODIFIERS as readonly string[]).includes(k))
+    ? keys
+    : { error: `--modifiers ${raw} — comma-separated ${MODIFIERS.join('|')}` }
+}
 
 const SECTION_HINT = '--in <section>: the product area it belongs to (auth, libraries, editor/canvas), integration for a use case crossing areas'
 

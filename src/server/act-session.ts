@@ -1,4 +1,5 @@
 import { isDeadSocket } from '../cdp/transport.js'
+import type { Modifier } from '../cdp/types.js'
 import type { ServerResponse } from '../types.js'
 import {
   PASSWORD_MASK,
@@ -15,6 +16,7 @@ import {
   EDGES,
   clickNode,
   describeAt,
+  describeOp,
   describeTarget,
   dragNode,
   elementLocator,
@@ -33,7 +35,7 @@ import {
   type Target,
   type UntilArgs,
 } from './act-script.js'
-import { cwdOf, refuseStepSave, str, strs } from './act-store.js'
+import { cwdOf, modifiersOf, refuseStepSave, str, strs } from './act-store.js'
 import { replay, type ActDeps } from './act-replay.js'
 
 const DEFAULT_MAX_STEPS = 30
@@ -45,7 +47,7 @@ const SETTLE_STABLE_POLLS = 2
 const SETTLE_QUIET_POLLS = 4
 const ROW_OPS = ['click', 'dblclick', 'rightclick', 'type', 'select'] as const
 type RowOp = typeof ROW_OPS[number]
-type RowStepArgs = { op: RowOp; n: number; text: string }
+type RowStepArgs = { op: RowOp; n: number; text: string; modifiers?: Modifier[] }
 
 /** How a replay finds `c` again, and which of the visible controls answering to the same it is. */
 function stepTarget(c: Control, controls: Control[]): RowTarget {
@@ -140,8 +142,10 @@ export async function runAct(
   if (isClickOp(op) && str(args, 'target') !== undefined) {
     const target = parseTarget(str(args, 'target')!)
     if (!target) return { ok: false, error: `act ${op} <n | testid=<id> | css=<selector>>[@x,y]` }
-    if ('n' in target && !target.at) return rowStep(run, { op, n: target.n, text: '' })
-    return clickStep(run, op, target)
+    const modifiers = modifiersOf(args)
+    if (modifiers && 'error' in modifiers) return { ok: false, error: modifiers.error }
+    if ('n' in target && !target.at) return rowStep(run, { op, n: target.n, text: '', modifiers })
+    return clickStep(run, op, target, modifiers)
   }
   if (isRowOp(op)) return rowStep(run, { op, n: num(args.n), text: str(args, 'text') ?? '' })
   if (op === 'do') return batchStep(run, args.steps)
@@ -202,7 +206,7 @@ async function printTable(run: Run, controls?: Control[]): Promise<string> {
   return formatControlTable(session.rows, { step: session.steps.length, maxSteps: session.maxSteps, untilLabel: session.until.label })
 }
 
-async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerResponse> {
+async function rowStep(run: Run, { op, n, text, modifiers }: RowStepArgs): Promise<ServerResponse> {
   const located = await locate(run, n)
   if (!('target' in located)) return located
   const { target, fresh } = located
@@ -212,11 +216,11 @@ async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerRe
 
   const { session, deps } = run
   const echo = isClickOp(op) ? '' : ` ${target.isPassword ? PASSWORD_MASK : JSON.stringify(text)}`
-  const done = `${op} [${n}] ${describeControl(target)}${echo}`
+  const done = `${describeOp(op, modifiers)} [${n}] ${describeControl(target)}${echo}`
   let isReloaded = false
   try {
     if (isClickOp(op)) {
-      await clickNode(deps.conn, target.backendDOMNodeId, op)
+      await clickNode(deps.conn, target.backendDOMNodeId, op, { modifiers })
     } else if (op === 'type') {
       await deps.conn.fillByNodeId(target.backendDOMNodeId, text)
     } else {
@@ -230,7 +234,7 @@ async function rowStep(run: Run, { op, n, text }: RowStepArgs): Promise<ServerRe
     isReloaded = true
   }
   deps.invalidateAxCache()
-  session.steps.push({ op, target: stepTarget(target, fresh), value: isClickOp(op) ? undefined : text, isPassword: target.isPassword })
+  session.steps.push({ op, target: stepTarget(target, fresh), value: isClickOp(op) ? undefined : text, isPassword: target.isPassword, modifiers })
   return finishStep(run, { before: tableKey(fresh), done: isReloaded ? `${done} · window reloaded` : done })
 }
 
@@ -295,15 +299,15 @@ async function pick(run: Run, target: CliTarget): Promise<Picked | ServerRespons
 }
 
 /** A click op on an element, or at `at` px from its top-left corner (a spot on a canvas). */
-async function clickStep(run: Run, op: ClickOp, target: CliTarget): Promise<ServerResponse> {
+async function clickStep(run: Run, op: ClickOp, target: CliTarget, modifiers: Modifier[] | undefined): Promise<ServerResponse> {
   const picked = await pick(run, target)
   if (!('nodeId' in picked)) return picked
   const { session, deps } = run
   const { at } = target
-  await clickNode(deps.conn, picked.nodeId, op, at)
+  await clickNode(deps.conn, picked.nodeId, op, { at, modifiers })
   deps.invalidateAxCache()
-  session.steps.push({ op, target: picked.target, isPassword: false, at })
-  return finishStep(run, { before: picked.before, done: `${op} ${picked.label}${describeAt(at)}` })
+  session.steps.push({ op, target: picked.target, isPassword: false, at, modifiers })
+  return finishStep(run, { before: picked.before, done: `${describeOp(op, modifiers)} ${picked.label}${describeAt(at)}` })
 }
 
 /**
