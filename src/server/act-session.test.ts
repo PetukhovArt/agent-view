@@ -10,7 +10,7 @@ const NODE_ID = 7
 describe('runAct', () => {
   const app = (name = 'Индикатор') => {
     const conn = {
-      evaluate: async () => '',
+      evaluate: vi.fn(async (_expression: string, _opts?: object): Promise<unknown> => ''),
       getAccessibilityTree: async () => [{ nodeId: 'ax7', role: { value: 'button' }, name: { value: name }, backendDOMNodeId: NODE_ID }],
       getLayoutSnapshot: async () => ({
         viewport: { width: 800, height: 600 },
@@ -21,7 +21,7 @@ describe('runAct', () => {
       queryVisible: async () => (conn.clickByNodeId.mock.calls.length ? { backendDOMNodeId: 1, count: 1 } : { backendDOMNodeId: null, count: 0 }),
       clickByNodeId: vi.fn(async () => {}),
     }
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn }
+    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
     return { conn, deps, holder: { act: null }, cwd: mkdtempSync(join(tmpdir(), 'av-act-')) }
   }
 
@@ -44,5 +44,19 @@ describe('runAct', () => {
 
     expect(started).toMatchObject({ ok: false, error: expect.stringContaining('uuid') })
     expect(holder.act).toBeNull()
+  })
+
+  it('refuses an expression until or wait while allowEval is off, running none of its JS', async () => {
+    const { conn, deps, holder, cwd } = app()
+
+    const until = await runAct(holder, { op: 'start', untilExpr: 'window.ready', cwd }, deps)
+    await runAct(holder, { op: 'start', untilTestid: 'selected', cwd }, deps)
+    const wait = await runAct(holder, { op: 'wait', expr: 'window.ready' }, deps)
+
+    expect([until, wait]).toEqual([
+      { ok: false, error: expect.stringContaining('allowEval') },
+      { ok: false, error: expect.stringContaining('allowEval') },
+    ])
+    expect(conn.evaluate).not.toHaveBeenCalledWith(expect.stringContaining('window.ready'), expect.anything())
   })
 })

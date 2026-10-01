@@ -80,6 +80,10 @@ export class CDPTimeoutError extends Error {
 export const isDeadSocket = (err: unknown): boolean =>
   err instanceof Error && /WebSocket (is not open|connection closed)/.test(err.message)
 
+/** A `DOM` call found no box or no node: not drawn yet, or replaced by a re-render. No `Input` event went out. */
+export const isNotDrawn = (err: unknown): boolean =>
+  err instanceof Error && /Could not compute box model|layout object|No node with given id|does not belong to the document|Could not find node/.test(err.message)
+
 /** Snapshot rects and screenshots are device pixels; everything else here is CSS pixels. */
 const devicePixelRatio = (metrics: { layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number } }): number =>
   metrics.layoutViewport.clientWidth / metrics.cssLayoutViewport.clientWidth

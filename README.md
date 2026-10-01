@@ -321,7 +321,7 @@ Full form with all optional fields:
 | `port`              | yes      | CDP debugging port. Integer in range `1`–`65535`                                                                                                      |
 | `launch`            | yes      | Shell command used by `agent-view launch` to start the app (e.g. `"npm run dev"`). Pass an empty string if you always start the app yourself          |
 | `webgl.engine`      | no       | Scene-graph engine. Currently `"pixi"` ships an adapter; the architecture is pluggable for adding more engines                                        |
-| `allowEval`         | no       | `true` to enable `agent-view eval` and `watch`. Off by default; opt-in for arbitrary JS execution                                                     |
+| `allowEval`         | no       | `true` to enable `agent-view eval`, `watch`, `logs --probe` and `act` expressions (`--until-expr`, `wait --expr`). Off by default; opt-in for arbitrary JS execution |
 | `consoleBufferSize` | no       | Per-target console ring capacity. Positive integer. Default `500`                                                                                     |
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to on first call. Any subset of `["page", "iframe", "shared_worker", "service_worker", "worker"]`. Default `["page", "shared_worker", "service_worker"]` |
 | `captureBody`       | no       | `true` to capture response bodies and request payloads for `agent-view network`. Off by default; opt-in since bodies can carry tokens/PII. WebSocket frame payloads are visible regardless              |

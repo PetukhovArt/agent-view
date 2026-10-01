@@ -204,7 +204,10 @@ agent-view's to check, never the driver's: `act start` needs exactly one of `--u
 animation over): a JS expression in the page that holds while truthy, or, when it returns a promise,
 once the promise resolves, whatever its value. One that throws or rejects does not hold yet. Both run
 page JS, so both need `"allowEval": true`, at recording and at replay; without it they are refused
-(`… evaluates JS in the page. Set "allowEval": true in agent-view.config.json to enable it.`).
+(`… evaluates JS in the page. Set "allowEval": true in agent-view.config.json to enable it.`). A load
+longer than a step's 10 s is the until's job (`--timeout`). `${NAME}` in an
+expression is a parameter, pasted in as raw text: an uppercase JS template-literal slot reads as one, and
+a value holding a quote breaks the expression.
 
 ```bash
 agent-view act start --until-testid workspace-root   # new session for this CDP port; prints the table
@@ -392,7 +395,8 @@ same way, labelled `step` instead of `prerequisite`. Its one line, ending in the
 | `STALE: step 1/2 select combobox "Период" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
 | `FAIL: replay data-load — steps ran, expression "window.app.loaded" not true after 15s · 15.3s` | 1 | an `--until-expr` never held; also `still pending`, `threw <error>` |
 | `FAIL: step 2/3 wait expression "window.app.loaded" not true after 10s · 10.2s` | 1 | a `wait --expr` step never held |
-| `STALE: step 2/3 click button "Закрыть" — <CDP error> · 10.4s` | 3 | the control kept vanishing between finding and acting for 10 s |
+| `STALE: step 2/3 click treeitem "Насос" — Could not compute box model. · 10.4s` | 3 | the control was found but never drawn, or kept being re-rendered, for 10 s |
+| `STALE: step 2/3 click button "Закрыть" — <CDP error> · 0.4s` | 3 | acting failed otherwise (a panel that toggled shut); input already sent is never repeated |
 
 Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
 prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,

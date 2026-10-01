@@ -17,13 +17,12 @@ import {
   GLANCE_MS,
   clickNode,
   conditionOf,
-  exprCondition,
-  unmet,
   describeAt,
   describeOp,
   describeTarget,
   dragNode,
   elementLocator,
+  exprCondition,
   isClickOp,
   isEdge,
   isScriptName,
@@ -34,6 +33,7 @@ import {
   parseTarget,
   pointIn,
   scriptStore,
+  unmet,
   writeScript,
   type CliTarget,
   type ClickOp,
@@ -120,7 +120,10 @@ export async function runAct(
     if (!isOneUntil(untilArgs)) {
       return { ok: false, error: 'act start --until-testid <id> | --until-selector <css> | --until-expr <js> — exactly one' }
     }
-    if (untilArgs.expr !== undefined && !deps.isEvalAllowed) return { ok: false, error: `--until-expr evaluates JS in the page. ${ALLOW_EVAL_HINT}` }
+    const isEvalRefused = untilArgs.expr !== undefined && !deps.isEvalAllowed
+    if (isEvalRefused) {
+      return { ok: false, error: `--until-expr evaluates JS in the page. ${ALLOW_EVAL_HINT}` }
+    }
     if (str(args, 'save') !== undefined) {
       const refused = await refuseStepSave(await scriptStore(cwdOf(args)), str(args, 'save'), str(args, 'in')) ?? refuseDraft(args)
       if (refused) return refused
@@ -150,7 +153,9 @@ export async function runAct(
   if (session.steps.length >= session.maxSteps) {
     return { ok: true, data: `BLOCKED: step budget ${session.maxSteps} exhausted\n${await printTable(run)}` }
   }
-  if (op === 'wait') return waitStep(run, expr!)
+  if (op === 'wait' && expr !== undefined) {
+    return waitStep(run, expr)
+  }
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
   if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
@@ -396,9 +401,8 @@ async function doneLine(session: ActSession): Promise<string> {
   return `${line} · saved ${saved.ok ? saved.data : saved.error}`
 }
 
-/** `waitMs`: what an expression's promise is given. */
-function isUntilMet({ session, deps }: Run, waitMs: number): Promise<boolean> {
-  return onLiveConn(deps, async () => !await unmet(deps.conn, session.until, waitMs))
+function isUntilMet({ session, deps }: Run, promiseWaitMs: number): Promise<boolean> {
+  return onLiveConn(deps, async () => !await unmet(deps.conn, session.until, promiseWaitMs))
 }
 
 /** A wait recorded as a step, for a state no element shows; one that never holds is not recorded. */

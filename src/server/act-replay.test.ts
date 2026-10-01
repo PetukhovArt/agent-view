@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MouseButton, type PageSession } from '../cdp/types.js'
 import { writeScript, type ClickOp } from './act-script.js'
-import { replay } from './act-replay.js'
+import { replay, type ActDeps } from './act-replay.js'
 
 const NODE_ID = 7
 
@@ -20,6 +20,11 @@ const fakeConn = (attributes: Record<string, string> = {}) => ({
   clickByNodeId: vi.fn(async () => {}),
 })
 
+const fakeDeps = (conn: object, { isEvalAllowed = false } = {}): ActDeps => {
+  const deps: ActDeps = { conn: conn as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed }
+  return deps
+}
+
 describe('replay', () => {
   it.each<[ClickOp, object]>([
     ['click', {}],
@@ -30,7 +35,7 @@ describe('replay', () => {
     const step = { op, target: { role: 'button', name: 'Сцена' }, isPassword: false }
     await writeScript({ store, name: 'open' }, { until: { testid: 'done' }, steps: [step] })
     const conn = fakeConn()
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
+    const deps = fakeDeps(conn)
 
     const result = await replay({ store, name: 'open' }, deps)
 
@@ -38,17 +43,20 @@ describe('replay', () => {
     expect(conn.clickByNodeId).toHaveBeenCalledExactlyOnceWith(NODE_ID, opts)
   })
 
-  it('acts again on a control found before its box is drawn (a virtual list row), instead of STALE', async () => {
+  it.each([
+    ['acts again on a control found before its box is drawn (a virtual list row)', 'Could not compute box model.', 0, 2],
+    ['ends STALE at once when acting failed otherwise, never sending input twice', 'Drag was not intercepted', 3, 1],
+  ])('%s', async (_, error, exitCode, clicks) => {
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
     await writeScript({ store, name: 'open' }, { until: { testid: 'done' }, steps: [{ op: 'click', target: { role: 'button', name: 'Сцена' }, isPassword: false }] })
     const conn = fakeConn()
-    conn.clickByNodeId.mockRejectedValueOnce(new Error('Could not compute box model.'))
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
+    conn.clickByNodeId.mockRejectedValueOnce(new Error(error))
+    const deps = fakeDeps(conn)
 
     const result = await replay({ store, name: 'open' }, deps)
 
-    expect(result).toMatchObject({ ok: true, exitCode: 0 })
-    expect(conn.clickByNodeId).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ ok: true, exitCode })
+    expect(conn.clickByNodeId).toHaveBeenCalledTimes(clicks)
   })
 
   const saveWaitThenClick = async () => {
@@ -63,7 +71,7 @@ describe('replay', () => {
 
   it('waits on a recorded expression until it holds before the next step', async () => {
     const { store, conn, calls } = await saveWaitThenClick()
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: true }
+    const deps = fakeDeps(conn, { isEvalAllowed: true })
 
     const result = await replay({ store, name: 'open' }, deps)
 
@@ -73,7 +81,7 @@ describe('replay', () => {
 
   it('refuses a script that evaluates JS while allowEval is off, before any step', async () => {
     const { store, conn } = await saveWaitThenClick()
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
+    const deps = fakeDeps(conn)
 
     const result = await replay({ store, name: 'open' }, deps)
 
@@ -91,7 +99,7 @@ describe('replay', () => {
     // The prerequisite's until shows only once its row was clicked, so replay runs it.
     conn.queryVisible = async (css: string) =>
       css.includes('row-selected') && !conn.clickByNodeId.mock.calls.length ? { backendDOMNodeId: null, count: 0 } : { backendDOMNodeId: 1, count: 1 }
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
+    const deps = fakeDeps(conn)
     return { store, conn, deps }
   }
 
@@ -122,7 +130,7 @@ describe('replay', () => {
     await writeScript({ store, name: 'form-fill' }, { until: { testid: 'done' }, steps: [], after: 'form-open' })
     const conn = fakeConn()
     conn.queryVisible = async (css: string) => (css.includes('menu') ? { backendDOMNodeId: null, count: 0 } : { backendDOMNodeId: 1, count: 1 })
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
+    const deps = fakeDeps(conn)
 
     const result = await replay({ store, name: 'form-fill' }, deps)
 
@@ -140,7 +148,7 @@ describe('replay', () => {
     const conn = fakeConn()
     conn.queryVisible = async (css: string) =>
       css.includes('menu') && !conn.clickByNodeId.mock.calls.length ? { backendDOMNodeId: null, count: 0 } : { backendDOMNodeId: 1, count: 1 }
-    const deps = { conn: conn as unknown as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed: false }
+    const deps = fakeDeps(conn)
 
     const result = await replay({ store, name: 'flow-use-case' }, deps)
 

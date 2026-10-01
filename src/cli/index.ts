@@ -438,7 +438,7 @@ const parseSeconds = (value: string): number => {
 const EXPR_HOLDS = 'is truthy, or its promise resolves'
 const UNTIL_EXPR_FLAG = '--until-expr <js>'
 const UNTIL_EXPR_HELP = `Done when this JS expression in the page ${EXPR_HOLDS} (state no element shows); needs allowEval`
-const TARGET_HELP ='<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre'
+const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre'
 /** Candidates for `${NAME}`: the server keeps only the names a script uses. */
 const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
 

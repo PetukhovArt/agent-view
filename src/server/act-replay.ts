@@ -1,5 +1,5 @@
 import type { PageSession, Point } from '../cdp/types.js'
-import { isDeadSocket } from '../cdp/transport.js'
+import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
 import type { ServerResponse } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
@@ -78,7 +78,7 @@ export async function waitFor(deps: ActDeps, condition: Condition, timeoutMs: nu
   return isMet ? undefined : reason ?? 'not reached'
 }
 
-const evaluatesJs = (script: ActScript) => script.until.expr !== undefined || script.steps.some(s => s.op === 'wait')
+const hasExpression = (script: ActScript) => script.until.expr !== undefined || script.steps.some(s => s.op === 'wait')
 
 /** One script of a run with the time its until may take. */
 type Link = { name: string; script: ActScript; untilMs: number }
@@ -156,7 +156,8 @@ export async function replay(
   const plan = await planRun(store, name, params)
   if ('ok' in plan) return plan
   const { chain, linkWord } = plan
-  if (!deps.isEvalAllowed && [...chain, plan.main].some(link => evaluatesJs(link.script))) {
+  const isEvalRefused = !deps.isEvalAllowed && [...chain, plan.main].some(link => hasExpression(link.script))
+  if (isEvalRefused) {
     return { ok: false, error: `"${name}" evaluates JS in the page (an --until-expr or a wait --expr). ${ALLOW_EVAL_HINT}` }
   }
   const attributes = testIdAttributes(testIdAttribute)
@@ -207,12 +208,43 @@ export async function replay(
     return { nodeId: control?.backendDOMNodeId, seen }
   }
 
+  /**
+   * Finds `target` and runs `use` on its node within the step's time: a FAIL / STALE verdict, or what `use`
+   * returns. A node not drawn yet (a row a virtual list draws a frame later) or replaced by a re-render is
+   * found again; any other failure means the app is not in the state the script was recorded in (a panel
+   * that toggled shut).
+   */
+  const onNode = async (
+    target: Target,
+    { isEnabledRequired, what }: { isEnabledRequired: boolean; what: string },
+    use: (nodeId: number, msLeft: number) => Promise<ServerResponse | undefined>,
+  ): Promise<ServerResponse | undefined> => {
+    const deadline = Date.now() + STEP_TIMEOUT_MS
+    for (;;) {
+      const { nodeId, seen } = await resolve(target, isEnabledRequired, deadline - Date.now())
+      if (!nodeId) {
+        // Present but unusable is the app misbehaving; absent is the script out of date.
+        return seen
+          ? verdict(EXIT_FAIL, `FAIL: ${what} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
+          : verdict(EXIT_STALE, `STALE: ${what} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
+      }
+      try {
+        return await use(nodeId, deadline - Date.now())
+      } catch (err) {
+        if (isDeadSocket(err)) throw err
+        const isRetried = isNotDrawn(err) && Date.now() < deadline
+        if (!isRetried) return verdict(EXIT_STALE, `STALE: ${what} — ${err instanceof Error ? err.message : String(err)}`)
+      }
+      await sleep(POLL_MS)
+    }
+  }
+
   type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' }>
-  /** Acts on the found node: a verdict when the app cannot take the step, the message of what threw, or undefined. */
-  const actOn = async (step: ActionStep, nodeId: number, at: string): Promise<ServerResponse | string | undefined> => {
+  /** Acts on the found node: a verdict when the app cannot take the step, else undefined. */
+  const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
     try {
       if (step.op === 'drag') {
-        const dropId = step.to && (await resolve(step.to, false)).nodeId
+        const dropId = step.to && (await resolve(step.to, false, msLeft)).nodeId
         if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
         await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
       } else if (isClickOp(step.op)) {
@@ -226,7 +258,7 @@ export async function replay(
       }
     } catch (err) {
       // The window reloaded under the action (login, logout): it went out; the next poll reconnects.
-      if (!isDeadSocket(err)) return err instanceof Error ? err.message : String(err)
+      if (!isDeadSocket(err)) throw err
     }
     return undefined
   }
@@ -238,9 +270,11 @@ export async function replay(
       if (step.op === 'scroll') {
         let wheelAt: Point | undefined
         if (step.target) {
-          const { nodeId } = await resolve(step.target, false)
-          if (!nodeId) return verdict(EXIT_STALE, `STALE: ${at} scroll ${describeTarget(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
-          wheelAt = pointIn(await deps.conn.getBoxRect(nodeId, { scrollIntoView: false }))
+          const failed = await onNode(step.target, { isEnabledRequired: false, what: `${at} scroll ${describeTarget(step.target)}` }, async (nodeId) => {
+            wheelAt = pointIn(await deps.conn.getBoxRect(nodeId, { scrollIntoView: false }))
+            return undefined
+          })
+          if (failed) return failed
         }
         await poll(deps, async c => { await c.scrollWheel(step.direction, wheelAt); return true }, STEP_TIMEOUT_MS)
         deps.invalidateAxCache()
@@ -252,26 +286,9 @@ export async function replay(
         if (reason) return verdict(EXIT_FAIL, `FAIL: ${at} wait ${condition.label} ${reason} after ${STEP_TIMEOUT_MS / 1000}s`)
         continue
       }
-      const deadline = Date.now() + STEP_TIMEOUT_MS
-      for (;;) {
-        const { nodeId, seen } = await resolve(step.target, step.op !== 'drag', deadline - Date.now())
-        if (!nodeId) {
-          // Present but unusable is the app misbehaving; absent is the script out of date.
-          return seen
-            ? verdict(EXIT_FAIL, `FAIL: ${at} ${step.op} ${describeTarget(step.target)} — still ${seen} after ${STEP_TIMEOUT_MS / 1000}s`)
-            : verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describeTarget(step.target)} — not on screen within ${STEP_TIMEOUT_MS / 1000}s`)
-        }
-        const outcome = await actOn(step, nodeId, at)
-        if (typeof outcome !== 'string') {
-          if (outcome) return outcome
-          break
-        }
-        // Thrown before any input went out: a box not computed yet (a row a virtual list draws a frame
-        // later) or a node replaced by a re-render. Found again until the step's time is up; then the
-        // app is not in the state the script was recorded in (a panel that toggled shut).
-        if (Date.now() >= deadline) return verdict(EXIT_STALE, `STALE: ${at} ${step.op} ${describeTarget(step.target)} — ${outcome}`)
-        await sleep(POLL_MS)
-      }
+      const what = `${at} ${step.op} ${describeTarget(step.target)}`
+      const failed = await onNode(step.target, { isEnabledRequired: step.op !== 'drag', what }, (nodeId, msLeft) => actOn(step, nodeId, at, msLeft))
+      if (failed) return failed
       // A `dom` right after the replay must not get the tree from before the last action.
       deps.invalidateAxCache()
     }

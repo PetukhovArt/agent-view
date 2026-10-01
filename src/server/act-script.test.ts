@@ -7,11 +7,12 @@ import { EvaluationError, type PageSession } from '../cdp/types.js'
 import { edgePoint, exprCondition, markParams, paramsOf, scriptStore, unmet } from './act-script.js'
 
 describe('unmet', () => {
-  /** Runs the expression the way Runtime.evaluate with awaitPromise does, in this realm. */
+  /** Runs the expression the way Runtime.evaluate does, in this realm: a promise is awaited only with awaitPromise. */
   const page = {
-    evaluate: async (expression: string) => {
+    evaluate: async (expression: string, opts?: { awaitPromise?: boolean }) => {
       try {
-        return await (0, eval)(expression)
+        const value: unknown = (0, eval)(expression)
+        return opts?.awaitPromise ? await value : value
       } catch (err) {
         throw new EvaluationError(String(err))
       }

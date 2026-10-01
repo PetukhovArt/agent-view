@@ -89,6 +89,9 @@ function envMs(name: string, fallback: number): number {
   return Number.isFinite(raw) && raw > 0 ? raw : fallback
 }
 
+/** A request without the project dir gets no `allowEval`, as `eval` refuses one. */
+const isEvalAllowedIn = (cwd: string | undefined): boolean => cwd !== undefined && readConfig(resolve(cwd))?.allowEval === true
+
 /** Poll-based commands carry their own `--timeout` (seconds); the deadline must outlive it. */
 export function requestDeadlineMs(command: string, args: Record<string, unknown>): number | null {
   if (UNBOUNDED_COMMANDS.has(command)) return null
@@ -788,7 +791,7 @@ export class AgentViewServer {
         this.dropSessionsForPort(req.port)
         return this.getPageSession(req, (await this.resolveWindow(req)).targetId)
       },
-      isEvalAllowed: readConfig(resolve(argStr(req.args, 'cwd') ?? process.cwd()))?.allowEval === true,
+      isEvalAllowed: isEvalAllowedIn(argStr(req.args, 'cwd')),
     })
   }
 
