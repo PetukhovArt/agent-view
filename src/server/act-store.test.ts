@@ -40,6 +40,7 @@ describe('saveUseCase', () => {
       '',
       'Use cases:',
       '- [pick-use-case](pick-use-case.json) — FEA-10 TC-01: выделяет строку; строка выделена · params LABEL · requires tree/fixtures/demo.sh',
+      '',
     ].join('\n'))
     expect(JSON.parse(readFileSync(join(store, 'tree', 'pick-use-case.json'), 'utf8'))).toMatchObject({ paramNotes: { LABEL: 'имя строки' } })
   })

@@ -201,7 +201,7 @@ A saved Act Session re-run inside the server with no Decider. Ends DONE, FAIL (t
 _Avoid_: Script Run, Playback
 
 **Act Script**
-A saved Act Session as JSON: done condition, steps, and optionally a note, the start route and an `after` prerequisite script that Replay runs first unless its done condition already holds.
+A saved Act Session as JSON: done condition, steps, and optionally a note (its goal), what each parameter stands for, the start route and an `after` prerequisite script that Replay runs first unless its done condition already holds.
 _Avoid_: Recording, Macro, Scenario, Step Script
 
 **Use Case**

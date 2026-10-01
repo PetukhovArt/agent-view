@@ -37,13 +37,12 @@ describe('runAct', () => {
     expect(conn.clickByNodeId.mock.calls).toEqual([[NODE_ID, { modifiers: ['ctrl'] }], [NODE_ID, { modifiers: ['ctrl'] }]])
   })
 
-  it('refuses to save a step marked from a uuid parameter value, though the saved strings hold only ${ROW}', async () => {
-    const uuid = '7a1e0b52-1111-4c2a-9a01-000000000001'
-    const { deps, holder, cwd } = app(`Насос ${uuid}`)
+  it('refuses a uuid parameter value at start --save, before a run that could not be saved', async () => {
+    const { deps, holder, cwd } = app()
 
-    await runAct(holder, { op: 'start', untilTestid: 'selected', save: 'pick', in: 'tree', params: [`ROW=${uuid}`], cwd }, deps)
-    const recorded = await runAct(holder, { op: 'click', target: '1' }, deps)
+    const started = await runAct(holder, { op: 'start', untilTestid: 'selected', save: 'pick', in: 'tree', params: ['ROW=7a1e0b52-1111-4c2a-9a01-000000000001'], cwd }, deps)
 
-    expect(recorded).toMatchObject({ ok: true, data: expect.stringMatching(/saved .*uuid/) })
+    expect(started).toMatchObject({ ok: false, error: expect.stringContaining('uuid') })
+    expect(holder.act).toBeNull()
   })
 })

@@ -82,7 +82,6 @@ export type ActSession = {
   after?: string
   /** `--param NAME=value` of `start`: marked in the script `--save` writes. */
   params?: string[]
-  /** `--param-note NAME=text` of `start`. */
   paramNotes?: string[]
   /** DONE was printed: the recording is complete and takes no more steps. */
   isDone: boolean
@@ -116,7 +115,7 @@ export async function runAct(
       return { ok: false, error: 'act start --until-testid <id> | --until-selector <css> — exactly one' }
     }
     if (str(args, 'save') !== undefined) {
-      const refused = await refuseStepSave(await scriptStore(cwdOf(args)), str(args, 'save'), str(args, 'in'))
+      const refused = await refuseStepSave(await scriptStore(cwdOf(args)), str(args, 'save'), str(args, 'in')) ?? refuseDraft(args)
       if (refused) return refused
     }
     const start = await deps.conn.evaluate(START_EXPRESSION).catch(() => undefined)
@@ -158,8 +157,19 @@ export async function runAct(
   return { ok: false, error: `Unknown act op: ${op}` }
 }
 
+const untilArgsOf = (args: Record<string, unknown>): UntilArgs => ({ testid: str(args, 'untilTestid'), selector: str(args, 'untilSelector') })
+
+/** What `act start --save` can refuse before the run: all but a param note, which needs the steps. */
+function refuseDraft(args: Record<string, unknown>): ServerResponse | undefined {
+  const notes = parseParamNotes(strs(args, 'paramNotes'))
+  const unfit = notes && 'error' in notes
+    ? notes.error
+    : refuseScript({ until: untilArgsOf(args), steps: [], note: str(args, 'note') }, strs(args, 'params'))
+  return unfit ? { ok: false, error: unfit } : undefined
+}
+
 function createSession(args: Record<string, unknown>): ActSession {
-  const untilArgs: UntilArgs = { testid: str(args, 'untilTestid'), selector: str(args, 'untilSelector') }
+  const untilArgs = untilArgsOf(args)
   const testIdAttribute = str(args, 'testIdAttribute')
   const maxSteps = typeof args.maxSteps === 'number' && args.maxSteps > 0 ? args.maxSteps : DEFAULT_MAX_STEPS
   return {

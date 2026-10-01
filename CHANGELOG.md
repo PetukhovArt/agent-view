@@ -4,7 +4,7 @@
 
 ### Changed
 - The script store `index.md` (and `act list`) prints one short line per script: `- [<name>](<name>.json) — <note> · params … · after <step> · requires <fixture>`. The until, the step count, a use case's step chain, the start route and the timeout are left to the JSON — a section index no longer has to be read whole to pick one script.
-- `act save`, `act start --save` and `act save-use-case` refuse a `--note` over 120 characters or on several lines, and a uuid anywhere in the script (until, steps, a `--param` value, the note): a uuid differs between projects and machines, so such a script fits only where it was recorded. Saved scripts holding one still replay.
+- `act save`, `act start --save` and `act save-use-case` refuse a `--note` over 120 characters or on several lines, a `--param-note` for a parameter the script does not take, and a uuid anywhere in the script (until, steps, a `--param` value, the note, a param note): a uuid differs between projects and machines, so such a script fits only where it was recorded. `act start --save` refuses before the run, not at DONE. Saved scripts holding one still replay.
 
 ### Added
 - `--param-note NAME=<text>` on `act start`, `act save` and `act save-use-case`: what a `${NAME}` parameter stands for, kept in the script JSON (`paramNotes`) instead of in the note.

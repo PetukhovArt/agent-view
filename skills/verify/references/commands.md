@@ -220,8 +220,8 @@ agent-view act drag 7 5 --html5         # a native drag-and-drop (a `draggable` 
 agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
 agent-view act save login --in auth     # writes <project>/.agent-view/scripts/auth/login.json + the index.md files, prints the path
 agent-view act start --until-testid x --save auth-login --in auth   # same, written automatically on DONE (one turn fewer)
-agent-view act start --until-testid settings-root --save settings-open --in settings --after auth-login --note "open settings"
-agent-view act save settings-open --in settings --after auth-login --note "open settings"   # --note / --after on either
+agent-view act start --until-testid settings-root --save settings-open --in settings --after auth-login --note "opens settings; the settings page is shown"
+agent-view act save settings-open --in settings --after auth-login --note "opens settings; the settings page is shown"   # --note / --after on either
 agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
 agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос --param-note "ROW=tree id of the row"   # what ${ROW} stands for: in the JSON, not the index; on start and save-use-case too
 agent-view act save project-import --in projects --timeout 120   # replay waits up to 120 s for the until (default 15)
@@ -230,7 +230,7 @@ ROW=library/Насосы/Пожарный agent-view act replay tree-row-select 
 agent-view act list                     # sections of the store; needs no running app
 agent-view act list libraries           # the steps and use cases of one section (and of the sections below it)
 agent-view act save-use-case pump-open-use-case --in libraries --until-testid pump-card \
-  auth-login 'project-open PROJECT=${PROJECT}' "tree-row-select ROW=library/Насосы/Насос timeout=30" --note "open the pump card"
+  auth-login 'project-open PROJECT=${PROJECT}' "tree-row-select ROW=library/Насосы/Насос timeout=30" --note "opens the pump card; the card is shown"
 ```
 
 Scripts live per project in `<project>/.agent-view/scripts/`, `<project>` being the directory of
@@ -263,7 +263,9 @@ Use cases:
 
 A line is `- [<name>](<name>.json) — <note> · params … · after <step> · requires <fixture>`, empty fields
 left out; the until, the steps, the start route, the timeout and the param notes are only in the JSON.
-Save refuses, with nothing written:
+The note says what happens in the app; a check outside it (a file's content, a checksum) belongs to the
+test scenario, not to the script. Save refuses, with nothing written — `start --save` before the run, but
+for a param note, checked at DONE:
 - a `--note` over 120 characters or on several lines — one sentence, what it does; how it ends;
 - a `--param-note` for a parameter the script does not take;
 - a uuid anywhere in the script — until, steps, a `--param` value, the note, a param note
@@ -277,7 +279,8 @@ step takes but the entry does not bind (`"tree-row-select" needs ROW — "tree-r
 empty value, one it does not take, and a `--requires` that is not a file under `<section>/fixtures/`. A value may be `${NAME}`, filled from the env var `NAME` at replay, so one step can
 appear twice with different values. `timeout=` overrides the step's own. `--requires <path>` (repeatable)
 names a **fixture** — setup outside the UI (files on disk) kept in `<section>/fixtures/`: replay never
-runs it, it only prints `requires (not run by replay): <path>` under the verdict. Inside a use case the
+runs it, it only prints `requires (not run by replay): <path>` under the verdict. A use case prepares its
+data through its own fixtures and assumes no other use case ran: use cases replay in any order. Inside a use case the
 steps' `after` is not run; the list is the whole order. Replay skips only its leading steps whose until
 already holds (project open, scene open); from the first one not reached, every step runs — a later step
 whose until holds from the start (a dialog closed, a tab active) is not a reason to skip the ones before it.

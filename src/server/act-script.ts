@@ -114,12 +114,8 @@ const mapScript = <S extends SavedScript>(script: S, fn: (s: string) => string):
  * first so one that contains another is not split. A value found nowhere is an error, not a no-op.
  */
 export function markParams(script: ActScript, params: string[]): ActScript | { error: string } {
-  const pairs: [string, string][] = []
-  for (const param of params) {
-    const match = PARAM_ARG.exec(param)
-    if (!match) return { error: `--param ${param} — NAME=value, NAME of A-Z 0-9 _` }
-    pairs.push([match[1], match[2]])
-  }
+  const pairs = parsePairs('--param', params)
+  if ('error' in pairs) return pairs
   let marked = script
   for (const [name, value] of pairs.sort((a, b) => b[1].length - a[1].length)) {
     let isFound = false
@@ -143,36 +139,39 @@ export function paramsOf(script: SavedScript): string[] {
   return [...names].sort()
 }
 
-/** `--param-note NAME=text`, repeatable. */
-export function parseParamNotes(args: string[] | undefined): Record<string, string> | { error: string } | undefined {
-  if (!args) return undefined
-  const notes: Record<string, string> = {}
+function parsePairs(flag: string, args: string[]): [string, string][] | { error: string } {
+  const pairs: [string, string][] = []
   for (const arg of args) {
     const match = PARAM_ARG.exec(arg)
-    if (!match) return { error: `--param-note ${arg} — NAME=text, NAME of A-Z 0-9 _` }
-    notes[match[1]] = match[2]
+    if (!match) return { error: `${flag} ${arg} — NAME=<value>, NAME of A-Z 0-9 _` }
+    pairs.push([match[1], match[2]])
   }
-  return notes
+  return pairs
 }
 
-/** The index line of a script is its goal: what it does; how it ends. */
-const NOTE_MAX = 120
+export function parseParamNotes(args: string[] | undefined): Record<string, string> | { error: string } | undefined {
+  if (!args) return undefined
+  const pairs = parsePairs('--param-note', args)
+  return 'error' in pairs ? pairs : Object.fromEntries(pairs)
+}
+
+/** The note is the goal on the script's index line, which an agent reads whole to pick one script. */
+export const NOTE_MAX = 120
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
 /**
  * Why `script` may not be saved. A uuid differs between projects and machines, so a script holding
- * one fits only where it was recorded; `values` are the `--param` values it was marked from, no
- * longer in its strings.
+ * one fits only where it was recorded; `params` are the `--param NAME=value` args it was marked
+ * from, their values no longer in its strings.
  */
-export function refuseScript(script: SavedScript, values: string[] = []): string | undefined {
+export function refuseScript(script: SavedScript, params: string[] = []): string | undefined {
   const { note, paramNotes = {} } = script
-  if (note !== undefined && (note.length > NOTE_MAX || /[\r\n]/.test(note))) {
-    return `--note: one sentence of at most ${NOTE_MAX} characters, what the script does; how it ends — this one has ${note.length}`
-  }
+  const isNoteUnfit = note !== undefined && (note.length > NOTE_MAX || /[\r\n]/.test(note))
+  if (isNoteUnfit) return `--note: one sentence of at most ${NOTE_MAX} characters, what the script does; how it ends — this one has ${note.length}`
   const takes = paramsOf(script)
   const stray = Object.keys(paramNotes).filter(n => !takes.includes(n))
   if (stray.length) return `--param-note ${stray.join(', ')}: the script takes no such parameter${takes.length ? ` — it takes ${takes.join(', ')}` : ''}`
-  const strings = [...values, note ?? '', ...Object.values(paramNotes)]
+  const strings = [...params, note ?? '', ...Object.values(paramNotes)]
   mapScript(script, s => {
     strings.push(s)
     return s
