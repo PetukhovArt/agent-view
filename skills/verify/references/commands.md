@@ -198,7 +198,13 @@ wait fits, poll `dom --filter X --count` with an explicit attempt cap and report
 For a driver that only ever answers `op n [text]`. Each call acts, waits for the UI to settle,
 checks the done condition, and prints a fresh numbered control table. The done condition is
 agent-view's to check, never the driver's: `act start` needs exactly one of `--until-testid`,
-`--until-selector`.
+`--until-selector`, `--until-expr`.
+
+`--until-expr <js>` and `act wait --expr <js>` wait for a state no element shows (data loaded, an
+animation over): a JS expression in the page that holds while truthy, or, when it returns a promise,
+once the promise resolves, whatever its value. One that throws or rejects does not hold yet. Both run
+page JS, so both need `"allowEval": true`, at recording and at replay; without it they are refused
+(`… evaluates JS in the page. Set "allowEval": true in agent-view.config.json to enable it.`).
 
 ```bash
 agent-view act start --until-testid workspace-root   # new session for this CDP port; prints the table
@@ -223,6 +229,8 @@ agent-view act drag "css=canvas@10,10" "css=canvas@200,150"   # from a point to 
 agent-view act drag 7 "css=canvas@300,200"   # a tree row dropped at a point of the canvas
 agent-view act drag 7 5 --html5         # a native drag-and-drop (a `draggable` row) instead of pointer events
 agent-view act wait                     # no action: settle up to 3 s, print the table (not a step)
+agent-view act wait --expr "window.app.store.loaded"   # a step: wait up to 10 s until it holds; replay waits on it too
+agent-view act start --until-expr "document.fonts.ready" --save editor-ready --in editor   # done when the promise resolves
 agent-view act save login --in auth     # writes <project>/.agent-view/scripts/auth/login.json + the index.md files, prints the path
 agent-view act start --until-testid x --save auth-login --in auth   # same, written automatically on DONE (one turn fewer)
 agent-view act start --until-testid settings-root --save settings-open --in settings --after auth-login --note "opens settings; the settings page is shown"
@@ -283,7 +291,7 @@ for a param note, checked at DONE:
 
 **Use cases.** A saved `act` run is a **step**: one small action, reusable. A **use case** is a user
 goal made of saved steps, in order, with a done condition of its own; its name ends in `-use-case` (a
-step's never does). `act save-use-case <name>-use-case --in <section> --until-testid|--until-selector …
+step's never does). `act save-use-case <name>-use-case --in <section> --until-testid|--until-selector|--until-expr …
 "<step> [NAME=value …] [timeout=<s>]" …` needs no running app; it refuses a step not saved, a parameter a
 step takes but the entry does not bind (`"tree-row-select" needs ROW — "tree-row-select ROW=…"`), an
 empty value, one it does not take, and a `--requires` that is not a file under `<section>/fixtures/`. A value may be `${NAME}`, filled from the env var `NAME` at replay, so one step can
@@ -333,6 +341,7 @@ First line of an op's output:
 | `✓ click css=#cv @120,80 · 150ms` | a point of an element: `@x,y` from its top-left |
 | `✓ drag css=#cv @10,10 → css=#cv @200,150 · 200ms` | point to point |
 | `✓ scroll down testid=properties-panel · 120ms` | wheel over that element |
+| `✓ wait expression "window.app.store.loaded" · 400ms` | `act wait --expr` held; recorded as a step |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
 | `BLOCKED: [3] button "Войти" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
 | `BLOCKED: [3] covered by div.overlay testid=spinner` | something else receives the click; fresh table follows, nothing was done |
@@ -340,7 +349,8 @@ First line of an op's output:
 
 `act wait` runs even after the budget is spent. Errors (non-zero exit):
 
-- `` run `agent-view act start` first ``, `act start --until-testid <id> | --until-selector <css> — exactly one`
+- `` run `agent-view act start` first ``, `act start --until-testid <id> | --until-selector <css> | --until-expr <js> — exactly one`
+- `wait expression "…" not true after 10s — not recorded` (`act wait --expr`; also `still pending`, `threw <error>`)
 - `` this act run is DONE — `agent-view act start` for a new one `` (any step after DONE; `table` / `wait` still work)
 - `No row [n] in the last table (1-N)`
 - `[n] is a <role>, not a text field — pick a textbox/combobox row` (`type` on a non-text row);
@@ -362,7 +372,7 @@ a `testid=` / `css=` target is saved as given, with its `@x,y`. It stores no pas
 runs it inside the server: each step waits (50 ms polls, 10 s cap) only for its own control to be on
 screen, enabled and uncovered, then acts; a control found but not yet drawn (a virtual-list row, a list
 re-rendered under it) is found again and acted on within the same 10 s; a window reload mid-run is
-ridden over. The until then gets
+ridden over. A `wait --expr` step gets 10 s. The until then gets
 15 s, or the script's `--timeout`. The `after` chain runs first, checked nearest-first (once, no wait):
 the nearest prerequisite whose own until already holds is skipped together with every one before it,
 and the ones after it run; the main script's until is not pre-checked. A use case runs its steps the
@@ -380,11 +390,14 @@ same way, labelled `step` instead of `prerequisite`. Its one line, ending in the
 | `STALE: step 2/2 click button "Войти" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
 | `STALE: step 3/3 drag target testid=video-panel not found · 10.5s` | 3 | same, for a drop target |
 | `STALE: step 1/2 select combobox "Период" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
+| `FAIL: replay data-load — steps ran, expression "window.app.loaded" not true after 15s · 15.3s` | 1 | an `--until-expr` never held; also `still pending`, `threw <error>` |
+| `FAIL: step 2/3 wait expression "window.app.loaded" not true after 10s · 10.2s` | 1 | a `wait --expr` step never held |
 | `STALE: step 2/3 click button "Закрыть" — <CDP error> · 10.4s` | 3 | the control kept vanishing between finding and acting for 10 s |
 
 Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
 prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,
-`"x" after-chain loops: x → login → x`, `"x" needs ROW, SCENE — set as env vars` (checked for the whole
+`"x" after-chain loops: x → login → x`, `"x" evaluates JS in the page … allowEval …` (an expression
+anywhere in the chain, without `allowEval`), `"x" needs ROW, SCENE — set as env vars` (checked for the whole
 chain before any step), `"x-use-case": step "y" needs ROW — bind it in the use case`. A use case with
 `requires` adds a second line under its verdict: `requires (not run by replay): tree/fixtures/stub.sh`.
 

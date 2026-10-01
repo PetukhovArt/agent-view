@@ -2,6 +2,9 @@
 
 ## [0.24.0] - 2026-10-01
 
+### Added
+- `act start --until-expr <js>` (and on `act save-use-case`): done when a JS expression in the page is truthy, or, when it returns a promise, once the promise resolves — for a state no element shows (data loaded, an animation over). `act wait --expr <js>` waits up to 10 s for one and records it as a step that `act replay` waits on. Both run page JS, so recording and replaying them need `"allowEval": true`; save checks them like any other string (a uuid refuses, `--param` marks them).
+
 ### Fixed
 - `act replay` no longer ends STALE when a step's control is found before it is drawn — a row a virtual list draws a frame after opening, a list re-rendered by a data refresh (`Could not compute box model`). It finds the control again and acts within the step's 10 s; STALE only if it still throws then.
 

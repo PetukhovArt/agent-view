@@ -2,8 +2,9 @@ import { execFile } from 'node:child_process'
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, posix, relative, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { MouseButton, type ClickOpts, type Modifier, type PageSession, type Point, type Rect } from '../cdp/types.js'
-import { testIdLocator, type Locator } from './locator.js'
+import { CDPTimeoutError, withTimeout } from '../cdp/transport.js'
+import { EvaluationError, MouseButton, type ClickOpts, type Modifier, type PageSession, type Point, type Rect } from '../cdp/types.js'
+import { findByLocator, locatorFromArgs, testIdLocator, type Locator } from './locator.js'
 import { AGENT_VIEW_DIR } from './port.js'
 
 /**
@@ -37,8 +38,42 @@ export type RecordedStep =
   /** `to`: a row, any element, or absent = the viewport; `toAt` replaces the `edge` point. */
   /** `isHtml5`: a native drag-and-drop (draggable rows), not pointer events. */
   | { op: 'drag'; target: Target; at?: Point; to?: Target; edge: Edge; toAt?: Point; isHtml5?: boolean }
+  /** A state no element shows (data loaded, an animation over): runs page JS, so `allowEval` only. */
+  | { op: 'wait'; expr: string }
 
-export type UntilArgs = { testid?: string; selector?: string }
+/** Exactly one is set; `expr` is a JS expression in the page. */
+export type UntilArgs = { testid?: string; selector?: string; expr?: string }
+
+/** What an until or a wait step waits for: a visible element, or a JS expression. */
+export type Condition = Locator | { expr: string; label: string }
+
+export const exprCondition = (expr: string): Condition => ({ expr, label: `expression ${JSON.stringify(expr)}` })
+
+export const conditionOf = (until: UntilArgs, testIdAttribute: string | undefined): Condition | undefined =>
+  (until.expr !== undefined ? exprCondition(until.expr) : locatorFromArgs({ ...until, testIdAttribute }))
+
+/** A one-off check (not a poll) gives an expression's promise this long. */
+export const GLANCE_MS = 500
+
+/** A promise holds once it resolves, whatever its value (a `Promise<void>` ready hook); any other value while truthy. */
+const settledExpression = (expr: string) =>
+  `(async () => { const v = (${expr}\n); return typeof v?.then === 'function' ? (await v, true) : !!v })()`
+
+/**
+ * Undefined when `condition` holds now, else why not. An expression's promise gets `waitMs`; an
+ * expression that throws or rejects does not hold. A dead socket is thrown.
+ */
+export async function unmet(conn: PageSession, condition: Condition, waitMs: number): Promise<string | undefined> {
+  if (!('expr' in condition)) return 'error' in await findByLocator(conn, condition) ? 'not visible' : undefined
+  try {
+    const value = await withTimeout(conn.evaluate(settledExpression(condition.expr), { awaitPromise: true }), waitMs, 'expression')
+    return value === true ? undefined : 'not true'
+  } catch (err) {
+    if (err instanceof CDPTimeoutError) return 'still pending'
+    if (err instanceof EvaluationError) return `threw ${err.message.split('\n')[0]}`
+    throw err
+  }
+}
 
 export type ActScript = {
   until: UntilArgs

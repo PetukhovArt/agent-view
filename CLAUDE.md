@@ -99,8 +99,9 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
 Two flags in `agent-view.config.json` are **project-owner opt-ins**, both off by default. The token already
 authenticates the local socket; these gate what the socket is allowed to do. Don't bypass either.
 
-- **`allowEval`** — `eval` is the only command that runs arbitrary JS; `watch` and `logs --probe` are gated by the same
-  flag. Enforced in `src/server/server.ts` (`handleEval`).
+- **`allowEval`** — `eval` is the only command that runs arbitrary JS; `watch`, `logs --probe` and the `act`
+  expressions (`--until-expr`, `wait --expr`, and `act replay` of a script holding one) are gated by the same flag.
+  Enforced in `src/server/server.ts` (`handleEval`; `handleAct` passes it to the act run as `isEvalAllowed`).
 - **`captureBody`** — response bodies are fetched eagerly at `loadingFinished` and kept in the ring only when this is
   `true`. Off, only metadata and headers are stored, so secret-bearing bodies stay out of agent context.
 

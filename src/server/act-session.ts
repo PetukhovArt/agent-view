@@ -11,10 +11,14 @@ import {
   resolveRow,
   type Control,
 } from '../inspectors/controls/index.js'
-import { findByLocator, locatorFromArgs, testIdAttributes, type Locator } from './locator.js'
+import { findByLocator, testIdAttributes } from './locator.js'
 import {
   EDGES,
+  GLANCE_MS,
   clickNode,
+  conditionOf,
+  exprCondition,
+  unmet,
   describeAt,
   describeOp,
   describeTarget,
@@ -33,13 +37,14 @@ import {
   writeScript,
   type CliTarget,
   type ClickOp,
+  type Condition,
   type RecordedStep,
   type RowTarget,
   type Target,
   type UntilArgs,
 } from './act-script.js'
-import { cwdOf, modifiersOf, refuseStepSave, str, strs } from './act-store.js'
-import { replay, type ActDeps } from './act-replay.js'
+import { cwdOf, isOneUntil, modifiersOf, refuseStepSave, str, strs, untilArgsOf } from './act-store.js'
+import { ALLOW_EVAL_HINT, STEP_TIMEOUT_MS, replay, waitFor, type ActDeps } from './act-replay.js'
 
 const DEFAULT_MAX_STEPS = 30
 const SETTLE_POLL_MS = 100
@@ -62,7 +67,7 @@ function stepTarget(c: Control, controls: Control[]): RowTarget {
 
 /** Step-protocol state for one CDP port. Rows are those of the LAST printed table. */
 export type ActSession = {
-  until: Locator
+  until: Condition
   untilArgs: UntilArgs
   maxSteps: number
   testIdAttribute?: string
@@ -111,9 +116,11 @@ export async function runAct(
   }
   if (op === 'start') {
     // Done is agent-view's call, never the driver's: no run without a done condition.
-    if ((str(args, 'untilTestid') === undefined) === (str(args, 'untilSelector') === undefined)) {
-      return { ok: false, error: 'act start --until-testid <id> | --until-selector <css> — exactly one' }
+    const untilArgs = untilArgsOf(args)
+    if (!isOneUntil(untilArgs)) {
+      return { ok: false, error: 'act start --until-testid <id> | --until-selector <css> | --until-expr <js> — exactly one' }
     }
+    if (untilArgs.expr !== undefined && !deps.isEvalAllowed) return { ok: false, error: `--until-expr evaluates JS in the page. ${ALLOW_EVAL_HINT}` }
     if (str(args, 'save') !== undefined) {
       const refused = await refuseStepSave(await scriptStore(cwdOf(args)), str(args, 'save'), str(args, 'in')) ?? refuseDraft(args)
       if (refused) return refused
@@ -137,11 +144,13 @@ export async function runAct(
       timeout: seconds(args.timeout),
     })
   }
-  if (op === 'wait') return finishStep(run, { before: tableKey(await snapshot(run)), done: 'wait', quietPolls: Infinity })
+  const expr = str(args, 'expr')
+  if (op === 'wait' && expr === undefined) return finishStep(run, { before: tableKey(await snapshot(run)), done: 'wait', quietPolls: Infinity })
   if (session.isDone) return { ok: false, error: 'this act run is DONE — `agent-view act start` for a new one' }
   if (session.steps.length >= session.maxSteps) {
     return { ok: true, data: `BLOCKED: step budget ${session.maxSteps} exhausted\n${await printTable(run)}` }
   }
+  if (op === 'wait') return waitStep(run, expr!)
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
   if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
@@ -157,8 +166,6 @@ export async function runAct(
   return { ok: false, error: `Unknown act op: ${op}` }
 }
 
-const untilArgsOf = (args: Record<string, unknown>): UntilArgs => ({ testid: str(args, 'untilTestid'), selector: str(args, 'untilSelector') })
-
 /** What `act start --save` can refuse before the run: all but a param note, which needs the steps. */
 function refuseDraft(args: Record<string, unknown>): ServerResponse | undefined {
   const notes = parseParamNotes(strs(args, 'paramNotes'))
@@ -173,7 +180,7 @@ function createSession(args: Record<string, unknown>): ActSession {
   const testIdAttribute = str(args, 'testIdAttribute')
   const maxSteps = typeof args.maxSteps === 'number' && args.maxSteps > 0 ? args.maxSteps : DEFAULT_MAX_STEPS
   return {
-    until: locatorFromArgs({ ...untilArgs, testIdAttribute })!,
+    until: conditionOf(untilArgs, testIdAttribute)!,
     untilArgs,
     maxSteps,
     testIdAttribute,
@@ -376,7 +383,7 @@ const tableKey = (controls: Control[]): string => controls.map((c, i) => formatC
 /** A table the decider asked for still ends the run when the goal was reached meanwhile. */
 async function tableOrDone(run: Run): Promise<ServerResponse> {
   const table = await printTable(run)
-  return { ok: true, data: await isUntilMet(run) ? await doneLine(run.session) : table }
+  return { ok: true, data: await isUntilMet(run, GLANCE_MS) ? await doneLine(run.session) : table }
 }
 
 /** The DONE line; with `start --save`, the recording is written here, sparing the decider a turn. */
@@ -389,8 +396,20 @@ async function doneLine(session: ActSession): Promise<string> {
   return `${line} · saved ${saved.ok ? saved.data : saved.error}`
 }
 
-function isUntilMet({ session, deps }: Run): Promise<boolean> {
-  return onLiveConn(deps, async () => !('error' in await findByLocator(deps.conn, session.until)))
+/** `waitMs`: what an expression's promise is given. */
+function isUntilMet({ session, deps }: Run, waitMs: number): Promise<boolean> {
+  return onLiveConn(deps, async () => !await unmet(deps.conn, session.until, waitMs))
+}
+
+/** A wait recorded as a step, for a state no element shows; one that never holds is not recorded. */
+async function waitStep(run: Run, expr: string): Promise<ServerResponse> {
+  if (!run.deps.isEvalAllowed) return { ok: false, error: `act wait --expr evaluates JS in the page. ${ALLOW_EVAL_HINT}` }
+  const condition = exprCondition(expr)
+  const before = tableKey(await snapshot(run))
+  const reason = await waitFor(run.deps, condition, STEP_TIMEOUT_MS)
+  if (reason) return { ok: false, error: `wait ${condition.label} ${reason} after ${STEP_TIMEOUT_MS / 1000}s — not recorded` }
+  run.session.steps.push({ op: 'wait', expr })
+  return finishStep(run, { before, done: `wait ${condition.label}` })
 }
 
 /**
@@ -412,7 +431,7 @@ async function finishStep(
     await new Promise(r => setTimeout(r, SETTLE_POLL_MS))
     // A socket that dies again mid-reload is a document between loads: an empty table.
     controls = await unlessDeadSocket(snapshot(run), [])
-    isDone = await unlessDeadSocket(isUntilMet(run), false)
+    isDone = await unlessDeadSocket(isUntilMet(run, Math.max(SETTLE_BUDGET_MS - (Date.now() - t0), SETTLE_POLL_MS)), false)
     if (isDone) break
     const key = tableKey(controls)
     // An empty table is a document between loads, never a settled screen.

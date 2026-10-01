@@ -3,7 +3,31 @@ import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { edgePoint, markParams, paramsOf, scriptStore } from './act-script.js'
+import { EvaluationError, type PageSession } from '../cdp/types.js'
+import { edgePoint, exprCondition, markParams, paramsOf, scriptStore, unmet } from './act-script.js'
+
+describe('unmet', () => {
+  /** Runs the expression the way Runtime.evaluate with awaitPromise does, in this realm. */
+  const page = {
+    evaluate: async (expression: string) => {
+      try {
+        return await (0, eval)(expression)
+      } catch (err) {
+        throw new EvaluationError(String(err))
+      }
+    },
+  } as unknown as PageSession
+
+  it.each([
+    ['a resolved promise of nothing (a ready hook) holds', 'Promise.resolve()', undefined],
+    ['a truthy value holds', '[1].length', undefined],
+    ['a falsy value does not', '[].length', 'not true'],
+    ['a promise still pending does not', 'new Promise(() => {})', 'still pending'],
+    ['an expression that throws does not, naming the error', 'notDefinedAnywhere.loaded', 'threw ReferenceError: notDefinedAnywhere is not defined'],
+  ])('%s', async (_, expr, reason) => {
+    expect(await unmet(page, exprCondition(expr), 50)).toBe(reason)
+  })
+})
 
 describe('edgePoint', () => {
   it('drops inside the right edge strip, not the replace-zone centre', () => {

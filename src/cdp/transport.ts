@@ -91,7 +91,7 @@ function snapshotAttributes(pairs: number[], strings: string[]): Record<string, 
   return attributes
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+export async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([

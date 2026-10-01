@@ -435,7 +435,10 @@ const parseSeconds = (value: string): number => {
   if (!(seconds > 0)) throw new InvalidArgumentError('a positive number of seconds')
   return seconds
 }
-const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre'
+const EXPR_HOLDS = 'is truthy, or its promise resolves'
+const UNTIL_EXPR_FLAG = '--until-expr <js>'
+const UNTIL_EXPR_HELP = `Done when this JS expression in the page ${EXPR_HOLDS} (state no element shows); needs allowEval`
+const TARGET_HELP ='<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre'
 /** Candidates for `${NAME}`: the server keeps only the names a script uses. */
 const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
 
@@ -448,6 +451,7 @@ act
   .description('New act session for this CDP port; prints the control table')
   .option('--until-testid <id>', 'Done when an element with this test id is visible')
   .option('--until-selector <css>', 'Done when a match of this selector is visible')
+  .option(UNTIL_EXPR_FLAG, UNTIL_EXPR_HELP)
   .option('--max-steps <n>', 'Step budget (default 30)', (v: string) => parseInt(v, 10))
   .option('--save <name>', 'Write the replay script on DONE (same as act save <name>); needs --in')
   .option(IN_FLAG, IN_HELP)
@@ -457,7 +461,7 @@ act
   .option(PARAM_NOTE_FLAG, PARAM_NOTE_HELP, collectParam, [])
   .option(TIMEOUT_FLAG, TIMEOUT_HELP, parseSeconds)
   .action(async (options) => {
-    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, maxSteps: options.maxSteps, save: options.save, in: options.in, note: options.note, after: options.after, params: options.param, paramNotes: options.paramNote, timeout: options.timeout })
+    await runAct(requireConfig(), { op: 'start', untilTestid: options.untilTestid, untilSelector: options.untilSelector, untilExpr: options.untilExpr, maxSteps: options.maxSteps, save: options.save, in: options.in, note: options.note, after: options.after, params: options.param, paramNotes: options.paramNote, timeout: options.timeout })
   })
 
 act.command('table').description('Re-snapshot and print the control table')
@@ -494,7 +498,8 @@ act.command('do <steps...>').description('Several ops decided from one table, e.
   .action(async (steps: string[]) => { await runAct(requireConfig(), { op: 'do', steps }) })
 
 act.command('wait').description('No action: settle up to 3 s for the app to react, then print the table')
-  .action(async () => { await runAct(requireConfig(), { op: 'wait' }) })
+  .option('--expr <js>', `Instead: wait up to 10 s until this JS expression in the page ${EXPR_HOLDS}, recorded as a step replay waits on; needs allowEval`)
+  .action(async (opts: { expr?: string }) => { await runAct(requireConfig(), { op: 'wait', expr: opts.expr }) })
 
 act.command('replay <name>').description('Run a saved act script with no model. Exit 0 DONE, 1 FAIL (until never came), 3 STALE (a control is gone). Passwords from $AGENT_VIEW_SECRET, ${NAME} parameters from $NAME')
   .action(async (name: string) => { await runAct(requireConfig(), { op: 'replay', name, secret: process.env.AGENT_VIEW_SECRET, params: envParams() }) })
@@ -512,11 +517,12 @@ act.command('save-use-case <name> <steps...>').description('Save a use case: sav
   .option(IN_FLAG, `${IN_HELP}; integration when it crosses areas`)
   .option('--until-testid <id>', 'Done when an element with this test id is visible')
   .option('--until-selector <css>', 'Done when a match of this selector is visible')
+  .option(UNTIL_EXPR_FLAG, UNTIL_EXPR_HELP)
   .option(NOTE_FLAG, NOTE_HELP)
   .option(PARAM_NOTE_FLAG, PARAM_NOTE_HELP, collectParam, [])
   .option('--requires <path>', 'A fixture in the store (auth/fixtures/…) to run first; replay names it, never runs it; repeatable', collectParam, [])
   .action(async (name: string, steps: string[], options) => {
-    await runAct(requireConfig(), { op: 'save-use-case', name, steps, in: options.in, untilTestid: options.untilTestid, untilSelector: options.untilSelector, note: options.note, paramNotes: options.paramNote, requires: options.requires })
+    await runAct(requireConfig(), { op: 'save-use-case', name, steps, in: options.in, untilTestid: options.untilTestid, untilSelector: options.untilSelector, untilExpr: options.untilExpr, note: options.note, paramNotes: options.paramNote, requires: options.requires })
   })
 
 act.command('delete <name>').description('Delete a saved script and regenerate the indexes; refused while a use case or an after names it; needs no running app')

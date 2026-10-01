@@ -37,6 +37,10 @@ export const strs = (args: Record<string, unknown>, key: string): string[] | und
   return values.length ? values : undefined
 }
 export const cwdOf = (args: Record<string, unknown>): string => str(args, 'cwd') ?? process.cwd()
+
+export const untilArgsOf = (args: Record<string, unknown>): UntilArgs =>
+  ({ testid: str(args, 'untilTestid'), selector: str(args, 'untilSelector'), expr: str(args, 'untilExpr') })
+export const isOneUntil = (until: UntilArgs): boolean => Object.values(until).filter(v => v !== undefined).length === 1
 /** `--modifiers ctrl,shift` of `click` and the act click ops. */
 export function modifiersOf(args: Record<string, unknown>): Modifier[] | { error: string } | undefined {
   const raw = str(args, 'modifiers')
@@ -127,14 +131,14 @@ function parseUseEntry(line: string): UseEntry | { error: string } {
  * value, or to `${NAME}` the use case takes from env); a fixture must be a file under `<section>/fixtures/`.
  */
 export async function saveUseCase(args: Record<string, unknown>): Promise<ServerResponse> {
-  const usage = `act save-use-case <name>${USE_CASE_SUFFIX} --in <section> --until-testid <id> | --until-selector <css> "<step> [NAME=value …] [timeout=<s>]" …`
+  const usage = `act save-use-case <name>${USE_CASE_SUFFIX} --in <section> --until-testid <id> | --until-selector <css> | --until-expr <js> "<step> [NAME=value …] [timeout=<s>]" …`
   const name = str(args, 'name')
   const section = str(args, 'in')
-  const until: UntilArgs = { testid: str(args, 'untilTestid'), selector: str(args, 'untilSelector') }
+  const until = untilArgsOf(args)
   const lines = strs(args, 'steps') ?? []
   if (!isScriptName(name) || !name.endsWith(USE_CASE_SUFFIX)) return { ok: false, error: `${usage} — the name ends in ${USE_CASE_SUFFIX}` }
   if (!isSection(section)) return { ok: false, error: `${usage} — ${SECTION_HINT}` }
-  if ((until.testid === undefined) === (until.selector === undefined)) return { ok: false, error: `${usage} — exactly one until` }
+  if (!isOneUntil(until)) return { ok: false, error: `${usage} — exactly one until` }
   if (lines.length === 0) return { ok: false, error: `${usage} — at least one step` }
   const store = await scriptStore(cwdOf(args))
   const use: UseEntry[] = []

@@ -788,6 +788,7 @@ export class AgentViewServer {
         this.dropSessionsForPort(req.port)
         return this.getPageSession(req, (await this.resolveWindow(req)).targetId)
       },
+      isEvalAllowed: readConfig(resolve(argStr(req.args, 'cwd') ?? process.cwd()))?.allowEval === true,
     })
   }
 
