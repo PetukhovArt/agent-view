@@ -6,7 +6,7 @@
 - `act delete <name>`: removes a saved script and regenerates the indexes. Refused while a use case lists it as a step or a step names it as `after`; the refusal lists every one.
 
 ### Fixed
-- A click or drag on an element waits until its box stops moving (two reads 50 ms apart agree, up to 1 s), so an element sliding in — a toast — is hit where it comes to rest instead of missed on its first frame. Covers `click`, `drag`, `act` steps and `act replay`.
+- Every read of an element's box waits until it stops moving (two reads two animation frames apart agree, up to 1 s), so an element sliding in — a toast — is hit where it comes to rest instead of missed on its first frame. Covers `click`, `drag`, `screenshot` crops, `act` steps and `act replay`; a static element costs two frames.
 
 ## [0.22.0] - 2026-10-01
 

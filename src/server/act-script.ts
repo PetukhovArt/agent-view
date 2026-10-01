@@ -72,6 +72,11 @@ export type UseCase = {
 export type SavedScript = ActScript | UseCase
 
 export const isUseCase = (script: SavedScript): script is UseCase => 'use' in script
+
+/** How `script` runs the script `name`: as a use case step, as its `after`, or not at all. */
+export const howNamed = (script: SavedScript, name: string): 'a step' | 'after' | undefined => (isUseCase(script)
+  ? (script.use.some(e => e.step === name) ? 'a step' : undefined)
+  : (script.after === name ? 'after' : undefined))
 export const USE_CASE_SUFFIX = '-use-case'
 
 const execFileAsync = promisify(execFile)

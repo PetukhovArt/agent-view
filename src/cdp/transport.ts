@@ -1026,9 +1026,12 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   }
 }
 
-/** Longer than a frame at 30 fps, so two box reads this far apart straddle a repaint. */
-const BOX_FRAME_MS = 50
-const BOX_SETTLE_MS = 1000
+/**
+ * Two animation frames, or this long when the window paints none (hidden, throttled): an animation
+ * advances only on a frame, so box reads a clock interval apart could both land mid-slide.
+ */
+const FRAMES_EXPRESSION = 'new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 100) })'
+const BOX_REST_MS = 1000
 
 /** CDP `Input.dispatchMouseEvent` `modifiers` bits. */
 const MODIFIER_BITS: Record<Modifier, number> = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
@@ -1186,24 +1189,25 @@ export async function connectToPage(
   }
 
   /**
-   * The content quad once two reads a frame apart agree, so an element sliding in (a toast) is
-   * clicked where it comes to rest, not on its first frame. Still moving after BOX_SETTLE_MS (a
+   * The content quad once two reads frames apart agree, so an element sliding in (a toast) is
+   * clicked where it comes to rest, not on its first frame. Still moving after BOX_REST_MS (a
    * looping animation): the last read.
    */
-  async function settledContent(backendNodeId: number): Promise<number[]> {
+  async function contentAtRest(backendNodeId: number): Promise<number[]> {
     const read = async () => (await DOM.getBoxModel({ backendNodeId })).model.content
-    const end = Date.now() + BOX_SETTLE_MS
+    const end = Date.now() + BOX_REST_MS
     for (let last = await read(); ;) {
-      await sleep(BOX_FRAME_MS)
+      await Runtime.evaluate({ expression: FRAMES_EXPRESSION, awaitPromise: true })
       const next = await read()
-      if (next.every((v, i) => v === last[i]) || Date.now() >= end) return next
+      const isAtRest = next.every((v, i) => v === last[i])
+      if (isAtRest || Date.now() >= end) return next
       last = next
     }
   }
 
   async function resolveBoxCenter(backendNodeId: number, scrollIntoView: boolean): Promise<Point> {
     if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
-    const [x1, y1, x2, y2, x3, y3, x4, y4] = await settledContent(backendNodeId)
+    const [x1, y1, x2, y2, x3, y3, x4, y4] = await contentAtRest(backendNodeId)
     return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 }
   }
 
@@ -1232,7 +1236,7 @@ export async function connectToPage(
 
   async function resolveBoxRect(backendNodeId: number, scrollIntoView: boolean): Promise<ScreenshotClip> {
     if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
-    const [x1, y1, x2, y2, x3, y3, x4, y4] = await settledContent(backendNodeId)
+    const [x1, y1, x2, y2, x3, y3, x4, y4] = await contentAtRest(backendNodeId)
     const xs = [x1, x2, x3, x4]
     const ys = [y1, y2, y3, y4]
     const minX = Math.min(...xs)

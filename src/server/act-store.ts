@@ -5,6 +5,7 @@ import type { ServerResponse } from '../types.js'
 import {
   USE_CASE_SUFFIX,
   findScript,
+  howNamed,
   isFixturePath,
   isScriptName,
   isSection,
@@ -70,16 +71,15 @@ export async function listSaved(args: Record<string, unknown>): Promise<ServerRe
   return { ok: true, data: `${join(store, section)} · replay: agent-view act replay <name>\n${parts.join('\n\n')}` }
 }
 
-/** `act delete <name>`: refused while a use case lists it as a step or a step names it as `after`. */
 export async function deleteScript(args: Record<string, unknown>): Promise<ServerResponse> {
-  const name = str(args, 'name')
+  const name = str(args, 'name') ?? ''
   const store = await scriptStore(cwdOf(args))
-  const entries = await listScripts(store)
-  const target = entries.find(e => e.name === name)
-  if (!target) return { ok: false, error: `act delete ${name ?? '<name>'} — no such script in ${store}` }
-  const users = entries.flatMap(({ name: user, script }) => {
-    if (isUseCase(script)) return script.use.some(e => e.step === name) ? [`${user} (a step)`] : []
-    return script.after === name ? [`${user} (after)`] : []
+  // A file, not a parsed script: one whose JSON broke is deleted too.
+  const target = (await scriptFiles(store)).find(e => e.name === name)
+  if (!target) return { ok: false, error: `act delete ${name} — no such script in ${store}` }
+  const users = (await listScripts(store)).flatMap(e => {
+    const how = howNamed(e.script, name)
+    return how ? [`${e.name} (${how})`] : []
   })
   if (users.length) return { ok: false, error: `act delete ${name} — still named by ${users.join(', ')}: delete or re-save them first` }
   await removeScript(store, target.path)

@@ -91,9 +91,10 @@ Increase `--steps` for handlers using `globalpointermove` so intermediate frames
 With `--modifiers` the output ends in `holding ctrl+shift` (`Clicked ref 3 holding ctrl`); an unknown
 key exits 1 with `--modifiers x — comma-separated alt|ctrl|meta|shift`.
 
-A click or drag on an element (not `--pos`) aims where its box comes to rest: it waits until two reads
-50 ms apart agree, so a toast sliding in is hit, not missed on its first frame. An element still
-moving after 1 s (a looping animation) is hit where it is then. `act` steps and `act replay` click the same way.
+Every read of an element's box (a click or drag on an element, not `--pos`; a `screenshot` crop; the
+`act` cover check) waits until two reads two animation frames apart agree, so a toast sliding in is
+hit where it comes to rest, not missed on its first frame. An element still moving after 1 s (a looping
+animation) is taken where it is then. A static element costs two frames. `act` steps and `act replay` click the same way.
 
 `--testid` / `--selector` act on the **first visible** match; hidden copies (`v-show`, a closed
 popover) are skipped. When several match, the output says so — `Clicked testid "row" (first visible
@@ -233,7 +234,7 @@ AGENT_VIEW_SECRET=… agent-view act replay auth-login   # re-run it with no mod
 ROW=library/Насосы/Пожарный agent-view act replay tree-row-select   # ${ROW} filled from $ROW, in the after chain too
 agent-view act list                     # sections of the store; needs no running app
 agent-view act list libraries           # the steps and use cases of one section (and of the sections below it)
-agent-view act delete tree-row-old      # removes the script and regenerates the indexes; refused while a use case or an after names it (all listed); needs no running app
+agent-view act delete tree-row-old      # removes the script and regenerates the indexes; needs no running app
 agent-view act save-use-case pump-open-use-case --in libraries --until-testid pump-card \
   auth-login 'project-open PROJECT=${PROJECT}' "tree-row-select ROW=library/Насосы/Насос timeout=30" --note "opens the pump card; the card is shown"
 ```
@@ -249,7 +250,11 @@ name that lies in another section is refused. A script in the store root (saved 
 replays and is listed as "In no section yet"; a name missing from the store is read from the old
 `~/.agent-view/scratch/<name>.json` (read-only).
 
-Each save rewrites `index.md` in every section and in the store root. `act list` prints the root one,
+`act delete <name>` prints `Deleted <path>`; it refuses a script a use case or an `after` still names,
+listing every one (`act delete scene-open — still named by pick-use-case (a step), tree-row-select
+(after): delete or re-save them first`), and a name not in the store (`— no such script in <store>`).
+
+Each save and delete rewrites `index.md` in every section and in the store root. `act list` prints the root one,
 `act list <section>` one section — read the section before recording, a step you need may be there:
 
 ```
