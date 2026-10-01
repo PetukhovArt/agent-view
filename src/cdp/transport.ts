@@ -1026,6 +1026,10 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
   }
 }
 
+/** Longer than a frame at 30 fps, so two box reads this far apart straddle a repaint. */
+const BOX_FRAME_MS = 50
+const BOX_SETTLE_MS = 1000
+
 /** CDP `Input.dispatchMouseEvent` `modifiers` bits. */
 const MODIFIER_BITS: Record<Modifier, number> = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 const DRAG_INTERCEPT_TIMEOUT_MS = 1000
@@ -1181,10 +1185,25 @@ export async function connectToPage(
     })
   }
 
+  /**
+   * The content quad once two reads a frame apart agree, so an element sliding in (a toast) is
+   * clicked where it comes to rest, not on its first frame. Still moving after BOX_SETTLE_MS (a
+   * looping animation): the last read.
+   */
+  async function settledContent(backendNodeId: number): Promise<number[]> {
+    const read = async () => (await DOM.getBoxModel({ backendNodeId })).model.content
+    const end = Date.now() + BOX_SETTLE_MS
+    for (let last = await read(); ;) {
+      await sleep(BOX_FRAME_MS)
+      const next = await read()
+      if (next.every((v, i) => v === last[i]) || Date.now() >= end) return next
+      last = next
+    }
+  }
+
   async function resolveBoxCenter(backendNodeId: number, scrollIntoView: boolean): Promise<Point> {
     if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
-    const { model } = await DOM.getBoxModel({ backendNodeId })
-    const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
+    const [x1, y1, x2, y2, x3, y3, x4, y4] = await settledContent(backendNodeId)
     return { x: (x1 + x2 + x3 + x4) / 4, y: (y1 + y2 + y3 + y4) / 4 }
   }
 
@@ -1213,8 +1232,7 @@ export async function connectToPage(
 
   async function resolveBoxRect(backendNodeId: number, scrollIntoView: boolean): Promise<ScreenshotClip> {
     if (scrollIntoView) await scrollNodeIntoView(backendNodeId)
-    const { model } = await DOM.getBoxModel({ backendNodeId })
-    const [x1, y1, x2, y2, x3, y3, x4, y4] = model.content
+    const [x1, y1, x2, y2, x3, y3, x4, y4] = await settledContent(backendNodeId)
     const xs = [x1, x2, x3, x4]
     const ys = [y1, y2, y3, y4]
     const minX = Math.min(...xs)

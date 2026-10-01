@@ -250,6 +250,20 @@ describe('clickByNodeId', () => {
     expect(pressCall?.[0].y).toBe(30)
   })
 
+  it('clicks a sliding element where it comes to rest, not where its first frame was', async () => {
+    const quad = (dy: number) => ({ model: { content: [10, 20 + dy, 30, 20 + dy, 30, 40 + dy, 10, 40 + dy] } })
+    mockDomBoxModel
+      .mockResolvedValueOnce(quad(0))
+      .mockResolvedValueOnce(quad(30))
+      .mockResolvedValueOnce(quad(47))
+      .mockResolvedValueOnce(quad(47))
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.clickByNodeId(42)
+
+    const pressCall = mockDispatchMouse.mock.calls.find((c) => c[0].type === 'mousePressed')
+    expect(pressCall?.[0].y).toBe(77)
+  })
+
   it('passes backendNodeId to both resolveNode and getBoxModel', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(99)
