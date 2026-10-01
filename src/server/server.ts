@@ -43,7 +43,7 @@ import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
 import { runAct, type ActSession } from './act-session.js'
-import { listSaved, modifiersOf, saveUseCase } from './act-store.js'
+import { deleteScript, listSaved, modifiersOf, saveUseCase } from './act-store.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -777,6 +777,7 @@ export class AgentViewServer {
   private async handleAct(req: ServerRequest): Promise<ServerResponse> {
     if (argStr(req.args, 'op') === 'list') return listSaved(req.args)
     if (argStr(req.args, 'op') === 'save-use-case') return saveUseCase(req.args)
+    if (argStr(req.args, 'op') === 'delete') return deleteScript(req.args)
     const { targetId } = await this.resolveWindow(req)
     const cacheKey = `${req.port}:${targetId}`
     return runAct(this.stateFor(req.port), req.args, {

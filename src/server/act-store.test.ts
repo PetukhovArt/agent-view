@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { scriptStore, writeScript } from './act-script.js'
-import { saveUseCase } from './act-store.js'
+import { deleteScript, saveUseCase } from './act-store.js'
 
 const UUID = '7a1e0b52-1111-4c2a-9a01-000000000001'
 
@@ -61,5 +61,34 @@ describe('saveUseCase', () => {
     const saved = await save({ paramNotes: ['ROW=tree id'] })
 
     expect(saved).toEqual({ ok: false, error: '--param-note ROW: the script takes no such parameter — it takes LABEL' })
+  })
+})
+
+describe('deleteScript', () => {
+  let cwd: string
+  let store: string
+
+  beforeEach(async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'av-store-'))
+    store = await scriptStore(cwd)
+    const step = { until: { testid: 'done' }, steps: [] }
+    await writeScript({ store, name: 'scene-open', section: 'scenes' }, step)
+    await writeScript({ store, name: 'tree-row-select', section: 'tree' }, { ...step, after: 'scene-open' })
+    await saveUseCase({ cwd, name: 'pick-use-case', in: 'tree', untilTestid: 'done', steps: ['scene-open', 'tree-row-select'] })
+  })
+
+  it('deletes a script nothing names and drops it from the index', async () => {
+    const deleted = await deleteScript({ cwd, name: 'pick-use-case' })
+
+    expect(deleted).toMatchObject({ ok: true })
+    expect(existsSync(join(store, 'tree', 'pick-use-case.json'))).toBe(false)
+    expect(readFileSync(join(store, 'tree', 'index.md'), 'utf8')).not.toContain('pick-use-case')
+  })
+
+  it('refuses a script a use case or an after still names, listing every one', async () => {
+    const deleted = await deleteScript({ cwd, name: 'scene-open' })
+
+    expect(deleted).toEqual({ ok: false, error: 'act delete scene-open — still named by pick-use-case (a step), tree-row-select (after): delete or re-save them first' })
+    expect(existsSync(join(store, 'scenes', 'scene-open.json'))).toBe(true)
   })
 })

@@ -519,6 +519,9 @@ act.command('save-use-case <name> <steps...>').description('Save a use case: sav
     await runAct(requireConfig(), { op: 'save-use-case', name, steps, in: options.in, untilTestid: options.untilTestid, untilSelector: options.untilSelector, note: options.note, paramNotes: options.paramNote, requires: options.requires })
   })
 
+act.command('delete <name>').description('Delete a saved script and regenerate the indexes; refused while a use case or an after names it; needs no running app')
+  .action(async (name: string) => { await runAct(requireConfig(), { op: 'delete', name }) })
+
 act.command('list [section]').description('Sections of the script store, or the steps and use cases of one; needs no running app')
   .action(async (section: string | undefined) => { await runAct(requireConfig(), { op: 'list', section }) })
 

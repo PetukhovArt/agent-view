@@ -14,6 +14,7 @@ import {
   paramsOf,
   parseParamNotes,
   refuseScript,
+  removeScript,
   renderSection,
   renderStore,
   scriptFiles,
@@ -67,6 +68,22 @@ export async function listSaved(args: Record<string, unknown>): Promise<ServerRe
     return sections.length > 1 ? `${s}/\n${body}` : body
   })
   return { ok: true, data: `${join(store, section)} · replay: agent-view act replay <name>\n${parts.join('\n\n')}` }
+}
+
+/** `act delete <name>`: refused while a use case lists it as a step or a step names it as `after`. */
+export async function deleteScript(args: Record<string, unknown>): Promise<ServerResponse> {
+  const name = str(args, 'name')
+  const store = await scriptStore(cwdOf(args))
+  const entries = await listScripts(store)
+  const target = entries.find(e => e.name === name)
+  if (!target) return { ok: false, error: `act delete ${name ?? '<name>'} — no such script in ${store}` }
+  const users = entries.flatMap(({ name: user, script }) => {
+    if (isUseCase(script)) return script.use.some(e => e.step === name) ? [`${user} (a step)`] : []
+    return script.after === name ? [`${user} (after)`] : []
+  })
+  if (users.length) return { ok: false, error: `act delete ${name} — still named by ${users.join(', ')}: delete or re-save them first` }
+  await removeScript(store, target.path)
+  return { ok: true, data: `Deleted ${target.path}` }
 }
 
 /** Names are store-wide: one saved into a second section would make two scripts answer to it. */
