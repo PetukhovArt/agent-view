@@ -658,7 +658,7 @@ These commands read the scene graph from canvas-based rendering engines. Skip th
 
 ```bash
 agent-view scene                        # Scene graph from configured engine
-agent-view scene --filter "player"      # Filter by object name/type
+agent-view scene --filter "player"      # Filter by object name/type/id
 agent-view scene --verbose              # Extended props (scale, alpha, rotation)
 agent-view scene --diff                 # Changes since last call
 agent-view scene --compact              # Merge single-child chains onto one line (reduces output)

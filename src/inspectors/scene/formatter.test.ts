@@ -108,6 +108,12 @@ describe('formatNode', () => {
     expect(lines).toHaveLength(1)
   })
 
+  it('filters by the id a node prints', () => {
+    const node = makeScene({ type: 'billboard', name: 'Tower 9', extras: { id: 'obj://00af12/2' } })
+    const lines = collect(node, { filter: '00AF12' })
+    expect(lines).toHaveLength(1)
+  })
+
   it('shows parent when child matches filter', () => {
     const child = makeScene({ name: 'hero', type: 'Sprite' })
     const parent = makeScene({ name: 'root', children: [child] })

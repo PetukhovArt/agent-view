@@ -89,7 +89,8 @@ function formatLine(node: SceneNode, depth: number, options: SceneOptions): stri
 function subtreeMatches(node: SceneNode, lowerFilter: string): boolean {
   if (
     node.name.toLowerCase().includes(lowerFilter) ||
-    node.type.toLowerCase().includes(lowerFilter)
+    node.type.toLowerCase().includes(lowerFilter) ||
+    node.extras?.id?.toLowerCase().includes(lowerFilter)
   ) {
     return true
   }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.26.1] - 2026-10-06
+
+### Fixed
+- `scene --filter <text>` also matches the id a scene object prints (`id=…` on a CesiumJS entity), not only its name and type.
+
 ## [0.26.0] - 2026-10-06
 
 ### Added
