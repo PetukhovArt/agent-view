@@ -229,7 +229,7 @@ agent-view act rightclick 3             # right-click (fires contextmenu); then 
 agent-view act click "css=#content-area canvas@120,80"   # what is no row: testid=<id> | css=<selector>; @x,y = px from its top-left
 agent-view act rightclick 3@10,5        # a row, at a point of it; without @ — its centre
 agent-view act click "scene=Tower 3"    # cesiumjs: a scene object by id, name or label, as click --scene; the step and replay wait for it up to 10 s (a camera still flying)
-agent-view act goto "Tower 3" --height 2000   # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25)
+agent-view act goto "Tower 3" --height 2000   # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25); --param HEIGHT=2000 saves the height as ${HEIGHT}
 agent-view act click 4 --modifiers ctrl # keys held: alt|ctrl|meta|shift, comma-separated; recorded and replayed (ctrl = add to a selection)
 agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
@@ -319,7 +319,7 @@ already holds (project open, scene open); from the first one not reached, every 
 whose until holds from the start (a dialog closed, a tab active) is not a reason to skip the ones before it.
 
 Parameters: `--param NAME=value` (NAME of `A-Z 0-9 _`) replaces every occurrence of the value in the
-steps' test ids, names and typed text and in the until with `${NAME}`, longest value first; a value
+steps' test ids, names and typed text, a goto's `--height` and in the until with `${NAME}`, longest value first; a value
 found nowhere refuses the save (`--param ROW: "…" is in no step and not in the until`). Replay takes
 each `${NAME}` from the env var `NAME`, for every script of the `after` chain; scripts without
 placeholders replay as before.
@@ -366,6 +366,10 @@ First line of an op's output:
 
 - `` run `agent-view act start` first ``, `act start --until-testid <id> | --until-selector <css> | --until-expr <js> — exactly one`
 - `wait expression "…" not true after 10s — not recorded` (`act wait --expr`; also `still pending`, `threw <error>`)
+- `click scene=Tower 3 — Scene object "Tower 3" is covered or off screen after 10s — not recorded` (a scene
+  object missing or covered for 10 s; also `goto Tower 3 --height 2000 — …`); with no engine or an adapter that
+  cannot locate, the error alone, at once
+- `--height <metres>: "x" is not a number`, `height given twice: in 10.5,45.25,5000 and as --height 2000` (`act goto`)
 - `` this act run is DONE — `agent-view act start` for a new one `` (any step after DONE; `table` / `wait` still work)
 - `No row [n] in the last table (1-N)`
 - `[n] is a <role>, not a text field — pick a textbox/combobox row` (`type` on a non-text row);
@@ -409,12 +413,15 @@ same way, labelled `step` instead of `prerequisite`. Its one line, ending in the
 | `FAIL: step 2/3 wait expression "window.app.loaded" not true after 10s · 10.2s` | 1 | a `wait --expr` step never held |
 | `STALE: step 2/3 click treeitem "Насос" — Could not compute box model. · 10.4s` | 3 | the control was found but never drawn, or kept being re-rendered, for 10 s |
 | `STALE: step 2/3 click button "Закрыть" — <CDP error> · 0.4s` | 3 | acting failed otherwise (a panel that toggled shut); input already sent is never repeated |
+| `` STALE: step 1/2 goto Tower 3 --height 2000 — No scene object "Tower 3". Run `agent-view scene` after 10s · 10.2s `` | 3 | a scene step's object stayed missing; `FAIL` (1) when it stayed covered |
 
 Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
 prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,
 `"x" after-chain loops: x → login → x`, `"x" evaluates JS in the page … allowEval …` (an expression
 anywhere in the chain, without `allowEval`), `"x" needs ROW, SCENE — set as env vars` (checked for the whole
-chain before any step), `"x-use-case": step "y" needs ROW — bind it in the use case`. A use case with
+chain before any step), `"x-use-case": step "y" needs ROW — bind it in the use case`,
+`"x": goto Tower 3 — --height <metres>: "abc" is not a number` (a `${HEIGHT}` filled with no number, checked
+the same way), and for a scene step with no engine or an adapter that cannot locate, `step 1/2 goto Tower 3 — <error>`. A use case with
 `requires` adds a second line under its verdict: `requires (not run by replay): tree/fixtures/stub.sh`.
 
 ### Screenshots
@@ -683,7 +690,8 @@ Viewer "cesiumContainer" via=vue-cesium
 `(x,y)` is the page point a click lands on; none means no position, off the canvas or behind the
 globe. `--verbose` adds `lonlat=lon,lat,height`. `--goto` prints `Camera over (10.5000, 45.2500) at
 5000 m`, or `Camera over "Tower 3" (…) at … m` for an object. A height both in the coordinates and as
-`--height` exits 1 with `height given twice: in 10.5,45.25,5000 and as --height 2000`. A `scene`, `click --scene` or `--goto`
+`--height` exits 1 with `height given twice: in 10.5,45.25,5000 and as --height 2000`; a height that is no
+number with `--height <metres>: "x" is not a number`, and `--height` without `--goto` with `--height goes with --goto`. A `scene`, `click --scene` or `--goto`
 call also keeps every viewer it found in `window.__agentView.cesium` (`[{ key, via, viewer, scene,
 Cesium }]`), so a later `eval` reaches the Cesium API without hunting for it; before the first such
 call it is unset, and plain CesiumJS found by its frames has no `viewer` there, only `scene` and `Cesium`.
