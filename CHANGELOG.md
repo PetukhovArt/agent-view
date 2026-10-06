@@ -7,6 +7,7 @@
 - The CLI no longer runs its commands on a leftover server of another agent-view version, which served them with its own code (an older one dropped `--until-expr` and failed every check). The server refuses a request from another version; the CLI stops it, starts its own and resends, printing `agent-view: server <old> replaced by <new>`. A server from 0.26 or older does not check: run `agent-view stop` once after upgrading.
 - On a minimised or covered window or a background tab, `click`/`wait`/`fill --filter` no longer hang until the 45 s deadline: they search the full accessibility tree, which needs no frame. `screenshot` fails at once with `Window is hidden …` and the launch flags that keep the window drawn (README, "Commands"); agent-view never brings the window to the front.
 - A command without `-w` stays in the window the previous command on that CDP port used, while it is open. A popup the app opened used to take every later command.
+- `eval` of an expression that returns a Promise, without `--await`, exits 1 with `The result is a Promise, still running in the page. Add --await to get its value.` It used to print `{}`, as if the call had done nothing.
 
 ## [0.26.0] - 2026-10-06
 

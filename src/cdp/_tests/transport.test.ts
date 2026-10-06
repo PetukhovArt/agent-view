@@ -131,7 +131,7 @@ vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
 
 import { connectToPage, connectToRuntime, listTargets } from '../transport.js'
 import { AxTreeCache } from '../ax-cache.js'
-import { ConsoleLevel, JsDialogType, TargetType, type ConsoleMessage, type TargetInfo } from '../types.js'
+import { ConsoleLevel, JsDialogType, TargetType, UnawaitedPromiseError, type ConsoleMessage, type TargetInfo } from '../types.js'
 
 const pageTarget: TargetInfo = { id: 'target-1', type: TargetType.Page, title: 'Test', url: 'http://x' }
 const workerTarget: TargetInfo = { id: 'worker-1', type: TargetType.SharedWorker, title: 'sw.js', url: 'http://x/sw' }
@@ -583,6 +583,14 @@ describe('evaluate', () => {
       exceptionDetails: { exception: { description: 'ReferenceError: x is not defined' } },
     })
     await expect(session.evaluate('x')).rejects.toThrow(/ReferenceError/)
+  })
+
+  // Regression: an unawaited Promise came back as `{}`, and the agent took the call for a no-op.
+  it('refuses a Promise result the caller did not await', async () => {
+    const session = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const evalMock = await getEvalMock()
+    evalMock.mockResolvedValueOnce({ result: { type: 'object', subtype: 'promise', value: {} } })
+    await expect(session.evaluate('invoke("size")')).rejects.toBeInstanceOf(UnawaitedPromiseError)
   })
 })
 

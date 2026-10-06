@@ -187,6 +187,9 @@ export class EvaluationError extends Error {
   }
 }
 
+/** The expression returned a Promise the caller did not await: by value it reads as `{}`, as if the call did nothing. */
+export class UnawaitedPromiseError extends EvaluationError {}
+
 export type RuntimeSession = {
   readonly target: TargetInfo
   /**

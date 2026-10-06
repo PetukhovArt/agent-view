@@ -467,6 +467,9 @@ agent-view eval --json "({ buttons: document.querySelectorAll('button').length }
 agent-view eval --file probe.js                               # multi-line code: read from a file
 ```
 
+A result that is a Promise needs `--await`: without it `eval` exits 1 with `The result is a Promise,
+still running in the page. Add --await to get its value.` (the call itself did run).
+
 Multi-line code goes through `--file`: on Windows the npm `.cmd` shim (PowerShell, cmd, `npx`) cuts an
 argument at its first newline, and the rest arrives as `SyntaxError: Unexpected end of input`.
 

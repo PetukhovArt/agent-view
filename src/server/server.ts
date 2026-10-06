@@ -16,6 +16,7 @@ import {
   TargetType,
   ConsoleLevel,
   EvaluationError,
+  UnawaitedPromiseError,
   MouseButton,
   type PageSession,
   type RuntimeSession,
@@ -1487,6 +1488,9 @@ export class AgentViewServer {
         : formatted
       return { ok: true, data: { target: { id: target.id, type: target.type }, result: capped } }
     } catch (err) {
+      if (err instanceof UnawaitedPromiseError) {
+        return { ok: false, error: 'The result is a Promise, still running in the page. Add --await to get its value.' }
+      }
       if (err instanceof EvaluationError) {
         return { ok: false, error: err.message + (err.stack ? `\n${err.stack}` : '') }
       }

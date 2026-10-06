@@ -5,6 +5,7 @@ import {
   ConsoleLevel,
   ConsoleSource,
   EvaluationError,
+  UnawaitedPromiseError,
   MouseButton,
   NetworkEventKind,
   NetworkResourceType,
@@ -191,13 +192,15 @@ type InputDomain = {
   dragIntercepted: (cb: (p: { data: DragData }) => void) => () => void
 }
 
+type EvaluateResponse = {
+  result: { value?: unknown; type?: string; description?: string; subtype?: string; objectId?: string }
+  exceptionDetails?: { text?: string; exception?: { description?: string }; stackTrace?: { description?: string } }
+}
+
 type RawCDPClient = {
   Runtime: {
     enable: () => Promise<unknown>
-    evaluate: (params: Record<string, unknown>) => Promise<{
-      result: { value?: unknown; type?: string; description?: string; subtype?: string; objectId?: string }
-      exceptionDetails?: { text?: string; exception?: { description?: string }; stackTrace?: { description?: string } }
-    }>
+    evaluate: (params: Record<string, unknown>) => Promise<EvaluateResponse>
     callFunctionOn: (params: Record<string, unknown>) => Promise<unknown>
     releaseObjectGroup: (params: { objectGroup: string }) => Promise<unknown>
     runIfWaitingForDebugger: () => Promise<unknown>
@@ -778,19 +781,49 @@ async function evaluateImpl(
 ): Promise<unknown> {
   const returnByValue = opts?.returnByValue ?? true
   const awaitPromise = opts?.awaitPromise ?? false
-  const { result, exceptionDetails } = await client.Runtime.evaluate({
-    expression,
-    returnByValue,
-    awaitPromise,
-  })
-  if (exceptionDetails) {
-    const text = exceptionDetails.exception?.description
-      ?? exceptionDetails.text
-      ?? 'Evaluation failed'
-    throw new EvaluationError(text, exceptionDetails.stackTrace?.description)
+  if (awaitPromise || !returnByValue) {
+    const { result, exceptionDetails } = await client.Runtime.evaluate({ expression, returnByValue, awaitPromise })
+    throwIfThrown(exceptionDetails)
+    return returnByValue ? result.value : result
   }
-  if (returnByValue) return result.value
-  return result
+
+  // By value a Promise reads as `{}` and carries no subtype, so the result comes back as a handle
+  // first, which names it, and is read by value from there.
+  return withHandles(client, async (objectGroup) => {
+    const { result, exceptionDetails } = await client.Runtime.evaluate({ expression, objectGroup })
+    throwIfThrown(exceptionDetails)
+    if (result.subtype === 'promise') throw new UnawaitedPromiseError('The result is an unawaited Promise')
+    if (!result.objectId) return result.value
+    const read = await client.Runtime.callFunctionOn({
+      objectId: result.objectId,
+      functionDeclaration: 'function() { return this }',
+      returnByValue: true,
+    }) as { result: { value?: unknown } }
+    return read.result.value
+  })
+}
+
+function throwIfThrown(exceptionDetails: EvaluateResponse['exceptionDetails']): void {
+  if (!exceptionDetails) return
+  const text = exceptionDetails.exception?.description
+    ?? exceptionDetails.text
+    ?? 'Evaluation failed'
+  throw new EvaluationError(text, exceptionDetails.stackTrace?.description)
+}
+
+let handleGroupSeq = 0
+
+/**
+ * A RemoteObject outside a group lives until the page navigates: a lookup that left one on an
+ * element kept it, and everything it holds, out of GC, a false leak in a heap diff.
+ */
+async function withHandles<T>(client: RawCDPClient, fn: (objectGroup: string) => Promise<T>): Promise<T> {
+  const objectGroup = `agent-view-${++handleGroupSeq}`
+  try {
+    return await fn(objectGroup)
+  } finally {
+    await client.Runtime.releaseObjectGroup({ objectGroup }).catch(() => { /* socket gone */ })
+  }
 }
 
 async function openClient(port: number, target: TargetInfo): Promise<RawCDPClient> {
@@ -1080,7 +1113,7 @@ export async function connectToPage(
   const fileChooserSub = attachFileChooserSubscription(
     Page,
     (backendNodeId, files) => DOM.setFileInputFiles({ backendNodeId, files }).then(() => undefined),
-    (backendNodeId) => withHandles(async (objectGroup) => {
+    (backendNodeId) => withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       await Runtime.callFunctionOn({
         objectId: object.objectId,
@@ -1140,20 +1173,6 @@ export async function connectToPage(
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-  /**
-   * A RemoteObject outside a group lives until the page navigates: a lookup that left one on an
-   * element kept it, and everything it holds, out of GC, a false leak in a heap diff.
-   */
-  let handleGroupSeq = 0
-  async function withHandles<T>(fn: (objectGroup: string) => Promise<T>): Promise<T> {
-    const objectGroup = `agent-view-${++handleGroupSeq}`
-    try {
-      return await fn(objectGroup)
-    } finally {
-      await Runtime.releaseObjectGroup({ objectGroup }).catch(() => { /* socket gone */ })
-    }
-  }
-
   async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<DragResult> {
     const steps = Math.max(0, opts?.steps ?? 10)
     const button = opts?.button ?? MouseButton.Left
@@ -1211,7 +1230,7 @@ export async function connectToPage(
   }
 
   function scrollNodeIntoView(backendNodeId: number): Promise<void> {
-    return withHandles(async (objectGroup) => {
+    return withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       await Runtime.callFunctionOn({
         objectId: object.objectId,
@@ -1249,7 +1268,7 @@ export async function connectToPage(
    * interesting rect is its container.
    */
   function resolveAncestor(backendNodeId: number, levels: number): Promise<number> {
-    return withHandles(async (objectGroup) => {
+    return withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       const climbed = await Runtime.callFunctionOn({
         objectId: object.objectId,
@@ -1307,12 +1326,12 @@ export async function connectToPage(
     takeCoverage: () => coverage.take(),
     takeHeapSnapshot: () => takeHeapSnapshotImpl(client),
 
-    getEventListeners: (backendDOMNodeId, depth = 0) => withHandles(async (objectGroup) => {
+    getEventListeners: (backendDOMNodeId, depth = 0) => withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId: backendDOMNodeId, objectGroup })
       return listenersOn(object.objectId, depth)
     }),
 
-    getEventListenersBySelector: (selector, depth = 0) => withHandles(async (objectGroup) => {
+    getEventListenersBySelector: (selector, depth = 0) => withHandles(client, async (objectGroup) => {
       // objectId, not nodeId: `DOM.querySelector` needs a document nodeId, which is
       // renumbered on every navigation. Same reasoning as `uploadBySelector`.
       const { result, exceptionDetails } = await Runtime.evaluate({
@@ -1335,7 +1354,7 @@ export async function connectToPage(
 
       // objectId, not nodeId — same reasoning as `uploadBySelector`. `checkVisibility` is
       // Chromium 105+; the fallback still rules out `display:none`.
-      return withHandles(async (objectGroup) => {
+      return withHandles(client, async (objectGroup) => {
         const { result } = await Runtime.evaluate({
           expression: `[...${all}].find(el => el.checkVisibility
             ? el.checkVisibility({ visibilityProperty: true })
@@ -1457,7 +1476,7 @@ export async function connectToPage(
       await DOM.setFileInputFiles({ backendNodeId, files })
     },
 
-    uploadBySelector: (selector: string, files: string[]): Promise<boolean> => withHandles(async (objectGroup) => {
+    uploadBySelector: (selector: string, files: string[]): Promise<boolean> => withHandles(client, async (objectGroup) => {
       // Addressed by objectId rather than nodeId: `DOM.querySelector` needs a
       // document nodeId, and the document node is re-numbered on every
       // navigation. A RemoteObject from the page skips that bookkeeping.
@@ -1477,7 +1496,7 @@ export async function connectToPage(
       return true
     }),
 
-    fillByNodeId: (backendNodeId: number, value: string): Promise<void> => withHandles(async (objectGroup) => {
+    fillByNodeId: (backendNodeId: number, value: string): Promise<void> => withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       // A test id usually sits on a component's wrapper, not on the field inside it.
       // tagName, not instanceof: a field in an iframe belongs to another realm. The
@@ -1541,7 +1560,7 @@ export async function connectToPage(
         return null
       })
       if (!hit || hit.backendNodeId === backendNodeId) return null
-      return withHandles(async (objectGroup) => {
+      return withHandles(client, async (objectGroup) => {
         const [target, other] = await Promise.all([
           DOM.resolveNode({ backendNodeId, objectGroup }),
           DOM.resolveNode({ backendNodeId: hit.backendNodeId, objectGroup }),
@@ -1563,7 +1582,7 @@ export async function connectToPage(
       })
     },
 
-    selectOption: (backendNodeId: number, optionText: string): Promise<'ok' | 'not-select' | 'no-option'> => withHandles(async (objectGroup) => {
+    selectOption: (backendNodeId: number, optionText: string): Promise<'ok' | 'not-select' | 'no-option'> => withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       const outcome = await Runtime.callFunctionOn({
         objectId: object.objectId,
