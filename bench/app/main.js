@@ -86,6 +86,10 @@ function createWindow() {
 }
 
 startNetServer()
+// A window behind other windows stops painting: Accessibility.queryAXTree waits for a frame and hangs.
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+
 app.whenReady().then(createWindow)
 
 app.on('window-all-closed', () => {
