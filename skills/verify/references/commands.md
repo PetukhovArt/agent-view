@@ -32,6 +32,8 @@ agent-view stop                        # Stop the lazy server
 
 **Port conflict**: if the configured port is held by a non-CDP process (e.g. a stray webpack-dev on the same port), `agent-view launch` exits non-zero with `code: PORT_CONFLICT` and reports the owning PID/process name.
 
+**Server of another version**: the first call that reaches a server started by another agent-view version replaces it and then runs, printing `agent-view: server <old> replaced by <new>` on stderr. A server older than 0.27 does not check: run `agent-view stop` once after upgrading from one.
+
 **Tauri**: launch works the same as Electron, but the wait timeout is 10 min (cargo builds are slow). A port conflict on the Tauri devUrl port is almost always a parallel browser-dev.
 
 ### DOM Inspection

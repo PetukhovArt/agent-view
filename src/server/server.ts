@@ -42,6 +42,7 @@ import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspector
 import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
+import { VERSION } from '../version.js'
 import { runAct, type ActSession } from './act-session.js'
 import { deleteScript, listSaved, modifiersOf, saveUseCase } from './act-store.js'
 import {
@@ -341,6 +342,12 @@ export class AgentViewServer {
       // longer matches a running server.
       if (request.command !== 'stop' && request.token !== this.token) {
         socket.end(JSON.stringify({ ok: false, error: 'Unauthorized' } satisfies ServerResponse) + DELIMITER)
+        return
+      }
+      // Refused before any handler, so the CLI can replace this server and resend. A CLI
+      // older than the field sends none and is served as before.
+      if (request.command !== 'stop' && request.version !== undefined && request.version !== VERSION) {
+        socket.end(JSON.stringify({ ok: false, error: 'VersionMismatch', data: VERSION } satisfies ServerResponse) + DELIMITER)
         return
       }
       if (

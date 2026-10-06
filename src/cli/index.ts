@@ -8,8 +8,7 @@ if (nodeMajor < 18) {
 
 import { Command, InvalidArgumentError } from 'commander'
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { VERSION } from '../version.js'
 import { findConfig } from '../config/manager.js'
 import { DEFAULT_UNTIL_TIMEOUT_S, NOTE_MAX } from '../server/act-script.js'
 import { runInit } from './commands/init.js'
@@ -38,20 +37,10 @@ import { runUpload } from './commands/upload.js'
 import { runAct } from './commands/act.js'
 import type { AgentViewConfig } from '../config/types.js'
 
-// Resolve version from package.json at runtime — same path in dev (src/cli) and build (dist/cli).
-function resolveVersion(): string {
-  try {
-    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '../../package.json')
-    return JSON.parse(readFileSync(pkgPath, 'utf8')).version as string
-  } catch {
-    return '0.0.0'
-  }
-}
-
 const program = new Command()
   .name('agent-view')
   .description('Visual verification CLI for desktop apps')
-  .version(resolveVersion())
+  .version(VERSION)
 
 program
   .command('init')

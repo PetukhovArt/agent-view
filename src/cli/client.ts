@@ -5,7 +5,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync } from 'node:fs'
 import { SERVER_PORT, TOKEN_PATH } from '../server/port.js'
-import type { ServerRequest, ServerResponse } from '../types.js'
+import { RuntimeType, type ServerRequest, type ServerResponse } from '../types.js'
+import { VERSION } from '../version.js'
 
 const DELIMITER = '\n'
 /** Backstop above the server-side deadline: the CLI must always exit, even against a wedged server. */
@@ -26,30 +27,42 @@ export function readToken(): string {
 
 export async function sendCommand(request: ServerRequest, options: SendOptions = {}): Promise<ServerResponse> {
   const timeoutMs = options.timeoutMs ?? CLIENT_DEADLINE_MS
+  // The token is read on each send: a server started in between writes a new one.
+  const send = () => tryConnect({ ...request, token: readToken(), version: VERSION }, timeoutMs)
   let response: ServerResponse
   try {
-    response = await tryConnect({ ...request, token: readToken() }, timeoutMs)
+    response = await send()
   } catch (err) {
     if (err instanceof ServerTimeoutError) throw err
     await startServer()
-    return tryConnect({ ...request, token: readToken() }, timeoutMs)
+    return send()
   }
 
-  if (isUnauthorized(response) && request.command !== 'stop') {
-    // The running server predates the current token file (crashed restart, cleared
-    // $HOME). Its token is unknowable, so replace it rather than fail every call.
-    await tryConnect({ command: 'stop', port: 0, runtime: request.runtime, args: {}, token: '' }, 5_000)
-      .catch(() => { /* best effort */ })
-    await waitForPortFree()
-    await startServer()
-    return tryConnect({ ...request, token: readToken() }, timeoutMs)
+  if (isStaleServer(response) && request.command !== 'stop') {
+    await replaceServer(response)
+    return send()
   }
 
   return response
 }
 
-function isUnauthorized(response: ServerResponse): boolean {
-  return !response.ok && response.error === 'Unauthorized'
+/**
+ * The server on the port is not this CLI's: it predates the current token file (crashed
+ * restart, cleared $HOME), or it runs another agent-view version.
+ */
+export function isStaleServer(response: ServerResponse): boolean {
+  return !response.ok && (response.error === 'Unauthorized' || response.error === 'VersionMismatch')
+}
+
+/** Its token is unknowable and its code is not ours, so replace it rather than fail every call. */
+export async function replaceServer(response: ServerResponse): Promise<void> {
+  if (response.error === 'VersionMismatch') {
+    process.stderr.write(`agent-view: server ${String(response.data)} replaced by ${VERSION}\n`)
+  }
+  await tryConnect({ command: 'stop', port: 0, runtime: RuntimeType.Electron, args: {}, token: '' }, 5_000)
+    .catch(() => { /* best effort */ })
+  await waitForPortFree()
+  await startServer()
 }
 
 async function waitForPortFree(): Promise<void> {

@@ -29,6 +29,8 @@ export type ServerRequest = {
   engine?: WebGLEngine
   args: Record<string, unknown>
   token?: string
+  /** The CLI's package version. Absent from a CLI older than 0.27. */
+  version?: string
 }
 
 export enum ServerErrorCode {

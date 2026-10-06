@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { AgentViewServer, parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs, resolveUploadPath } from './server.js'
 import { join } from 'node:path'
+import { VERSION } from '../version.js'
 import type { PageSession, AXNode, TargetInfo } from '../cdp/types.js'
 import { TargetType } from '../cdp/types.js'
 
@@ -325,5 +326,27 @@ describe('per-port state', () => {
     slot3.logRecorder = { file: 'slot3/.agent-view/console.log' }
     expect(slot9.logRecorder).toBeNull()
     expect(server.isAnyRecording()).toBe(true)
+  })
+})
+
+// ── version handshake ─────────────────────────────────────────────────────────
+
+describe('a request from another CLI version', () => {
+  // Regression: a 0.24 CLI ran its act scripts on a leftover 0.23 server, which dropped
+  // the until-expr it did not know and reported every check as failed.
+  it('is refused with the server version before any handler runs', async () => {
+    const server = new AgentViewServer() as unknown as {
+      token: string
+      runWithDeadline: (req: unknown) => Promise<unknown>
+      processRequest: (data: string, socket: { end: (s: string) => void }) => Promise<void>
+    }
+    server.token = 't'
+    server.runWithDeadline = vi.fn()
+    let sent = ''
+    const request = { command: 'eval', port: 9222, runtime: 'electron', args: {}, token: 't', version: '0.0.1' }
+    await server.processRequest(JSON.stringify(request), { end: (s) => { sent = s } })
+
+    expect(JSON.parse(sent)).toEqual({ ok: false, error: 'VersionMismatch', data: VERSION })
+    expect(server.runWithDeadline).not.toHaveBeenCalled()
   })
 })

@@ -1,6 +1,8 @@
 import { connect, type Socket } from 'node:net'
 import type { AgentViewConfig } from '../../config/types.js'
-import { readToken, startServer } from '../client.js'
+import { isStaleServer, readToken, replaceServer, startServer } from '../client.js'
+import { VERSION } from '../../version.js'
+import type { ServerResponse } from '../../types.js'
 import { WATCH_MIN_INTERVAL_MS, type WatchFrame, type JsonPatchOp } from '../../inspectors/watch/types.js'
 
 import { SERVER_PORT } from '../../server/port.js'
@@ -58,6 +60,7 @@ export async function runWatch(
     runtime: config.runtime,
     args,
     token: readToken(),
+    version: VERSION,
   }
 
   await runStream(request, options)
@@ -67,17 +70,20 @@ async function runStream(request: object, options: WatchOptions): Promise<void> 
   try {
     await openAndStream(request, options)
   } catch (err) {
-    if (err instanceof ConnRefused) {
-      await startServer()
-      const newRequest = { ...(request as Record<string, unknown>), token: readToken() }
-      await openAndStream(newRequest, options)
-      return
-    }
-    throw err
+    if (err instanceof ConnRefused) await startServer()
+    else if (err instanceof StaleServer) await replaceServer(err.response)
+    else throw err
+    await openAndStream({ ...(request as Record<string, unknown>), token: readToken() }, options)
   }
 }
 
 class ConnRefused extends Error {}
+
+class StaleServer extends Error {
+  constructor(readonly response: ServerResponse) {
+    super(response.error)
+  }
+}
 
 function openAndStream(request: object, options: WatchOptions): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -85,6 +91,7 @@ function openAndStream(request: object, options: WatchOptions): Promise<void> {
     let buffer = ''
     let exitCode = 0
     let stopReceived = false
+    let stale = false
     let sigintReceived = false
 
     const onSigint = (): void => {
@@ -117,7 +124,13 @@ function openAndStream(request: object, options: WatchOptions): Promise<void> {
         }
         // Server-side validation error comes as ServerResponse with `ok` field.
         if (parsed && typeof parsed === 'object' && 'ok' in parsed) {
-          const r = parsed as { ok?: boolean; error?: string }
+          const r = parsed as ServerResponse
+          if (isStaleServer(r)) {
+            stale = true
+            socket.destroy()
+            reject(new StaleServer(r))
+            return
+          }
           if (r.ok === false) {
             process.stderr.write(`Error: ${r.error ?? 'unknown'}\n`)
             exitCode = 1
@@ -136,6 +149,7 @@ function openAndStream(request: object, options: WatchOptions): Promise<void> {
 
     socket.on('close', () => {
       process.off('SIGINT', onSigint)
+      if (stale) return
       if (!stopReceived && exitCode === 0) {
         // Server closed without a stop frame → unusual
         process.stderr.write('warning: server closed connection without stop frame\n')
