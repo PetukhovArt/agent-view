@@ -468,7 +468,9 @@ agent-view eval --file probe.js                               # multi-line code:
 ```
 
 A result that is a Promise needs `--await`: without it `eval` exits 1 with `The result is a Promise,
-still running in the page. Add --await to get its value.` (the call itself did run).
+still running in the page. Add --await to get its value.` (the call itself did run). An `--await`
+that outlives the 45 s deadline does not stop the Promise: the timeout says so, and whatever a probe
+patched stays patched until it settles, so check its restore before running it again.
 
 Multi-line code goes through `--file`: on Windows the npm `.cmd` shim (PowerShell, cmd, `npx`) cuts an
 argument at its first newline, and the rest arrives as `SyntaxError: Unexpected end of input`.

@@ -420,11 +420,15 @@ export class AgentViewServer {
     // The abandoned handler may still reject later — never let it reach the process guard.
     pending.catch(() => { /* orphaned after deadline */ })
     this.dropSessionsForPort(req.port)
+    const stillRunning = req.command === 'eval' && req.args['await'] === true
+      ? ' The awaited Promise still runs in the page and nothing cancels it: what it patched stays patched until it settles, so check that before running it again.'
+      : ''
     return {
       ok: false,
       error: `Timed out after ${Math.round(budget / 1000)}s waiting for CDP (command: ${req.command}, port: ${req.port}). `
         + `Dropped cached CDP sessions for that port — retry the command. `
-        + `If it keeps timing out, the app's DevTools endpoint is wedged: restart the app, or run \`agent-view stop\`.`,
+        + `If it keeps timing out, the app's DevTools endpoint is wedged: restart the app, or run \`agent-view stop\`.`
+        + stillRunning,
       code: ServerErrorCode.CDPTimeout,
     }
   }

@@ -8,6 +8,7 @@
 - On a minimised or covered window or a background tab, `click`/`wait`/`fill --filter` no longer hang until the 45 s deadline: they search the full accessibility tree, which needs no frame. `screenshot` fails at once with `Window is hidden …` and the launch flags that keep the window drawn (README, "Commands"); agent-view never brings the window to the front.
 - A command without `-w` stays in the window the previous command on that CDP port used, while it is open. A popup the app opened used to take every later command.
 - `eval` of an expression that returns a Promise, without `--await`, exits 1 with `The result is a Promise, still running in the page. Add --await to get its value.` It used to print `{}`, as if the call had done nothing.
+- An `eval --await` that hits the 45 s deadline says the Promise still runs in the page and that what it patched stays patched until it settles. A probe re-run after the timeout used to wrap its own still-installed patch.
 
 ## [0.26.0] - 2026-10-06
 
