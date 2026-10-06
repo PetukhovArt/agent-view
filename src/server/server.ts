@@ -26,7 +26,7 @@ import {
   type ClickOpts,
   type FileChooserArm,
 } from '../cdp/types.js'
-import { listSupportedTargets, connectToRuntime } from '../cdp/transport.js'
+import { listSupportedTargets, listDedicatedWorkers, connectToRuntime, connectToWorker } from '../cdp/transport.js'
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
 import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
@@ -507,7 +507,9 @@ export class AgentViewServer {
     if (!RUNTIME_ONLY_TARGETS.has(target.type)) {
       throw new Error(`Target type "${target.type}" does not support eval/console.`)
     }
-    const session = await connectToRuntime(req.port, target)
+    const session = target.type === TargetType.Worker
+      ? await connectToWorker(req.port, target.id)
+      : await connectToRuntime(req.port, target)
     this.connections.set(connKey, { kind: 'runtime', session })
     session.onDisconnect(() => this.evictSession(connKey))
     return session
@@ -1421,7 +1423,7 @@ export class AgentViewServer {
   // ── New v0.3.0 commands ────────────────────────────────────────────────────
 
   private async handleTargets(req: ServerRequest): Promise<ServerResponse> {
-    const targets = await listSupportedTargets(req.port)
+    const targets = withDedicatedWorkers(await listSupportedTargets(req.port), await listDedicatedWorkers(req.port))
     const typeFilter = argStrArray(req.args, 'types')
     const filtered = typeFilter && typeFilter.length > 0
       ? targets.filter(t => typeFilter.includes(t.type))
@@ -1435,7 +1437,8 @@ export class AgentViewServer {
     const allTargets = await listSupportedTargets(req.port)
 
     if (explicitId) {
-      const match = matchTarget(allTargets, explicitId)
+      let match = matchTarget(allTargets, explicitId)
+      if (match.kind === 'none') match = matchTarget(withDedicatedWorkers(allTargets, await listDedicatedWorkers(req.port)), explicitId)
       if (match.kind === 'found') return match.target
       throw new Error(describeTargetMatchFailure(explicitId, match))
     }
@@ -2044,6 +2047,11 @@ export type TargetMatch =
   | { kind: 'ambiguous'; matches: TargetInfo[] }
 
 const MIN_ID_PREFIX_LENGTH = 4
+
+/** `/json/list` plus the dedicated workers it leaves out, each target once. */
+function withDedicatedWorkers(listed: TargetInfo[], workers: TargetInfo[]): TargetInfo[] {
+  return [...listed, ...workers.filter((w) => !listed.some((t) => t.id === w.id))]
+}
 
 /**
  * Resolve a `--target` query: exact id → id prefix → title/url substring.

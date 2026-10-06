@@ -10,6 +10,7 @@
 - `eval` of an expression that returns a Promise, without `--await`, exits 1 with `The result is a Promise, still running in the page. Add --await to get its value.` It used to print `{}`, as if the call had done nothing.
 - An `eval --await` that hits the 45 s deadline says the Promise still runs in the page and that what it patched stays patched until it settles. A probe re-run after the timeout used to wrap its own still-installed patch.
 - `heap take` reads the snapshot chunk by chunk as DevTools sends it, instead of joining it into one string first: a heap of ~700 MB and up failed with `Invalid string length`. The renderer's own memory while V8 writes the snapshot is unchanged.
+- Dedicated workers (`new Worker`) show up in `targets` and answer `eval --target` and `heap take --target`: they are reached through their page. Electron leaves them out of the DevTools target list, so they were missing. A worker the list does carry is reached through its page too, not over a connection of its own, which timed out in one app (`CDP session setup for worker timed out`). `console`, `logs` and `network` still do not see them.
 
 ## [0.26.0] - 2026-10-06
 

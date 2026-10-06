@@ -668,6 +668,10 @@ You usually don't need this — `eval --target <substring>` and `--window <name>
 
 `targets` prints ids truncated to 8 chars, and `--target` / `--window` accept that printed handle (case-insensitive id prefix, ≥4 chars) as well as a full id or a title/URL substring. An ambiguous prefix is reported as ambiguous rather than resolved to an arbitrary target. Worker targets often share a blank title, so the printed id prefix is the reliable handle for them.
 
+Dedicated workers (`new Worker`) are listed as `worker`, found through their page: Electron leaves them out of
+the DevTools target list. `eval --target` and `heap take --target` reach them; `console`, `logs` and `network`
+do not see them.
+
 ### Scene / Canvas / WebGL (only when `webgl` is configured in agent-view.config.json)
 
 These commands read the scene graph from canvas-based rendering engines. Skip this section if the project has no `webgl` field in config.

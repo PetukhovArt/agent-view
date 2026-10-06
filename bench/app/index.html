@@ -344,6 +344,12 @@
       console.warn('[bench] SharedWorker unavailable:', err.message)
     }
 
+    // ── Dedicated worker: Electron lists none in /json/list, only its page reaches it ──
+    window.benchDedicatedWorker = new Worker(
+      URL.createObjectURL(new Blob(['self.jobs = 3; setInterval(() => {}, 1000)'], { type: 'application/javascript' })),
+      { name: 'bench-dedicated-worker' },
+    )
+
     // ── Page-wide click instrumentation (drives appState + console signals) ────
     document.addEventListener('click', (e) => {
       const target = e.target.closest('button, a')

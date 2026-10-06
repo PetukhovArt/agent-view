@@ -109,6 +109,13 @@ async function main(): Promise<void> {
     const sw = targets.find(t => t.type === 'shared_worker')
     check('targets includes a page', targets.some(t => t.type === 'page'))
     check('targets includes shared_worker', !!sw)
+    const dw = targets.find(t => t.type === 'worker')
+    check('targets includes the dedicated worker', !!dw)
+    if (dw) {
+      const inWorker = await sendCommand({ ...base, command: 'eval', args: { target: dw.id.slice(0, 8), expression: 'self.name + ":" + self.jobs', cwd } })
+      const result = (inWorker.data as { result?: string } | undefined)?.result
+      check('eval reaches the dedicated worker through its page', result === '"bench-dedicated-worker:3"', String(result ?? inWorker.error))
+    }
 
     // ── Step 2: prime attach for both targets BEFORE generating events ────────
     // `console` is lazy: it attaches on first call. Anything emitted before the

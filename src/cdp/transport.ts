@@ -1035,7 +1035,97 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
     // eslint-disable-next-line no-console
     console.error(`[av-debug] connectToRuntime ${target.type}:${target.id.slice(0, 8)}`)
   }
-  const client = await openClient(port, target)
+  return runtimeSessionOn(await openClient(port, target), target)
+}
+
+type AttachedTarget = { targetInfo: { targetId: string; type: string; title: string; url: string }; sessionId: string }
+type RawSessionClient = RawCDPClient & {
+  send: (method: string, params?: unknown, sessionId?: string) => Promise<unknown>
+  removeListener: (event: string, cb: (...args: unknown[]) => void) => void
+}
+
+/**
+ * Electron lists no dedicated worker in `/json/list`: it is reachable only as a child session of
+ * its page. A client of its own on the page auto-attaches the page's workers. Nothing is enabled
+ * on that client itself, so every event it carries belongs to one of them.
+ */
+async function openWorkerHost(port: number, page: TargetInfo): Promise<{ client: RawSessionClient; workers: AttachedTarget[] }> {
+  const client = await openClient(port, page) as RawSessionClient
+  const workers: AttachedTarget[] = []
+  client.on('Target.attachedToTarget', ((p: AttachedTarget) => {
+    if (p.targetInfo.type === TargetType.Worker) workers.push(p)
+  }) as () => void)
+  try {
+    // Chromium attaches the running workers before it answers.
+    await withTimeout(client.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }), connectTimeoutMs(), `worker attach on page:${page.id.slice(0, 8)}`)
+  } catch (err) {
+    try { await client.close() } catch { /* already gone */ }
+    throw err
+  }
+  return { client, workers }
+}
+
+const workerInfo = ({ targetInfo: t }: AttachedTarget): TargetInfo => ({ id: t.targetId, type: TargetType.Worker, title: t.title, url: t.url })
+
+/** The dedicated workers of every page on the port, which `/json/list` may leave out. */
+export async function listDedicatedWorkers(port: number): Promise<TargetInfo[]> {
+  const pages = (await listSupportedTargets(port)).filter((t) => t.type === TargetType.Page)
+  const found: TargetInfo[] = []
+  for (const page of pages) {
+    const host = await openWorkerHost(port, page).catch(() => null)
+    if (!host) continue
+    found.push(...host.workers.map(workerInfo))
+    await host.client.close().catch(() => { /* already gone */ })
+  }
+  return found
+}
+
+/** A dedicated worker's session, as a child of its page's, whether or not `/json/list` lists the worker. */
+export async function connectToWorker(port: number, workerId: string): Promise<RuntimeSession> {
+  const pages = (await listSupportedTargets(port)).filter((t) => t.type === TargetType.Page)
+  for (const page of pages) {
+    const host = await openWorkerHost(port, page).catch(() => null)
+    if (!host) continue
+    const worker = host.workers.find((w) => w.targetInfo.targetId === workerId)
+    if (worker) return runtimeSessionOn(sessionClient(host.client, worker.sessionId), workerInfo(worker))
+    await host.client.close().catch(() => { /* already gone */ })
+  }
+  throw new Error(`Worker ${workerId.slice(0, 8)} is gone: no page holds it any more.`)
+}
+
+/**
+ * The client API scoped to one flattened session: `Domain.method(params)` is sent with the
+ * session id, `Domain.event(cb)` hears only that session. Closing it closes the host client.
+ */
+function sessionClient(client: RawSessionClient, sessionId: string): RawCDPClient {
+  const on = (event: string, cb: (...args: unknown[]) => void): (() => void) => {
+    if (event === 'disconnect') {
+      const detached = (p: { sessionId?: string }) => { if (p.sessionId === sessionId) cb() }
+      client.on('disconnect', cb as () => void)
+      client.on('Target.detachedFromTarget', detached as () => void)
+      return () => { client.removeListener('disconnect', cb); client.removeListener('Target.detachedFromTarget', detached as () => void) }
+    }
+    const scoped = `${event}.${sessionId}`
+    client.on(scoped, cb as () => void)
+    return () => client.removeListener(scoped, cb)
+  }
+  const domain = (name: string) => new Proxy({}, {
+    get: (_, member: string) => (arg?: unknown) => typeof arg === 'function'
+      ? on(`${name}.${member}`, arg as (...args: unknown[]) => void)
+      : client.send(`${name}.${member}`, arg ?? {}, sessionId),
+  })
+  return new Proxy({} as RawCDPClient, {
+    get: (_, key: string) => {
+      if (key === 'on') return on
+      if (key === 'close') return () => client.close()
+      // Read by `await`: a domain proxy here would make the client look like a promise.
+      if (key === 'then') return undefined
+      return domain(key)
+    },
+  })
+}
+
+async function runtimeSessionOn(client: RawCDPClient, target: TargetInfo): Promise<RuntimeSession> {
   // Subscribe BEFORE enable so we catch buffered messages emitted at enable-time.
   const consoleSub = attachConsoleSubscription(client)
   const networkSub = attachNetworkSubscription(client.Network)
