@@ -144,6 +144,8 @@ async function smokePage(page: 'index' | 'plain', token: string, check: (name: s
     const targetLine = sceneText.split('\n').find(l => l.includes(`"${TARGET}"`)) ?? ''
     check(`${tag} scene lists "${TARGET}" at a point`, scene.ok && /\(\d+,\d+\)/.test(targetLine), targetLine)
     check(`${tag} scene names via=${via}`, sceneText.includes(`via=${via}`))
+    const byId = String((await run('scene', { filter: 'cam-4' })).data)
+    check(`${tag} scene --filter cam-4 lists it`, byId.includes('id=cam-4'), byId.split('\n').at(-1))
 
     const left = await hitAfter({ scene: TARGET })
     check(`${tag} click --scene "${TARGET}" hits it`, left.clicked.ok && left.hit?.button === 'left' && left.hit.name === TARGET,
