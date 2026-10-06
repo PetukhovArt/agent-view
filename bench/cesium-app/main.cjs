@@ -7,7 +7,8 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
 app.whenReady().then(() => {
-  const win = new BrowserWindow({ width: 1280, height: 800, webPreferences: { backgroundThrottling: false } })
+  const [x, y] = process.env.BENCH_WINDOW_POS?.split(',').map(Number) ?? []
+  const win = new BrowserWindow({ x, y, width: 1280, height: 800, webPreferences: { backgroundThrottling: false } })
   win.loadURL(`http://localhost:5199/${page}.html`)
 })
 
