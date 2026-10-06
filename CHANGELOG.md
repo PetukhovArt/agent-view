@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.1] - 2026-10-06
+
+### Added
+- `--height <metres>` on `scene --goto` and `act goto`: the camera height over an object or coordinates, so the camera can come down low over an object instead of keeping the current height. Coordinates that already carry a height plus `--height` are refused (`height given twice`). `act goto` saves it as typed, so `--param` can mark it; goto steps saved by 0.25.0 replay as before.
+
+### Fixed
+- A live `act click scene=<object>` (and `act dblclick` / `rightclick`) waits up to 10 s for the object, as replay does, instead of failing at once with `Scene object "x" is covered or off screen` right after a camera flight starts. It still fails after 10 s: `STALE` when the object is gone, `FAIL` when it stays covered. `click --scene` still answers at once.
+
 ## [0.25.0] - 2026-10-06
 
 ### Added
