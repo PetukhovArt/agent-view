@@ -5,8 +5,9 @@ import type { WebGLEngine } from '../../types.js'
 import type { SceneOptions, SceneNode, SceneAdapter, SceneGoto, SceneMiss } from './types.js'
 
 const NO_ENGINE = 'No WebGL engine configured. Add "webgl": { "engine": "pixi" | "cesiumjs" } to agent-view.config.json'
-const LON_LAT = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,(-?\d+(?:\.\d+)?))?$/
-const METRES = /^-?\d+(?:\.\d+)?$/
+const DECIMAL = String.raw`-?\d+(?:\.\d+)?`
+const LON_LAT = new RegExp(`^(${DECIMAL}),(${DECIMAL})(?:,(${DECIMAL}))?$`)
+const ONE_DECIMAL = new RegExp(`^${DECIMAL}$`)
 /** Decimal places of the lon/lat a camera move prints: about 10 m. */
 const CAMERA_DIGITS = 4
 
@@ -45,9 +46,9 @@ async function extract(conn: RuntimeSession, engine: WebGLEngine): Promise<Scene
 }
 
 function placeAdapter(engine: WebGLEngine | undefined): Required<Pick<SceneAdapter, 'locateScript' | 'gotoScript'>> | SceneMiss {
-  if (!engine) return { error: NO_ENGINE, reason: 'missing' }
+  if (!engine) return { error: NO_ENGINE, reason: 'fatal' }
   const { locateScript, gotoScript } = getAdapter(engine)
-  return locateScript && gotoScript ? { locateScript, gotoScript } : { error: `The ${engine} adapter cannot locate scene objects`, reason: 'missing' }
+  return locateScript && gotoScript ? { locateScript, gotoScript } : { error: `The ${engine} adapter cannot locate scene objects`, reason: 'fatal' }
 }
 
 const isSceneMiss = (raw: unknown): raw is SceneMiss => {
@@ -63,7 +64,7 @@ const isMoved = (raw: unknown): raw is { lonLat: [number, number, number] } => {
   return Array.isArray(lonLat) && lonLat.length === 3 && lonLat.every(n => typeof n === 'number')
 }
 
-const unexpected = (raw: unknown): SceneMiss => ({ error: `Unexpected answer from the page: ${JSON.stringify(raw)}`, reason: 'missing' })
+const unexpected = (raw: unknown): SceneMiss => ({ error: `Unexpected answer from the page: ${JSON.stringify(raw)}`, reason: 'fatal' })
 
 /** `lon,lat[,height]` (degrees, metres; spaces ignored) as coordinates, anything else as a scene object. */
 export function parseScenePlace(place: string): SceneGoto {
@@ -75,13 +76,15 @@ export function parseScenePlace(place: string): SceneGoto {
 /** `place` with the camera at `--height` metres; a string, as a saved act step holds it (maybe a filled `${NAME}`). */
 export function withHeight(place: SceneGoto, height: string | undefined): SceneGoto | { error: string } {
   if (height === undefined) return place
-  if (!METRES.test(height.trim())) return { error: `--height <metres>: "${height}" is not a number` }
+  if (!ONE_DECIMAL.test(height.trim())) return { error: `--height <metres>: "${height}" is not a number` }
   if (place.height !== undefined) return { error: `height given twice: in ${describePlace(place)} and as --height ${height}` }
   return { ...place, height: Number(height) }
 }
 
-export const describePlace = (place: SceneGoto): string =>
-  ('scene' in place ? place.scene : [place.lon, place.lat, place.height].filter(n => n !== undefined).join(','))
+export const describePlace = (place: SceneGoto): string => {
+  if (!('scene' in place)) return [place.lon, place.lat, place.height].filter(n => n !== undefined).join(',')
+  return place.height === undefined ? place.scene : `${place.scene} --height ${place.height}`
+}
 
 /** Clicks the scene object whose id, name or label is `query` at its page point now, if it takes a click there. */
 export async function clickSceneObject(

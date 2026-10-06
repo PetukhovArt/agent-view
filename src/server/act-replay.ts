@@ -86,23 +86,17 @@ export async function waitFor(deps: ActDeps, condition: Condition, timeoutMs: nu
 
 /**
  * Polls `probe` for a step's time until it answers no miss (a scene still loading, a camera still flying):
- * its answer, else a verdict line — FAIL for an object that stayed covered, STALE for one that stayed missing.
+ * its answer, else the last miss. A `fatal` miss ends the polling at once.
  */
-export async function untilAnswered<T extends object>(
-  deps: ActDeps,
-  what: string,
-  probe: (c: PageSession) => Promise<T | SceneMiss>,
-): Promise<T | { exitCode: number; line: string }> {
-  let miss: SceneMiss | undefined
+export async function untilAnswered<T extends object>(deps: ActDeps, probe: (c: PageSession) => Promise<T | SceneMiss>): Promise<T | SceneMiss> {
+  let miss: SceneMiss = { error: 'the page did not answer', reason: 'missing' }
   const answer = await poll(deps, async (c) => {
     const result = await probe(c)
-    if (!('error' in result)) return result
+    if (!('error' in result) || result.reason === 'fatal') return result
     miss = result
     return undefined
   }, STEP_TIMEOUT_MS)
-  if (answer) return answer
-  const [exitCode, word] = miss?.reason === 'covered' ? [EXIT_FAIL, 'FAIL'] : [EXIT_STALE, 'STALE']
-  return { exitCode, line: `${word}: ${what} — ${miss?.error} after ${STEP_TIMEOUT_MS / 1000}s` }
+  return answer ?? miss
 }
 
 const hasExpression = (script: ActScript) => script.until.expr !== undefined || script.steps.some(s => s.op === 'wait')
@@ -121,6 +115,20 @@ const noScript = (name: string): ServerResponse => ({ ok: false, error: `No save
 const unset = (script: SavedScript, values: Record<string, string> | undefined, refuse: (names: string) => string): ServerResponse | undefined => {
   const missing = paramsOf(script).filter(p => !values?.[p])
   return missing.length ? { ok: false, error: refuse(missing.join(', ')) } : undefined
+}
+/** `script` with each goto step's filled `--height` set in its place, or a refusal when one is no number or doubles the place's. */
+const placeHeights = (name: string, script: ActScript): ActScript | ServerResponse => {
+  const steps: RecordedStep[] = []
+  for (const step of script.steps) {
+    if (step.op !== 'goto' || step.height === undefined) {
+      steps.push(step)
+      continue
+    }
+    const place = withHeight(step.place, step.height)
+    if ('error' in place) return { ok: false, error: `"${name}": goto ${describePlace(step.place)} — ${place.error}` }
+    steps.push({ op: 'goto', place })
+  }
+  return { ...script, steps }
 }
 
 /**
@@ -142,7 +150,9 @@ async function planRun(store: string, name: string, params: Record<string, strin
       if (isUseCase(found.script)) return { ok: false, error: `"${name}": "${entry.step}" is a use case, not a step` }
       const unbound = unset(found.script, entry.params, names => `"${name}": step "${entry.step}" needs ${names} — bind it in the use case`)
       if (unbound) return unbound
-      chain.push({ name: entry.step, script: fillParams(found.script, entry.params ?? {}), untilMs: untilMs(entry.timeout ?? found.script.timeout) })
+      const script = placeHeights(entry.step, fillParams(found.script, entry.params ?? {}))
+      if ('ok' in script) return script
+      chain.push({ name: entry.step, script, untilMs: untilMs(entry.timeout ?? found.script.timeout) })
     }
     const main = { name, script: { until: useCase.until, steps: [] }, untilMs: UNTIL_TIMEOUT_MS }
     return { chain, main, linkWord: 'step', requires: useCase.requires ?? [] }
@@ -159,7 +169,9 @@ async function planRun(store: string, name: string, params: Record<string, strin
     const current = next
     const refused = unset(found.script, params, names => `"${current}" needs ${names} — set as env vars`)
     if (refused) return refused
-    chain.unshift({ name: next, script: fillParams(found.script, params), untilMs: untilMs(found.script.timeout) })
+    const script = placeHeights(current, fillParams(found.script, params))
+    if ('ok' in script) return script
+    chain.unshift({ name: next, script, untilMs: untilMs(found.script.timeout) })
     next = found.script.after
   }
   return { chain, main: chain.pop()!, linkWord: 'prerequisite', requires: [] }
@@ -173,7 +185,7 @@ async function planRun(store: string, name: string, params: Record<string, strin
  * or scene object is gone or no longer unique — the script no longer fits the app). Its `after` chain, or a use case's steps, run
  * first, from the nearest one whose own until already holds; one that is not DONE ends
  * the run with its verdict. `${NAME}` in any script of the chain takes `params[NAME]`; one
- * missing refuses the run before its first step.
+ * missing, or a goto `--height` filled with no number, refuses the run before its first step.
  */
 export async function replay(
   { store, name, secret, params = {}, testIdAttribute }:
@@ -194,6 +206,12 @@ export async function replay(
   // Fixtures are files on disk: replay never runs them, only says which the run assumes.
   const requires = plan.requires.length ? `\nrequires (not run by replay): ${plan.requires.join(', ')}` : ''
   const verdict = (exitCode: number, line: string): ServerResponse => ({ ok: true, data: `${line} · ${elapsed()}${requires}`, exitCode })
+  /** A scene step's miss: refused when nothing can answer, FAIL for an object that stayed covered, else STALE. */
+  const missed = (what: string, miss: SceneMiss): ServerResponse => {
+    if (miss.reason === 'fatal') return { ok: false, error: `${what} — ${miss.error}` }
+    const [exitCode, word] = miss.reason === 'covered' ? [EXIT_FAIL, 'FAIL'] : [EXIT_STALE, 'STALE']
+    return verdict(exitCode, `${word}: ${what} — ${miss.error} after ${STEP_TIMEOUT_MS / 1000}s`)
+  }
   /** The control, or why it is not usable yet: absent, or present but disabled / covered. */
   const find = async (target: RowTarget, { isEnabledRequired, timeoutMs }: { isEnabledRequired: boolean; timeoutMs: number }) => {
     let seen: string | undefined
@@ -314,17 +332,14 @@ export async function replay(
         continue
       }
       if (step.op === 'goto') {
-        const what = `${at} goto ${describePlace(step.place)}`
-        const place = withHeight(step.place, step.height)
-        if ('error' in place) return verdict(EXIT_STALE, `STALE: ${what} — ${place.error}`)
-        const moved = await untilAnswered(deps, what, c => moveSceneCamera(c, deps.engine, place))
-        if ('line' in moved) return verdict(moved.exitCode, moved.line)
+        const moved = await untilAnswered(deps, c => moveSceneCamera(c, deps.engine, step.place))
+        if ('error' in moved) return missed(`${at} goto ${describePlace(step.place)}`, moved)
         continue
       }
       if (isSceneClick(step)) {
         const opts = { ...CLICKS[step.op], modifiers: step.modifiers }
-        const clicked = await untilAnswered(deps, `${at} ${step.op} ${describeTarget(step.target)}`, c => clickSceneObject(c, deps.engine, step.target.scene, opts))
-        if ('line' in clicked) return verdict(clicked.exitCode, clicked.line)
+        const clicked = await untilAnswered(deps, c => clickSceneObject(c, deps.engine, step.target.scene, opts))
+        if ('error' in clicked) return missed(`${at} ${step.op} ${describeTarget(step.target)}`, clicked)
         deps.invalidateAxCache()
         continue
       }

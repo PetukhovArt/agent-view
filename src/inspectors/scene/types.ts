@@ -41,5 +41,8 @@ export type SceneAdapter = {
 /** Where `scene --goto` points the camera: degrees and metres, or a scene object by id, name or label; no height keeps the camera's. */
 export type SceneGoto = ({ lon: number; lat: number } | { scene: string }) & { height?: number }
 
-/** Why a scene object cannot be acted on: no single object answers (`missing`), or it takes no click where drawn (`covered`). */
-export type SceneMiss = { error: string; reason: 'missing' | 'covered' }
+/**
+ * Why a scene object cannot be acted on: no single object answers (`missing`), it takes no click where drawn
+ * (`covered`), or no wait can help (`fatal`: no engine, an adapter that cannot locate, a page answer it cannot read).
+ */
+export type SceneMiss = { error: string; reason: 'missing' | 'covered' | 'fatal' }

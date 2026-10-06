@@ -12,7 +12,7 @@ import {
   type Control,
 } from '../inspectors/controls/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
-import { clickSceneObject, moveSceneCamera, parseScenePlace, withHeight } from '../inspectors/scene/index.js'
+import { clickSceneObject, describePlace, moveSceneCamera, parseScenePlace, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
 import {
   CLICKS,
   EDGES,
@@ -344,12 +344,16 @@ async function clickStep(run: Run, op: ClickOp, target: CliTarget, modifiers: Mo
   return finishStep(run, { before: picked.before, done: `${describeOp(op, modifiers)} ${picked.label}${describeAt(at)}` })
 }
 
+/** A scene step that still missed after the step's time, or at once when no wait can help; its step is not recorded. */
+const notRecorded = (what: string, miss: SceneMiss): ServerResponse =>
+  ({ ok: false, error: miss.reason === 'fatal' ? miss.error : `${what} — ${miss.error} after ${STEP_TIMEOUT_MS / 1000}s — not recorded` })
+
 /** A click op on a scene object once it is drawn and takes the click, as replay waits for it; it has no row and no DOM node. */
 async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: Modifier[] | undefined): Promise<ServerResponse> {
   const { session, deps } = run
   const before = tableKey(await snapshot(run))
-  const found = await untilAnswered(deps, `${op} scene=${query}`, c => clickSceneObject(c, deps.engine, query, { ...CLICKS[op], modifiers }))
-  if ('line' in found) return { ok: false, error: `${found.line} — not recorded` }
+  const found = await untilAnswered(deps, c => clickSceneObject(c, deps.engine, query, { ...CLICKS[op], modifiers }))
+  if ('error' in found) return notRecorded(`${op} scene=${query}`, found)
   deps.invalidateAxCache()
   session.steps.push({ op, target: { scene: query }, modifiers })
   return finishStep(run, { before, done: `${describeOp(op, modifiers)} scene=${query} at (${found.x}, ${found.y})` })
@@ -359,11 +363,11 @@ async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: M
 async function gotoStep(run: Run, raw: string | undefined, height: string | undefined): Promise<ServerResponse> {
   if (!raw) return { ok: false, error: 'act goto <lon,lat[,height] | scene object> [--height <metres>]' }
   const place = parseScenePlace(raw)
-  const lifted = withHeight(place, height)
-  if ('error' in lifted) return { ok: false, error: lifted.error }
+  const target = withHeight(place, height)
+  if ('error' in target) return { ok: false, error: target.error }
   const before = tableKey(await snapshot(run))
-  const moved = await moveSceneCamera(run.deps.conn, run.deps.engine, lifted)
-  if ('error' in moved) return { ok: false, error: moved.error }
+  const moved = await untilAnswered(run.deps, c => moveSceneCamera(c, run.deps.engine, target))
+  if ('error' in moved) return notRecorded(`goto ${describePlace(target)}`, moved)
   run.session.steps.push({ op: 'goto', place, ...(height === undefined ? {} : { height }) })
   return finishStep(run, { before, done: moved.text })
 }

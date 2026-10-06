@@ -121,6 +121,16 @@ describe('replay', () => {
     expect(conn.clickByNodeId).not.toHaveBeenCalled()
   })
 
+  it('refuses a run whose goto --height is filled with no number, before any step of the after chain', async () => {
+    const { store, conn, deps } = await saveRowClick()
+    await writeScript({ store, name: 'low' }, { until: { testid: 'done' }, steps: [{ op: 'goto', place: { scene: 'Tower 3' }, height: '${HEIGHT}' }], after: 'row' })
+
+    const result = await replay({ store, name: 'low', params: { ROW: 'library/Насосы', HEIGHT: 'abc' } }, deps)
+
+    expect(result).toEqual({ ok: false, error: '"low": goto Tower 3 — --height <metres>: "abc" is not a number' })
+    expect(conn.clickByNodeId).not.toHaveBeenCalled()
+  })
+
   it('skips every prerequisite before the nearest one already reached, though its own until is gone', async () => {
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
     const click = { op: 'click' as const, target: { role: 'button', name: 'Сцена' }, isPassword: false }
