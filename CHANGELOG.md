@@ -1,12 +1,13 @@
 # Changelog
 
-## [0.25.1] - 2026-10-06
+## [0.26.0] - 2026-10-06
 
 ### Added
-- `--height <metres>` on `scene --goto` and `act goto`: the camera height over an object or coordinates, so the camera can come down low over an object instead of keeping the current height. Coordinates that already carry a height plus `--height` are refused (`height given twice`). `act goto` saves it as typed, so `--param` can mark it; goto steps saved by 0.25.0 replay as before.
+- `--height <metres>` on `scene --goto` and `act goto`: the camera height over an object or coordinates, so the camera can come down low over an object instead of keeping the current height. Coordinates that already carry a height plus `--height` are refused (`height given twice`). `act goto` saves it as typed, so `--param` can mark it; replay refuses a `${HEIGHT}` filled with no number before any step (exit 2). Goto steps saved by 0.25.0 replay as before.
 
 ### Fixed
-- A live `act click scene=<object>` (and `act dblclick` / `rightclick`) waits up to 10 s for the object, as replay does, instead of failing at once with `Scene object "x" is covered or off screen` right after a camera flight starts. It still fails after 10 s: `STALE` when the object is gone, `FAIL` when it stays covered. `click --scene` still answers at once.
+- A live `act click scene=<object>` (and `act dblclick` / `rightclick`) and a live `act goto` wait up to 10 s for the object, as replay does, instead of failing at once with `Scene object "x" is covered or off screen` right after a camera flight starts. After 10 s the step fails unrecorded: `click scene=x — <why> after 10s — not recorded`. `click --scene` still answers at once.
+- A scene step with no engine configured, or with an adapter that cannot locate objects, fails at once instead of after 10 s; in replay it exits 2 (could not run) instead of 3 (STALE).
 
 ## [0.25.0] - 2026-10-06
 
