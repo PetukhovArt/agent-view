@@ -174,6 +174,8 @@ rows, follow [`references/design-conformance.md`](references/design-conformance.
   kill a foreign process from this skill.
 - **`CDP_TIMEOUT`:** the command hit the server-side deadline and cached sessions for that port were dropped, so retry
   once. Repeated timeouts mean the app's DevTools endpoint is wedged — restart it.
+- **`The app window stopped painting`:** the window is minimized or covered; ask the user to bring it to the front,
+  then retry.
 - **Retry budget: 2 per command**, then mark the step `skipped` with the reason. Two covers a transient CDP drop; a
   third repeat means the app or the plan is wrong, not the call.
 

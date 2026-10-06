@@ -4,6 +4,7 @@
 
 ### Fixed
 - `scene --filter <text>` also matches the id a scene object prints (`id=…` on a CesiumJS entity), not only its name and type.
+- A minimized or covered app window no longer hangs `click`/`fill`/`listeners --filter`, `screenshot` and `drag` until the CLI gives up after 2 min: within ~3 s they fail with `The app window stopped painting: it is minimized or covered by another window. Bring it to the front and retry.`
 
 ## [0.26.0] - 2026-10-06
 

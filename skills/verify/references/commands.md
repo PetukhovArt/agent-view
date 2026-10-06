@@ -34,6 +34,8 @@ agent-view stop                        # Stop the lazy server
 
 **Tauri**: launch works the same as Electron, but the wait timeout is 10 min (cargo builds are slow). A port conflict on the Tauri devUrl port is almost always a parallel browser-dev.
 
+**Window not painting**: a minimized or covered window draws no frames, and `click`/`fill`/`listeners --filter`, `screenshot`, `snap` with a screenshot, `drag` and `act drag` wait on a frame. Within ~3 s they fail with `The app window stopped painting: it is minimized or covered by another window. Bring it to the front and retry. An app that must work while covered can start with the Chromium switches --disable-backgrounding-occluded-windows --disable-renderer-backgrounding.` `dom`, `eval`, `click <ref>` and `click --pos` still work on such a window.
+
 ### DOM Inspection
 ```bash
 agent-view dom                          # DOM accessibility tree (default window)
