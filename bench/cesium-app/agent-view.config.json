@@ -1,0 +1,7 @@
+{
+  "runtime": "electron",
+  "port": 19223,
+  "launch": "npm start",
+  "allowEval": true,
+  "webgl": { "engine": "cesiumjs" }
+}

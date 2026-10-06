@@ -1,0 +1,20 @@
+{
+  "name": "agent-view-bench-cesium-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cesium map for agent-view: a vue-cesium page (web-client stack) and a plain CesiumJS page",
+  "scripts": {
+    "predev": "node copy-cesium.mjs",
+    "dev": "vite",
+    "start": "node start.mjs"
+  },
+  "dependencies": {
+    "cesium": "1.119.0",
+    "vue": "^3.4.0",
+    "vue-cesium": "3.2.9"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.4.0"
+  }
+}
