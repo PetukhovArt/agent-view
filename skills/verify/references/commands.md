@@ -228,8 +228,8 @@ agent-view act dblclick 3               # double-click (fires dblclick); recorde
 agent-view act rightclick 3             # right-click (fires contextmenu); then pick the menu row from the next table
 agent-view act click "css=#content-area canvas@120,80"   # what is no row: testid=<id> | css=<selector>; @x,y = px from its top-left
 agent-view act rightclick 3@10,5        # a row, at a point of it; without @ — its centre
-agent-view act click "scene=Tower 3"    # cesiumjs: a scene object by id, name or label, as click --scene; replay finds it again (up to 10 s)
-agent-view act goto "Tower 3"           # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25)
+agent-view act click "scene=Tower 3"    # cesiumjs: a scene object by id, name or label, as click --scene; the step and replay wait for it up to 10 s (a camera still flying)
+agent-view act goto "Tower 3" --height 2000   # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25)
 agent-view act click 4 --modifiers ctrl # keys held: alt|ctrl|meta|shift, comma-separated; recorded and replayed (ctrl = add to a selection)
 agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
@@ -660,6 +660,7 @@ agent-view snap --scale 0.5             # DOM + Scene + Screenshot (path appende
 agent-view scene --goto 10.5,45.25,5000    # cesiumjs: camera straight down over lon,lat (degrees) at height (m)
 agent-view scene --goto -70.5,-33.25    # … keeping the current height; negative lon/lat as is
 agent-view scene --goto "Tower 3"       # … over a scene object by id, name or label
+agent-view scene --goto "Tower 3" --height 2000   # … at 2000 m; --height fits either form, not lon,lat,height
 ```
 
 Engines: `"engine": "pixi"` reads `window.__PIXI_DEVTOOLS__`; `"engine": "cesiumjs"` finds the
@@ -681,7 +682,8 @@ Viewer "cesiumContainer" via=vue-cesium
 
 `(x,y)` is the page point a click lands on; none means no position, off the canvas or behind the
 globe. `--verbose` adds `lonlat=lon,lat,height`. `--goto` prints `Camera over (10.5000, 45.2500) at
-5000 m`, or `Camera over "Tower 3" (…) at … m` for an object. A `scene`, `click --scene` or `--goto`
+5000 m`, or `Camera over "Tower 3" (…) at … m` for an object. A height both in the coordinates and as
+`--height` exits 1 with `height given twice: in 10.5,45.25,5000 and as --height 2000`. A `scene`, `click --scene` or `--goto`
 call also keeps every viewer it found in `window.__agentView.cesium` (`[{ key, via, viewer, scene,
 Cesium }]`), so a later `eval` reaches the Cesium API without hunting for it; before the first such
 call it is unset, and plain CesiumJS found by its frames has no `viewer` there, only `scene` and `Cesium`.
