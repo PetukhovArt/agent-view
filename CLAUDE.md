@@ -14,7 +14,9 @@ The published binary is `dist/cli/index.js` (`bin: agent-view`).
 
 <important if="you are running or changing the bench harness">
 
-Bench harness lives in `bench/` with its own Electron app under `bench/app/`. Six entry points:
+Bench harness lives in `bench/` with its own Electron app under `bench/app/`, and a Cesium map under
+`bench/cesium-app/` (`npm start` = vue-cesium page, `npm start -- --page=plain` = plain CesiumJS; vite 5199, CDP 19223).
+Seven entry points:
 
 ```bash
 npx tsx bench/smoke-devtools.ts   # end-to-end CDP / console / SharedWorker smoke
@@ -22,11 +24,12 @@ npx tsx bench/smoke-network.ts    # network capture: XHR/fetch, a 404, WebSocket
 npx tsx bench/smoke-dialogs.ts    # modals: JS dialog auto-answer, upload, file-chooser arm
 npx tsx bench/smoke-reach.ts      # coverage delta + listeners over real CDP
 npx tsx bench/smoke-heap.ts       # heap snapshot diff + retainers against a planted detached-DOM leak
+npx tsx bench/smoke-cesium.ts     # Cesium scene, click --scene, scene --goto, act scene=/goto on both map pages
 npx tsx bench/run.ts              # token / latency benchmark across scenarios
 ```
 
 A leftover server keeps serving the code it was started with and produces failures the current source does not have.
-`smoke-dialogs`, `smoke-reach` and `smoke-heap` stop whatever server holds the port first; `smoke-devtools`,
+`smoke-dialogs`, `smoke-reach`, `smoke-heap` and `smoke-cesium` stop whatever server holds the port first; `smoke-devtools`,
 `smoke-network` and `run.ts` reuse it, so stop it yourself (`agent-view stop`) before running them after a source
 change. With a live server on 47922, prefix `AGENT_VIEW_SERVER_PORT=<free port>`.
 
