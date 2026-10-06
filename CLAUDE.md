@@ -49,14 +49,15 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
 ### Layers (read in this order to grok the codebase)
 
 1. **`src/cdp/types.ts`** — two session kinds:
-    - `RuntimeSession` — `Runtime` + `Console` + `Log` only. Created by `connectToRuntime`. Used for `shared_worker` /
-      `service_worker` / `worker` targets.
+    - `RuntimeSession` — `Runtime` + `Console` + `Log` only. Created by `connectToRuntime` for `shared_worker` /
+      `service_worker` targets, and by `connectToWorker` for a dedicated `worker`, attached through its page's session
+      because `/json/list` may leave it out.
     - `PageSession extends RuntimeSession` — adds `Page` / `DOM` / `Accessibility` / `Input`. Created by
       `connectToPage`. Used for `page` / `iframe` targets. The interface inheritance is load-bearing — anything
       accepting `RuntimeSession` works for pages too; the type system enforces that screenshot/DOM ops cannot be
       requested on a worker.
 
-2. **`src/cdp/transport.ts`** — the CDP boundary. Two factories above; `listSupportedTargets` enumerates and filters to
+2. **`src/cdp/transport.ts`** — the CDP boundary. The factories above; `listSupportedTargets` enumerates and filters to
    known `TargetType`s. Console subscription is registered **before** `Runtime.enable` / `Log.enable` so buffered
    messages aren't dropped. CDP host map (`127.0.0.1` vs `::1`) is per-target — Tauri/WebView2 sometimes only listen on
    IPv6.
@@ -127,9 +128,9 @@ sibling directories; `src/server/` and `src/config/` colocate them next to the s
 
 ## Conventions enforced in this repo
 
-- **Console is lazy-attach**: `console` has no back-buffer, so any doc or skill describing it must teach
 - **All work is committed straight to `main`**: no feature branches and no per-task worktrees.
 
+- **Console is lazy-attach**: `console` has no back-buffer, so any doc or skill describing it must teach
   `clear → act → check` (see `skills/verify/SKILL.md`). This is a console rule, not a house rule for every stream —
   network attaches eagerly on purpose ([ADR 0002](./docs/adr/0002-eager-network-capture-lifecycle.md)). A new per-target
   stream picks its lifecycle from where its value sits, and records the choice as an ADR.
