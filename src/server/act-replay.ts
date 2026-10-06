@@ -84,6 +84,27 @@ export async function waitFor(deps: ActDeps, condition: Condition, timeoutMs: nu
   return isMet ? undefined : reason ?? 'not reached'
 }
 
+/**
+ * Polls `probe` for a step's time until it answers no miss (a scene still loading, a camera still flying):
+ * its answer, else a verdict line — FAIL for an object that stayed covered, STALE for one that stayed missing.
+ */
+export async function untilAnswered<T extends object>(
+  deps: ActDeps,
+  what: string,
+  probe: (c: PageSession) => Promise<T | SceneMiss>,
+): Promise<T | { exitCode: number; line: string }> {
+  let miss: SceneMiss | undefined
+  const answer = await poll(deps, async (c) => {
+    const result = await probe(c)
+    if (!('error' in result)) return result
+    miss = result
+    return undefined
+  }, STEP_TIMEOUT_MS)
+  if (answer) return answer
+  const [exitCode, word] = miss?.reason === 'covered' ? [EXIT_FAIL, 'FAIL'] : [EXIT_STALE, 'STALE']
+  return { exitCode, line: `${word}: ${what} — ${miss?.error} after ${STEP_TIMEOUT_MS / 1000}s` }
+}
+
 const hasExpression = (script: ActScript) => script.until.expr !== undefined || script.steps.some(s => s.op === 'wait')
 
 /** One script of a run with the time its until may take. */
@@ -245,23 +266,6 @@ export async function replay(
     }
   }
 
-  /**
-   * Polls `probe` for the step's time until it answers no miss (a scene still loading): its answer, else
-   * FAIL for an object that stayed covered, STALE for one that stayed missing.
-   */
-  const untilAnswered = async <T extends object>(what: string, probe: (c: PageSession) => Promise<T | SceneMiss>): Promise<T | ServerResponse> => {
-    let miss: SceneMiss | undefined
-    const answer = await poll(deps, async (c) => {
-      const result = await probe(c)
-      if (!('error' in result)) return result
-      miss = result
-      return undefined
-    }, STEP_TIMEOUT_MS)
-    if (answer) return answer
-    const [exitCode, word] = miss?.reason === 'covered' ? [EXIT_FAIL, 'FAIL'] : [EXIT_STALE, 'STALE']
-    return verdict(exitCode, `${word}: ${what} — ${miss?.error} after ${STEP_TIMEOUT_MS / 1000}s`)
-  }
-
   type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' } | SceneClickStep>
   /** Acts on the found node: a verdict when the app cannot take the step, else undefined. */
   const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
@@ -310,14 +314,14 @@ export async function replay(
         continue
       }
       if (step.op === 'goto') {
-        const moved = await untilAnswered(`${at} goto ${describePlace(step.place)}`, c => moveSceneCamera(c, deps.engine, step.place))
-        if ('ok' in moved) return moved
+        const moved = await untilAnswered(deps, `${at} goto ${describePlace(step.place)}`, c => moveSceneCamera(c, deps.engine, step.place))
+        if ('line' in moved) return verdict(moved.exitCode, moved.line)
         continue
       }
       if (isSceneClick(step)) {
         const opts = { ...CLICKS[step.op], modifiers: step.modifiers }
-        const clicked = await untilAnswered(`${at} ${step.op} ${describeTarget(step.target)}`, c => clickSceneObject(c, deps.engine, step.target.scene, opts))
-        if ('ok' in clicked) return clicked
+        const clicked = await untilAnswered(deps, `${at} ${step.op} ${describeTarget(step.target)}`, c => clickSceneObject(c, deps.engine, step.target.scene, opts))
+        if ('line' in clicked) return verdict(clicked.exitCode, clicked.line)
         deps.invalidateAxCache()
         continue
       }

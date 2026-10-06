@@ -46,7 +46,7 @@ import {
   type UntilArgs,
 } from './act-script.js'
 import { cwdOf, isOneUntil, modifiersOf, refuseStepSave, str, strs, untilArgsOf } from './act-store.js'
-import { ALLOW_EVAL_HINT, STEP_TIMEOUT_MS, replay, waitFor, type ActDeps } from './act-replay.js'
+import { ALLOW_EVAL_HINT, STEP_TIMEOUT_MS, replay, untilAnswered, waitFor, type ActDeps } from './act-replay.js'
 
 const DEFAULT_MAX_STEPS = 30
 const SETTLE_POLL_MS = 100
@@ -344,12 +344,12 @@ async function clickStep(run: Run, op: ClickOp, target: CliTarget, modifiers: Mo
   return finishStep(run, { before: picked.before, done: `${describeOp(op, modifiers)} ${picked.label}${describeAt(at)}` })
 }
 
-/** A click op on a scene object where it is drawn now; it has no row and no DOM node. */
+/** A click op on a scene object once it is drawn and takes the click, as replay waits for it; it has no row and no DOM node. */
 async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: Modifier[] | undefined): Promise<ServerResponse> {
   const { session, deps } = run
   const before = tableKey(await snapshot(run))
-  const found = await clickSceneObject(deps.conn, deps.engine, query, { ...CLICKS[op], modifiers })
-  if ('error' in found) return { ok: false, error: found.error }
+  const found = await untilAnswered(deps, `${op} scene=${query}`, c => clickSceneObject(c, deps.engine, query, { ...CLICKS[op], modifiers }))
+  if ('line' in found) return { ok: false, error: `${found.line} — not recorded` }
   deps.invalidateAxCache()
   session.steps.push({ op, target: { scene: query }, modifiers })
   return finishStep(run, { before, done: `${describeOp(op, modifiers)} scene=${query} at (${found.x}, ${found.y})` })
