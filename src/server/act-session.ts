@@ -12,7 +12,7 @@ import {
   type Control,
 } from '../inspectors/controls/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
-import { locateSceneObject, moveSceneCamera } from '../inspectors/scene/index.js'
+import { clickSceneObject, moveSceneCamera, parseScenePlace } from '../inspectors/scene/index.js'
 import {
   CLICKS,
   EDGES,
@@ -344,21 +344,21 @@ async function clickStep(run: Run, op: ClickOp, target: CliTarget, modifiers: Mo
   return finishStep(run, { before: picked.before, done: `${describeOp(op, modifiers)} ${picked.label}${describeAt(at)}` })
 }
 
-/** A click op on a map object where it is drawn now; it has no row and no DOM node. */
+/** A click op on a scene object where it is drawn now; it has no row and no DOM node. */
 async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: Modifier[] | undefined): Promise<ServerResponse> {
   const { session, deps } = run
-  const found = await locateSceneObject(deps.conn, deps.engine, query)
-  if ('error' in found) return { ok: false, error: found.error }
   const before = tableKey(await snapshot(run))
-  await deps.conn.clickAtPosition(found.x, found.y, { ...CLICKS[op], modifiers })
+  const found = await clickSceneObject(deps.conn, deps.engine, query, { ...CLICKS[op], modifiers })
+  if ('error' in found) return { ok: false, error: found.error }
   deps.invalidateAxCache()
   session.steps.push({ op, target: { scene: query }, modifiers })
   return finishStep(run, { before, done: `${describeOp(op, modifiers)} scene=${query} at (${found.x}, ${found.y})` })
 }
 
-/** The map camera over a place: recorded, so a replay sees the map the clicks after it were decided on. */
-async function gotoStep(run: Run, place: string | undefined): Promise<ServerResponse> {
-  if (!place) return { ok: false, error: 'act goto <lon,lat[,height] | scene object>' }
+/** The camera over a place: recorded, so a replay sees the scene the clicks after it were decided on. */
+async function gotoStep(run: Run, raw: string | undefined): Promise<ServerResponse> {
+  if (!raw) return { ok: false, error: 'act goto <lon,lat[,height] | scene object>' }
+  const place = parseScenePlace(raw)
   const before = tableKey(await snapshot(run))
   const moved = await moveSceneCamera(run.deps.conn, run.deps.engine, place)
   if ('error' in moved) return { ok: false, error: moved.error }

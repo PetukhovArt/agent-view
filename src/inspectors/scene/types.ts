@@ -32,11 +32,14 @@ export type SceneAdapter = {
   readonly extractScript: string
   // Returns null when the engine isn't present in the page.
   normalize(raw: unknown): SceneNode | null
-  /** Script resolving to the page point `{ x, y }` of the object `query` names, or `{ error }`. */
+  /** Script resolving to the page point `{ x, y }` of the object `query` names, or a `SceneMiss`. */
   locateScript?(query: string): string
-  /** Script moving the camera over `target`, resolving to `{ lonLat: [lon, lat, height] }` or `{ error }`. */
+  /** Script moving the camera over `target`, resolving to `{ lonLat: [lon, lat, height] }` or a `SceneMiss`. */
   gotoScript?(target: SceneGoto): string
 }
 
-/** Where `scene --goto` points the camera: degrees and metres, or a scene object by id or name. */
-export type SceneGoto = { lon: number; lat: number; height?: number } | { query: string }
+/** Where `scene --goto` points the camera: degrees and metres, or a scene object by id, name or label. */
+export type SceneGoto = { lon: number; lat: number; height?: number } | { scene: string }
+
+/** Why a scene object cannot be acted on: no single object answers (`missing`), or it takes no click where drawn (`covered`). */
+export type SceneMiss = { error: string; reason: 'missing' | 'covered' }

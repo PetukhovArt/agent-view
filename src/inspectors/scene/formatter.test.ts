@@ -26,6 +26,11 @@ describe('formatNode', () => {
     expect(lines[0]).toBe('Sprite "hero" (10,20)')
   })
 
+  it('prints no point for a node with no spot on screen', () => {
+    const node = makeScene({ type: 'billboard', name: 'Tower 9', x: undefined, y: undefined, extras: { id: 't9' } })
+    expect(collect(node)[0]).toBe('billboard "Tower 9" id=t9')
+  })
+
   it('marks hidden nodes with [hidden]', () => {
     const node = makeScene({ visible: false })
     const lines = collect(node)

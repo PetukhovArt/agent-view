@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { isAppTarget } from '../adapters/target-filter.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
-import { getSceneGraph, getRawScene, diffScenes, locateSceneObject, moveSceneCamera, type SceneNode } from '../inspectors/scene/index.js'
+import { getSceneGraph, getRawScene, diffScenes, clickSceneObject, moveSceneCamera, parseScenePlace, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning, installCDPErrorGuard, PortConflictError } from './launcher.js'
 import { readConfig } from '../config/manager.js'
@@ -743,9 +743,8 @@ export class AgentViewServer {
 
     const sceneQuery = argStr(req.args, 'scene')
     if (sceneQuery !== undefined) {
-      const found = await locateSceneObject(conn, req.engine, sceneQuery)
+      const found = await clickSceneObject(conn, req.engine, sceneQuery, clickOpts)
       if ('error' in found) return { ok: false, error: found.error }
-      await conn.clickAtPosition(found.x, found.y, clickOpts)
       this.axTreeCache.invalidate(cacheKey)
       return { ok: true, data: `${verb} scene "${sceneQuery}" at (${found.x}, ${found.y})${held}` }
     }
@@ -1319,7 +1318,7 @@ export class AgentViewServer {
 
     const goto = argStr(req.args, 'goto')
     if (goto !== undefined) {
-      const moved = await moveSceneCamera(conn, req.engine, goto)
+      const moved = await moveSceneCamera(conn, req.engine, parseScenePlace(goto))
       return 'error' in moved ? { ok: false, error: moved.error } : { ok: true, data: moved.text }
     }
 

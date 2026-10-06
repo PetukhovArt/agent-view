@@ -6,7 +6,6 @@ export type RawCesiumEntity = {
   id: string
   /** `entity.name`, else its label text: apps often name an entity only by its label. */
   name: string
-  /** Graphics the entity carries: billboard, label, polygon… */
   kinds: string[]
   visible: boolean
   lonLat: [number, number, number] | null
@@ -21,12 +20,18 @@ export type RawCesiumViewer = {
   dataSources: { name: string; entities: RawCesiumEntity[] }[]
 }
 
+/** How long plain CesiumJS gets to render the frame that reveals its viewer: a hidden page draws none. */
+const FRAME_WAIT_MS = 1000
+/** Decimal places of a printed lon/lat: about 0.1 m. */
+const LON_LAT_DIGITS = 6
+const NO_SCENE = JSON.stringify({ error: 'No cesiumjs scene found', reason: 'missing' })
 
-// Defines `findViewers()` and `entityRecord(v, e)` for the scripts below. A viewer is
+// Defines `findViewers()` and `findOne(q)` for the scripts below. A viewer is
 // { key, via, Cesium, scene, entities, dataSources, time }.
 const VIEWERS = `
   var KINDS = ['billboard', 'box', 'corridor', 'cylinder', 'ellipse', 'ellipsoid', 'label', 'model', 'path',
     'plane', 'point', 'polygon', 'polyline', 'polylineVolume', 'rectangle', 'tileset', 'wall'];
+  var av = window.__agentView = window.__agentView || {};
 
   function fromViewer(key, via, Cesium, viewer) {
     return { key: key, via: via, Cesium: Cesium, viewer: viewer, scene: viewer.scene, entities: viewer.entities,
@@ -34,7 +39,7 @@ const VIEWERS = `
   }
 
   // Plain CesiumJS keeps its Viewer in no global: catch the DataSourceDisplay a frame updates.
-  async function fromFrames(Cesium) {
+  async function catchFrames(Cesium) {
     var proto = Cesium.DataSourceDisplay.prototype;
     var update = proto.update;
     var displays = new Map();
@@ -45,7 +50,7 @@ const VIEWERS = `
     try {
       await new Promise(function (done) {
         requestAnimationFrame(function () { requestAnimationFrame(done); });
-        setTimeout(done, 1000);
+        setTimeout(done, ${FRAME_WAIT_MS});
       });
     } finally {
       proto.update = update;
@@ -55,6 +60,12 @@ const VIEWERS = `
       return { key: 'viewer-' + i, via: 'cesiumjs', Cesium: Cesium, scene: display.scene,
         entities: display.defaultDataSource.entities, dataSources: display._dataSourceCollection, time: entry[1] };
     });
+  }
+
+  // Overlapping calls share one catch: a second patch would wrap the first and restore it, not the original.
+  function fromFrames(Cesium) {
+    if (!av.cesiumFrames) av.cesiumFrames = catchFrames(Cesium).finally(function () { av.cesiumFrames = undefined; });
+    return av.cesiumFrames;
   }
 
   async function findViewers() {
@@ -67,11 +78,10 @@ const VIEWERS = `
         if (services && services.viewer) found.push(fromViewer(entry[0], 'vue-cesium', services.Cesium, services.viewer));
       });
     });
-    if (!found.length && window.__CESIUM_VIEWER__) found.push(fromViewer('viewer-0', 'hook', window.Cesium, window.__CESIUM_VIEWER__));
+    var hook = window.__CESIUM_VIEWER__;
+    if (!found.length && hook && hook.viewer && hook.Cesium) found.push(fromViewer('viewer-0', 'hook', hook.Cesium, hook.viewer));
     if (!found.length && window.Cesium && window.Cesium.DataSourceDisplay) found = await fromFrames(window.Cesium);
-    window.__agentView = Object.assign({}, window.__agentView, {
-      cesium: found.map(function (v) { return { key: v.key, via: v.via, viewer: v.viewer, scene: v.scene, Cesium: v.Cesium }; }),
-    });
+    av.cesium = found.map(function (v) { return { key: v.key, via: v.via, viewer: v.viewer, scene: v.scene, Cesium: v.Cesium }; });
     return found;
   }
 
@@ -95,9 +105,10 @@ const VIEWERS = `
     return {
       id: e.id,
       name: e.name || label || '',
+      names: [e.name, label].filter(Boolean),
       kinds: KINDS.filter(function (k) { return e[k]; }),
       visible: e.isShowing,
-      lonLat: place ? [+C.Math.toDegrees(place.longitude).toFixed(6), +C.Math.toDegrees(place.latitude).toFixed(6), Math.round(place.height)] : null,
+      lonLat: place ? [+C.Math.toDegrees(place.longitude).toFixed(${LON_LAT_DIGITS}), +C.Math.toDegrees(place.latitude).toFixed(${LON_LAT_DIGITS}), Math.round(place.height)] : null,
       point: pos ? pagePoint(v, pos) : null,
       entity: e,
       viewer: v,
@@ -118,16 +129,19 @@ const VIEWERS = `
     return records;
   }
 
-  // The one entity whose id or name is q, or an { error }.
+  // The one entity whose id, name or label text is q, or an { error, reason: 'missing' }.
   async function findOne(q) {
     var viewers = await findViewers();
-    if (!viewers.length) return { error: 'No cesiumjs scene found' };
+    if (!viewers.length) return ${NO_SCENE};
     var hits = [];
     viewers.forEach(function (v) {
-      allEntities(v).forEach(function (r) { if (r.id === q || r.name === q) hits.push(r); });
+      allEntities(v).forEach(function (r) { if (r.id === q || r.names.indexOf(q) >= 0) hits.push(r); });
     });
-    if (!hits.length) return { error: 'No scene object "' + q + '". Run \`agent-view scene\`' };
-    if (hits.length > 1) return { error: hits.length + ' scene objects "' + q + '": ' + hits.map(function (r) { return r.id; }).join(', ') };
+    if (!hits.length) return { error: 'No scene object "' + q + '". Run \`agent-view scene\`', reason: 'missing' };
+    if (hits.length > 1) {
+      var ids = hits.map(function (r) { return r.id; }).join(', ');
+      return { error: hits.length + ' scene objects "' + q + '": ' + ids + ' — address one by id; an act step needs an id the app sets or a unique name', reason: 'missing' };
+    }
     return hits[0];
   }
 `
@@ -143,46 +157,50 @@ export const CESIUM_EXTRACT_SCRIPT = `
       via: v.via,
       entities: v.entities.values.map(function (e) { return raw(entityRecord(v, e)); }),
       dataSources: dataSourcesOf(v).map(function (ds) {
-        return { name: ds.name, entities: ds.entities.values.map(function (e) { return raw(entityRecord(v, e)); }) };
+        return { name: ds.name || '', entities: ds.entities.values.map(function (e) { return raw(entityRecord(v, e)); }) };
       }),
     };
   });
 })()
 `
 
-/** Page {x, y} to click the object `query` at, or { error }; covered = something else is picked there. */
+/**
+ * Page {x, y} to click the object `query` at, or { error, reason }. Covered: the object is not
+ * among the objects drawn at its point, or HTML over the canvas would take the click there.
+ */
 export const cesiumLocateScript = (query: string): string => `
 (async function () {
   ${VIEWERS}
   var q = ${JSON.stringify(query)};
   var hit = await findOne(q);
   if (hit.error) return hit;
-  var covered = { error: 'Scene object "' + q + '" is covered or off screen' };
+  var covered = { error: 'Scene object "' + q + '" is covered or off screen', reason: 'covered' };
   if (!hit.point) return covered;
   var scene = hit.viewer.scene;
   var rect = scene.canvas.getBoundingClientRect();
   var picked = scene.drillPick(new hit.viewer.Cesium.Cartesian2(hit.point.x - rect.left, hit.point.y - rect.top));
-  var isOnTop = picked.some(function (p) { return p.id === hit.entity; });
-  return isOnTop ? hit.point : covered;
+  var isDrawnThere = picked.some(function (p) { return p.id === hit.entity; });
+  var isCanvasOnTop = document.elementFromPoint(hit.point.x, hit.point.y) === scene.canvas;
+  return isDrawnThere && isCanvasOnTop ? hit.point : covered;
 })()
 `
 
-/** Points the camera straight down over the target; returns { lonLat } where it went, or { error }. */
+/** Points the camera straight down over the target; returns { lonLat } where it went, or { error, reason }. */
 export const cesiumGotoScript = (target: SceneGoto): string => `
 (async function () {
   ${VIEWERS}
   var target = ${JSON.stringify(target)};
   var v, lon, lat;
-  if ('query' in target) {
-    var hit = await findOne(target.query);
+  if ('scene' in target) {
+    var hit = await findOne(target.scene);
     if (hit.error) return hit;
-    if (!hit.lonLat) return { error: 'Scene object "' + target.query + '" has no position' };
+    if (!hit.lonLat) return { error: 'Scene object "' + target.scene + '" has no position', reason: 'missing' };
     v = hit.viewer;
     lon = hit.lonLat[0];
     lat = hit.lonLat[1];
   } else {
     v = (await findViewers())[0];
-    if (!v) return { error: 'No cesiumjs scene found' };
+    if (!v) return ${NO_SCENE};
     lon = target.lon;
     lat = target.lat;
   }

@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { CDPTimeoutError, withTimeout } from '../cdp/transport.js'
 import { EvaluationError, MouseButton, type ClickOpts, type Modifier, type PageSession, type Point, type Rect } from '../cdp/types.js'
 import { findByLocator, locatorFromArgs, testIdLocator, type Locator } from './locator.js'
+import type { SceneGoto } from '../inspectors/scene/index.js'
 import { AGENT_VIEW_DIR } from './port.js'
 
 /**
@@ -16,10 +17,9 @@ export type RowTarget = { testid?: string; role: string; name: string; nth?: num
 /** Any element by test id or CSS: what is no table row (a canvas, a drop zone). */
 export type ElementTarget = { testid: string } | { selector: string }
 
-/** A map object by id or name (`scene` of the cesiumjs engine): located on the canvas at each click, no DOM node. */
+/** A scene object by id, name or label: no DOM node, the engine's scene adapter locates it on the canvas at each click. */
 export type SceneTarget = { scene: string }
 
-/** A target with a DOM node to act on. */
 export type NodeTarget = RowTarget | ElementTarget
 
 export type Target = NodeTarget | SceneTarget
@@ -47,8 +47,8 @@ export type RecordedStep =
   | { op: 'drag'; target: NodeTarget; at?: Point; to?: NodeTarget; edge: Edge; toAt?: Point; isHtml5?: boolean }
   /** A state no element shows (data loaded, an animation over): runs page JS, so `allowEval` only. */
   | { op: 'wait'; expr: string }
-  /** The map camera over `lon,lat[,height]` or a scene object (`scene --goto`). */
-  | { op: 'goto'; place: string }
+  /** The camera over a place, as `scene --goto`. */
+  | { op: 'goto'; place: SceneGoto }
 
 export type SceneClickStep = { op: ClickOp; target: SceneTarget; modifiers?: Modifier[] }
 

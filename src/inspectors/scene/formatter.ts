@@ -60,13 +60,13 @@ function collectSingleChildChain(node: SceneNode, options: SceneOptions): SceneN
   return chain
 }
 
-const at = (node: SceneNode): string => (node.x === undefined ? '' : ` (${node.x},${node.y})`)
+const pointSuffix = (node: SceneNode): string => (node.x === undefined ? '' : ` (${node.x},${node.y})`)
 
 /** Single-node label without indent — used inside compact chains. */
 function nodeLabel(node: SceneNode, options: SceneOptions): string {
   const vis = node.visible ? '' : ' [hidden]'
   const nameStr = node.name ? ` "${node.name}"` : ''
-  let label = `${node.type}${nameStr}${at(node)}${vis}`
+  let label = `${node.type}${nameStr}${pointSuffix(node)}${vis}`
 
   if (node.extras) {
     for (const [key, value] of Object.entries(node.extras)) {
@@ -109,7 +109,7 @@ function diffNode(prev: SceneNode, curr: SceneNode, depth: number, changes: stri
   const diffs: string[] = []
 
   if (prev.x !== curr.x || prev.y !== curr.y) {
-    diffs.push(`pos: ${at(prev).trim() || '∅'}→${at(curr).trim() || '∅'}`)
+    diffs.push(`pos: ${pointSuffix(prev).trim() || '∅'}→${pointSuffix(curr).trim() || '∅'}`)
   }
   if (prev.visible !== curr.visible) {
     diffs.push(`visible: ${prev.visible}→${curr.visible}`)
@@ -155,7 +155,7 @@ function diffChildren(
   for (const [key, child] of currByKey) {
     const prevChild = prevByKey.get(key)
     if (!prevChild) {
-      changes.push(`${indent}  + ${child.type}${child.name ? ` "${child.name}"` : ''}${at(child)}`)
+      changes.push(`${indent}  + ${child.type}${child.name ? ` "${child.name}"` : ''}${pointSuffix(child)}`)
     } else {
       diffNode(prevChild, child, depth + 1, changes)
     }
@@ -163,7 +163,7 @@ function diffChildren(
 
   for (const [key, child] of prevByKey) {
     if (!currByKey.has(key)) {
-      changes.push(`${indent}  - ${child.type}${child.name ? ` "${child.name}"` : ''}${at(child)}`)
+      changes.push(`${indent}  - ${child.type}${child.name ? ` "${child.name}"` : ''}${pointSuffix(child)}`)
     }
   }
 }

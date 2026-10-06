@@ -2,7 +2,7 @@ import type { PageSession, Point } from '../cdp/types.js'
 import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
 import type { ServerResponse, WebGLEngine } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
-import { locateSceneObject, moveSceneCamera } from '../inspectors/scene/index.js'
+import { clickSceneObject, describePlace, moveSceneCamera, type SceneMiss } from '../inspectors/scene/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
 import {
   CLICKS,
@@ -148,8 +148,8 @@ async function planRun(store: string, name: string, params: Record<string, strin
  * A saved `act` run, executed with no model and no settle: each step waits only until
  * its own target is on screen, enabled and uncovered, then acts. First line of the
  * result: `DONE` (until met), `FAIL` (the app did not answer: until never came, or a
- * control stayed disabled or covered — a bug) or `STALE` (a step's control is gone —
- * the script no longer fits the app). Its `after` chain, or a use case's steps, run
+ * control or scene object stayed disabled or covered — a bug) or `STALE` (a step's control
+ * or scene object is gone or no longer unique — the script no longer fits the app). Its `after` chain, or a use case's steps, run
  * first, from the nearest one whose own until already holds; one that is not DONE ends
  * the run with its verdict. `${NAME}` in any script of the chain takes `params[NAME]`; one
  * missing refuses the run before its first step.
@@ -245,16 +245,21 @@ export async function replay(
     }
   }
 
-  /** Polls `probe` for the step's time until it answers no `{ error }` (a map still loading): its answer, or a STALE verdict. */
-  const untilAnswered = async <T extends object>(what: string, probe: (c: PageSession) => Promise<T | { error: string }>): Promise<T | ServerResponse> => {
-    let reason = ''
+  /**
+   * Polls `probe` for the step's time until it answers no miss (a scene still loading): its answer, else
+   * FAIL for an object that stayed covered, STALE for one that stayed missing.
+   */
+  const untilAnswered = async <T extends object>(what: string, probe: (c: PageSession) => Promise<T | SceneMiss>): Promise<T | ServerResponse> => {
+    let miss: SceneMiss | undefined
     const answer = await poll(deps, async (c) => {
       const result = await probe(c)
       if (!('error' in result)) return result
-      reason = result.error
+      miss = result
       return undefined
     }, STEP_TIMEOUT_MS)
-    return answer ?? verdict(EXIT_STALE, `STALE: ${what} — ${reason} after ${STEP_TIMEOUT_MS / 1000}s`)
+    if (answer) return answer
+    const [exitCode, word] = miss?.reason === 'covered' ? [EXIT_FAIL, 'FAIL'] : [EXIT_STALE, 'STALE']
+    return verdict(exitCode, `${word}: ${what} — ${miss?.error} after ${STEP_TIMEOUT_MS / 1000}s`)
   }
 
   type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' } | SceneClickStep>
@@ -305,14 +310,14 @@ export async function replay(
         continue
       }
       if (step.op === 'goto') {
-        const moved = await untilAnswered(`${at} goto ${step.place}`, c => moveSceneCamera(c, deps.engine, step.place))
+        const moved = await untilAnswered(`${at} goto ${describePlace(step.place)}`, c => moveSceneCamera(c, deps.engine, step.place))
         if ('ok' in moved) return moved
         continue
       }
       if (isSceneClick(step)) {
-        const found = await untilAnswered(`${at} ${step.op} ${describeTarget(step.target)}`, c => locateSceneObject(c, deps.engine, step.target.scene))
-        if ('ok' in found) return found
-        await deps.conn.clickAtPosition(found.x, found.y, { ...CLICKS[step.op], modifiers: step.modifiers })
+        const opts = { ...CLICKS[step.op], modifiers: step.modifiers }
+        const clicked = await untilAnswered(`${at} ${step.op} ${describeTarget(step.target)}`, c => clickSceneObject(c, deps.engine, step.target.scene, opts))
+        if ('ok' in clicked) return clicked
         deps.invalidateAxCache()
         continue
       }

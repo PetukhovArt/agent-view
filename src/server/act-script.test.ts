@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { EvaluationError, type PageSession } from '../cdp/types.js'
-import { edgePoint, exprCondition, markParams, paramsOf, scriptStore, unmet } from './act-script.js'
+import { edgePoint, exprCondition, markParams, paramsOf, parseTarget, scriptStore, unmet } from './act-script.js'
 
 describe('unmet', () => {
   /** Runs the expression the way Runtime.evaluate does, in this realm: a promise is awaited only with awaitPromise. */
@@ -27,6 +27,12 @@ describe('unmet', () => {
     ['an expression that throws does not, naming the error', 'notDefinedAnywhere.loaded', 'threw ReferenceError: notDefinedAnywhere is not defined'],
   ])('%s', async (_, expr, reason) => {
     expect(await unmet(page, exprCondition(expr), 50)).toBe(reason)
+  })
+})
+
+describe('parseTarget', () => {
+  it('keeps a scene object name whole, `@` and all: a scene target takes no @x,y', () => {
+    expect(parseTarget('scene=Tower@12,4')).toEqual({ scene: 'Tower@12,4' })
   })
 })
 
