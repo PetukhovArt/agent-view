@@ -1,6 +1,8 @@
 # agent-view command reference
 
-Every command accepts `--window <id|name>`. Output is plain text, except `discover` (JSON) and
+Every command accepts `--window <id|name>`. Without it a command uses the window the previous
+command on this CDP port used, while that window is open, so a popup the app opens does not take
+over; the first command takes the app's first window. Output is plain text, except `discover` (JSON) and
 `screenshot` (a file path). Refs (`[ref=N]`) and req handles (`[req=N]`) are reallocated on every
 listing call — always expand from the most recent one.
 
@@ -439,6 +441,13 @@ agent-view screenshot                          # Full-res PNG (expensive: ~19k t
 ```
 
 `--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing. `--testid` / `--selector` crop the same way and take `--crop-up`, but a miss exits 1 instead: an exact address that misses is a wrong address, and a full-window capture would spend ~19k tokens on it. Pass at most one of `--crop`, `--testid`, `--selector`.
+
+**Hidden window**: Chromium draws no frame for a minimised or covered window or a background tab
+(`document.visibilityState` is `hidden`), so `screenshot` fails at once with `Window is hidden
+(minimised, covered or a background tab): …` and the launch flags that keep the window drawing.
+agent-view never brings a window to the front. `dom`, `click`, `fill`, `eval` and the rest work on a
+hidden window. Electron with `backgroundThrottling: false` reports `visible` even when minimised, and
+there a screenshot of a minimised window still times out.
 
 Screenshot pixels are CSS pixels, whatever the OS display scale: a point read off a full-window screenshot is the `click --pos` / `drag --from-pos` coordinate as is. Divide it by `--scale` when you passed one; on a `--crop` it is an offset from the element's top-left (the `act … @x,y` form).
 

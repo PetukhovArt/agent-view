@@ -34,8 +34,13 @@ read it before your first call in a session.
 | `heap`                               | what grew between two heap snapshots, and what retains it      |
 | `scene` `snap`                       | canvas / WebGL scene graph (only when `webgl` is configured)   |
 
-Every command takes `--window <id|name>`. Refs (`[ref=N]`) are session-scoped — after HMR or navigation, re-run `dom`
-for fresh ones.
+Every command takes `--window <id|name>`; without it a command stays in the window the previous one used. Refs
+(`[ref=N]`) are session-scoped — after HMR or navigation, re-run `dom` for fresh ones.
+
+The app window may stay in the background: only `screenshot` needs it drawn, and on a hidden window it fails at once
+with a hint instead of hanging. To keep it drawn, start Electron with `webPreferences.backgroundThrottling: false` (not while minimised),
+Chrome with `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` and the page in its own
+window; Tauri (WebView2) needs nothing.
 
 ## Picking the right tool
 

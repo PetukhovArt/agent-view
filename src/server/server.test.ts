@@ -2,6 +2,12 @@ import { describe, it, expect, vi } from 'vitest'
 import { AgentViewServer, parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs, resolveUploadPath } from './server.js'
 import { join } from 'node:path'
 import { VERSION } from '../version.js'
+import { listSupportedTargets } from '../cdp/transport.js'
+
+vi.mock('../cdp/transport.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../cdp/transport.js')>(),
+  listSupportedTargets: vi.fn(),
+}))
 import type { PageSession, AXNode, TargetInfo } from '../cdp/types.js'
 import { TargetType } from '../cdp/types.js'
 
@@ -326,6 +332,28 @@ describe('per-port state', () => {
     slot3.logRecorder = { file: 'slot3/.agent-view/console.log' }
     expect(slot9.logRecorder).toBeNull()
     expect(server.isAnyRecording()).toBe(true)
+  })
+})
+
+// ── default window ────────────────────────────────────────────────────────────
+
+describe('a command without -w', () => {
+  const main = { id: 'main-0000', type: TargetType.Page, title: 'App', url: 'app://index.html' }
+  const popup = { id: 'popup-000', type: TargetType.Page, title: 'Popup', url: 'app://popup.html' }
+
+  // Regression: CDP lists the newest window first, so a popup the app opened took every
+  // later command without -w, and the main window looked reloaded.
+  it.each(['resolveWindow', 'resolveTarget'] as const)('%s stays in the last used window while it lives', async (method) => {
+    const server = new AgentViewServer() as unknown as Record<typeof method, (req: unknown) => Promise<{ targetId?: string; id?: string }>>
+    const req = { command: 'eval', port: 9222, runtime: 'electron', args: {} }
+    const pick = async () => { const r = await server[method](req); return r.targetId ?? r.id }
+
+    vi.mocked(listSupportedTargets).mockResolvedValue([main])
+    expect(await pick()).toBe(main.id)
+    vi.mocked(listSupportedTargets).mockResolvedValue([popup, main])
+    expect(await pick()).toBe(main.id)
+    vi.mocked(listSupportedTargets).mockResolvedValue([popup])
+    expect(await pick()).toBe(popup.id)
   })
 })
 

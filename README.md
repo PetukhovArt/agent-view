@@ -334,7 +334,15 @@ Full form with all optional fields:
 
 ## Commands
 
-Every command targeting a window accepts `--window <id|title-substring>` (IDs come from `discover`). Examples below omit it for brevity.
+Every command targeting a window accepts `--window <id|title-substring>` (IDs come from `discover`). Examples below omit it for brevity. Without it a command uses the window the previous command on that CDP port used, while it is open, so a popup the app opens does not take over.
+
+The app window can stay in the background, and agent-view never brings it to the front. Only `screenshot` needs a drawn window: on a minimised or covered window or a background tab it fails at once with a hint. To keep the window drawn:
+
+| Runtime | Launch with |
+|---|---|
+| Electron | `webPreferences: { backgroundThrottling: false }` (a minimised window is still not drawn) |
+| Chrome | `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding`, the page in a window of its own |
+| Tauri (WebView2) | nothing |
 
 ### `init`
 

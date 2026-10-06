@@ -219,6 +219,8 @@ type PortState = {
   networkNextRef: number
   logRecorder: LogRecorder | null
   act: ActSession | null
+  /** The window the last command here used. Without `-w` the next one stays in it while it lives, so a popup does not take over. */
+  lastWindow: string | null
 }
 
 export class AgentViewServer {
@@ -293,6 +295,7 @@ export class AgentViewServer {
         networkNextRef: 1,
         logRecorder: null,
         act: null,
+        lastWindow: null,
       }
       this.portStates.set(port, state)
     }
@@ -466,9 +469,11 @@ export class AgentViewServer {
       }
       targetId = found.id
     } else {
-      targetId = windows[0].id
+      const last = this.stateFor(req.port).lastWindow
+      targetId = (windows.find(w => w.id === last) ?? windows[0]).id
     }
 
+    this.stateFor(req.port).lastWindow = targetId
     return { targetId, windows }
   }
 
@@ -1430,20 +1435,23 @@ export class AgentViewServer {
       throw new Error(describeTargetMatchFailure(explicitId, match))
     }
 
+    const state = this.stateFor(req.port)
+    const pages = allTargets.filter(t => t.type === TargetType.Page)
     if (windowArg) {
-      const pages = allTargets.filter(t => t.type === TargetType.Page)
       const byId = pages.find(t => t.id === windowArg)
       const byTitle = pages.find(t => t.title.toLowerCase().includes(windowArg.toLowerCase()))
       const found = byId ?? byTitle
       if (!found) {
         throw new Error(`Window not found: "${windowArg}".`)
       }
+      state.lastWindow = found.id
       return found
     }
 
-    const firstPage = allTargets.find(isAppTarget) ?? allTargets.find(t => t.type === TargetType.Page)
-    if (!firstPage) throw new Error('No page targets found.')
-    return firstPage
+    const page = pages.find(t => t.id === state.lastWindow) ?? allTargets.find(isAppTarget) ?? pages[0]
+    if (!page) throw new Error('No page targets found.')
+    state.lastWindow = page.id
+    return page
   }
 
   private async handleEval(req: ServerRequest): Promise<ServerResponse> {

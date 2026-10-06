@@ -197,6 +197,32 @@ describe('captureScreenshot', () => {
     const pixel = inflateSync(buffer.subarray(41, 41 + idatLen)).subarray(1)
     expect([...pixel]).toEqual([0, 0, 255, 255])
   })
+
+  // A hidden window gets no frame, and the capture waited for one until the 45 s deadline.
+  it('fails at once with a hint on a hidden page, never asking Chromium for a frame', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const client = await mockCDP.mock.results[0].value
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { value: 'hidden' } })
+
+    await expect(conn.captureScreenshot()).rejects.toThrow(/hidden.*backgroundThrottling/s)
+    expect(mockCaptureScreenshot).not.toHaveBeenCalled()
+  })
+})
+
+describe('queryAXTree', () => {
+  // queryAXTree waits for a frame too: on a hidden page `click --filter` hung until the deadline.
+  it('leaves a hidden page to the full tree, and queries again once it is shown', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const client = await mockCDP.mock.results[0].value
+    client.Accessibility.queryAXTree.mockClear()
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { value: 'hidden' } })
+
+    await expect(conn.queryAXTree({ accessibleName: 'Save' })).resolves.toBeNull()
+    expect(client.Accessibility.queryAXTree).not.toHaveBeenCalled()
+
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { value: 'visible' } })
+    await expect(conn.queryAXTree({ accessibleName: 'Save' })).resolves.toEqual([])
+  })
 })
 
 describe('clickByNodeId', () => {

@@ -1043,6 +1043,11 @@ const MODIFIER_BITS: Record<Modifier, number> = { alt: 1, ctrl: 2, meta: 4, shif
 const DRAG_INTERCEPT_TIMEOUT_MS = 1000
 const DRAG_NOT_INTERCEPTED =
   'no HTML5 drag started (Input.dragIntercepted not fired within 1 s): the element at --from is not draggable, or a control (input/select/button) under the cursor swallowed dragstart'
+const HIDDEN_PAGE_SCREENSHOT =
+  'Window is hidden (minimised, covered or a background tab): Chromium draws it no frame, so a screenshot would wait forever. '
+  + 'Show the window, or start the app so it keeps drawing: Electron `webPreferences.backgroundThrottling: false` (still nothing while minimised); '
+  + 'Chrome `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` with the page in a window of its own. '
+  + 'dom, click, eval and the other non-pixel commands work on a hidden window.'
 
 export async function connectToPage(
   port: number,
@@ -1101,6 +1106,12 @@ export async function connectToPage(
 
   // null = not yet tested; true = available; false = unavailable (API not supported)
   let queryAXTreeAvailable: boolean | null = null
+
+  /** Hidden, Chromium draws the page no frame, and a command that waits for one hangs. */
+  async function isHidden(): Promise<boolean> {
+    const { result } = await Runtime.evaluate({ expression: 'document.visibilityState', returnByValue: true })
+    return result.value === 'hidden'
+  }
 
   Page.frameNavigated(async () => {
     cache.invalidate(cacheKey)
@@ -1387,7 +1398,8 @@ export async function connectToPage(
     },
 
     async queryAXTree({ accessibleName, role }: { accessibleName?: string; role?: string }): Promise<AXNode[] | null> {
-      if (queryAXTreeAvailable === false) return null
+      // queryAXTree waits for a frame; null sends the caller to the full tree, which does not.
+      if (queryAXTreeAvailable === false || await isHidden()) return null
       try {
         const { nodes } = await Accessibility.queryAXTree({
           backendNodeId: documentBackendNodeId,
@@ -1403,6 +1415,7 @@ export async function connectToPage(
     },
 
     async captureScreenshot(opts?: ScreenshotOpts): Promise<ScreenshotResult> {
+      if (await isHidden()) throw new Error(HIDDEN_PAGE_SCREENSHOT)
       // Never pass `clip` to Chromium: see cropScalePng for why.
       const { data } = await Page.captureScreenshot({ format: 'png' })
       const png = Buffer.from(data, 'base64')
