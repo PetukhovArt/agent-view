@@ -53,6 +53,7 @@ const DETACHED_PREFIX = 'Detached '
 const NODES_KEY = '"nodes":['
 const EDGES_KEY = '"edges":['
 const STRINGS_KEY = '"strings":['
+const [DIGIT_0, DIGIT_9, CLOSE_BRACKET, BACKSLASH, QUOTE] = ['0', '9', ']', '\\', '"'].map(c => c.charCodeAt(0))
 
 export type HeapSnapshotParser = {
   push(chunk: string): void
@@ -74,10 +75,10 @@ export function createHeapSnapshotParser(name: string, target: string): HeapSnap
   let nodes: Uint32Array | undefined
   let edges: Uint32Array | undefined
   let value = 0
-  let inNumber = false
+  let isInNumber = false
   const strings: string[] = []
-  let inString = false
-  let escaped = false
+  let isInString = false
+  let isEscaped = false
   let raw: string[] = []
 
   /** Skips to `key`, which a chunk border may split. Returns where the text after it starts, or -1. */
@@ -96,15 +97,15 @@ export function createHeapSnapshotParser(name: string, target: string): HeapSnap
   const readNumbers = (text: string): number => {
     for (let i = 0; i < text.length; i++) {
       const c = text.charCodeAt(i)
-      if (c >= 48 && c <= 57) {
-        value = value * 10 + (c - 48)
-        inNumber = true
+      if (c >= DIGIT_0 && c <= DIGIT_9) {
+        value = value * 10 + (c - DIGIT_0)
+        isInNumber = true
         continue
       }
-      if (inNumber) numbers.push(value)
+      if (isInNumber) numbers.push(value)
       value = 0
-      inNumber = false
-      if (c === 93) return i + 1
+      isInNumber = false
+      if (c === CLOSE_BRACKET) return i + 1
     }
     return -1
   }
@@ -113,20 +114,20 @@ export function createHeapSnapshotParser(name: string, target: string): HeapSnap
   const readStrings = (text: string): number => {
     let i = 0
     while (i < text.length) {
-      if (!inString) {
+      if (!isInString) {
         const c = text[i]
-        if (c === '"') { inString = true; raw = [] }
+        if (c === '"') { isInString = true; raw = [] }
         else if (c === ']') return i + 1
         i++
         continue
       }
-      // `escaped` outlives the chunk: a backslash may end one and its escaped quote start the next.
+      // `isEscaped` outlives the chunk: a backslash may end one and its escaped quote start the next.
       let close = i
       for (; close < text.length; close++) {
         const c = text.charCodeAt(close)
-        if (escaped) escaped = false
-        else if (c === 92) escaped = true
-        else if (c === 34) break
+        if (isEscaped) isEscaped = false
+        else if (c === BACKSLASH) isEscaped = true
+        else if (c === QUOTE) break
       }
       if (close === text.length) {
         raw.push(text.slice(i))
@@ -135,7 +136,7 @@ export function createHeapSnapshotParser(name: string, target: string): HeapSnap
       raw.push(text.slice(i, close))
       const s = raw.join('')
       strings.push(s.includes('\\') ? JSON.parse(`"${s}"`) as string : s)
-      inString = false
+      isInString = false
       i = close + 1
     }
     return -1
@@ -192,17 +193,19 @@ export function createHeapSnapshotParser(name: string, target: string): HeapSnap
     push,
     end() {
       if (phase !== 'done' || !head || !nodes || !edges) throw new Error('Heap snapshot ended before its strings')
-      return buildSnapshot(name, target, head.meta, nodes, edges, strings)
+      return buildSnapshot({ name, target, meta: head.meta, nodes, edges, strings })
     },
   }
 }
 
-/** A Uint32Array that doubles when full; sized up front when the snapshot head gives the count. */
+const MIN_CAPACITY = 1024
+
+/** Sized up front from the snapshot head's counts; a head without them still parses. */
 class GrowingUint32 {
   private data: Uint32Array
   private length = 0
   constructor(expected: number) {
-    this.data = new Uint32Array(Math.max(expected, 1024))
+    this.data = new Uint32Array(Math.max(expected, MIN_CAPACITY))
   }
   push(v: number): void {
     if (this.length === this.data.length) {
@@ -217,7 +220,9 @@ class GrowingUint32 {
   }
 }
 
-function buildSnapshot(name: string, target: string, meta: Meta, nodes: Uint32Array, edges: Uint32Array, strings: string[]): HeapSnapshot {
+function buildSnapshot({ name, target, meta, nodes, edges, strings }: {
+  name: string; target: string; meta: Meta; nodes: Uint32Array; edges: Uint32Array; strings: string[]
+}): HeapSnapshot {
   const graph: HeapGraph = {
     nodes,
     edges,

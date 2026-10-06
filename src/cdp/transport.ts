@@ -822,7 +822,9 @@ async function withHandles<T>(client: RawCDPClient, fn: (objectGroup: string) =>
   try {
     return await fn(objectGroup)
   } finally {
-    await client.Runtime.releaseObjectGroup({ objectGroup }).catch(() => { /* socket gone */ })
+    // Not awaited: the session runs commands in order, so no later one sees the handles, and a
+    // plain `eval` pays no extra round trip.
+    void client.Runtime.releaseObjectGroup({ objectGroup }).catch(() => { /* socket gone */ })
   }
 }
 
@@ -1194,7 +1196,7 @@ export async function connectToPage(
   const { Runtime, Accessibility, Page, DOM, Input } = client as RawCDPClient & {
     Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
     Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
-    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; requestNode: (p: Record<string, unknown>) => Promise<{ nodeId: number }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown>; getNodeForLocation: (p: Record<string, unknown>) => Promise<{ backendNodeId: number }> }
+    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown>; getNodeForLocation: (p: Record<string, unknown>) => Promise<{ backendNodeId: number }> }
     Input: InputDomain
     DOMDebugger: DOMDebuggerDomain
   }
@@ -1377,8 +1379,8 @@ export async function connectToPage(
       }) as { result?: { objectId?: string } }
       const ancestorObjectId = climbed.result?.objectId
       if (!ancestorObjectId) return backendNodeId
-      const { nodeId } = await DOM.requestNode({ objectId: ancestorObjectId })
-      const { node } = await DOM.describeNode({ nodeId })
+      // Not `DOM.requestNode`: a node pushed to the DOM agent stays held by it after release.
+      const { node } = await DOM.describeNode({ objectId: ancestorObjectId })
       return node.backendNodeId
     })
   }

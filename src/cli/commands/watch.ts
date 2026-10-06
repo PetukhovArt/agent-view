@@ -91,7 +91,7 @@ function openAndStream(request: object, options: WatchOptions): Promise<void> {
     let buffer = ''
     let exitCode = 0
     let stopReceived = false
-    let stale = false
+    let isStale = false
     let sigintReceived = false
 
     const onSigint = (): void => {
@@ -126,7 +126,7 @@ function openAndStream(request: object, options: WatchOptions): Promise<void> {
         if (parsed && typeof parsed === 'object' && 'ok' in parsed) {
           const r = parsed as ServerResponse
           if (isStaleServer(r)) {
-            stale = true
+            isStale = true
             socket.destroy()
             reject(new StaleServer(r))
             return
@@ -149,7 +149,7 @@ function openAndStream(request: object, options: WatchOptions): Promise<void> {
 
     socket.on('close', () => {
       process.off('SIGINT', onSigint)
-      if (stale) return
+      if (isStale) return
       if (!stopReceived && exitCode === 0) {
         // Server closed without a stop frame → unusual
         process.stderr.write('warning: server closed connection without stop frame\n')

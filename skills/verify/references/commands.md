@@ -2,7 +2,8 @@
 
 Every command accepts `--window <id|name>`. Without it a command uses the window the previous
 command on this CDP port used, while that window is open, so a popup the app opens does not take
-over; the first command takes the app's first window. Output is plain text, except `discover` (JSON) and
+over. The first command, and the first after the server restarts, takes the first app window
+CDP lists, usually the newest: pass `--window` there. Output is plain text, except `discover` (JSON) and
 `screenshot` (a file path). Refs (`[ref=N]`) and req handles (`[req=N]`) are reallocated on every
 listing call — always expand from the most recent one.
 

@@ -163,25 +163,37 @@ async function main(): Promise<void> {
 
     // A lookup that keeps a handle on the element it found keeps it alive after the app drops it.
     // An IIFE: a top-level `const` would outlive the call in the global lexical scope.
+    // The `held-target` twin stays referenced from the page: it proves the class name below is
+    // the one the heap prints, so an empty answer for `lookup-target` means collected.
     const planted = await evalIn(`(() => {
-      const b = document.createElement('button');
-      b.className = 'lookup-target';
-      b.setAttribute('data-testid', 'lookup-target');
-      b.textContent = 'Lookup target';
-      document.body.appendChild(b);
+      for (const name of ['lookup-target', 'held-target']) {
+        const b = document.createElement('button');
+        b.className = name;
+        b.setAttribute('data-testid', name);
+        b.textContent = name;
+        document.body.appendChild(b);
+      }
+      window.__heldTarget = document.querySelector('.held-target');
       return 1
     })()`)
     check('planted the lookup target', planted.ok, planted.error ?? '')
     const waited = await sendCommand({ ...base, command: 'wait', args: { testid: 'lookup-target', timeout: 5, cwd } })
     const clicked = await sendCommand({ ...base, command: 'click', args: { testid: 'lookup-target', cwd } })
-    check('wait and click --testid found the target', waited.ok && clicked.ok, String(waited.error ?? clicked.error ?? ''))
-    await evalIn(`document.querySelector('.lookup-target').remove()`)
+    const cropped = await sendCommand({ ...base, command: 'screenshot', args: { testid: 'lookup-target', cropUp: 1, scale: 0.2, cwd } })
+    check('wait, click and screenshot --crop-up found the target', waited.ok && clicked.ok && cropped.ok,
+      String(waited.error ?? clicked.error ?? cropped.error ?? ''))
+    await evalIn(`document.querySelectorAll('.lookup-target, .held-target').forEach(b => b.remove())`)
     await heap({ action: 'take', name: 'after-lookup' })
+    const retainersOf = async (name: string): Promise<string> => {
+      const r = await heap({ action: 'retainers', name: 'after-lookup', class: `Detached <button class="${name}" data-testid="${name}">` })
+      return String(r.data ?? r.error)
+    }
+    const control = await retainersOf('held-target')
+    check('the detached class name matches the heap\'s', control.includes('retained by'), control)
     // Chromium's own input state (InternalNode) keeps the last clicked node, as after a user's
     // click. The inspector's handles, retained as "DevTools console", are agent-view's.
-    const held = await heap({ action: 'retainers', name: 'after-lookup', class: 'Detached <button class="lookup-target" data-testid="lookup-target">' })
-    const hTxt = String(held.data ?? held.error)
-    check('a lookup keeps no handle on the element', held.ok && !hTxt.includes('DevTools console'), hTxt)
+    const lookup = await retainersOf('lookup-target')
+    check('a lookup keeps no handle on the element', !lookup.includes('DevTools console'), lookup)
   } finally {
     await sendCommand({ token, command: 'stop', args: {} } as Record<string, unknown>).catch(() => {})
     proc.kill()

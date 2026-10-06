@@ -350,7 +350,8 @@ export class AgentViewServer {
       }
       // Refused before any handler, so the CLI can replace this server and resend. A CLI
       // older than the field sends none and is served as before.
-      if (request.command !== 'stop' && request.version !== undefined && request.version !== VERSION) {
+      const isOtherVersion = request.version !== undefined && request.version !== VERSION
+      if (request.command !== 'stop' && isOtherVersion) {
         socket.end(JSON.stringify({ ok: false, error: 'VersionMismatch', data: VERSION } satisfies ServerResponse) + DELIMITER)
         return
       }
@@ -420,7 +421,7 @@ export class AgentViewServer {
     // The abandoned handler may still reject later — never let it reach the process guard.
     pending.catch(() => { /* orphaned after deadline */ })
     this.dropSessionsForPort(req.port)
-    const stillRunning = req.command === 'eval' && req.args['await'] === true
+    const awaitedPromiseNote = req.command === 'eval' && req.args['await'] === true
       ? ' The awaited Promise still runs in the page and nothing cancels it: what it patched stays patched until it settles, so check that before running it again.'
       : ''
     return {
@@ -428,7 +429,7 @@ export class AgentViewServer {
       error: `Timed out after ${Math.round(budget / 1000)}s waiting for CDP (command: ${req.command}, port: ${req.port}). `
         + `Dropped cached CDP sessions for that port — retry the command. `
         + `If it keeps timing out, the app's DevTools endpoint is wedged: restart the app, or run \`agent-view stop\`.`
-        + stillRunning,
+        + awaitedPromiseNote,
       code: ServerErrorCode.CDPTimeout,
     }
   }
