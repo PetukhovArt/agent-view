@@ -128,6 +128,8 @@ sibling directories; `src/server/` and `src/config/` colocate them next to the s
 ## Conventions enforced in this repo
 
 - **Console is lazy-attach**: `console` has no back-buffer, so any doc or skill describing it must teach
+- **All work is committed straight to `main`**: no feature branches and no per-task worktrees.
+
   `clear → act → check` (see `skills/verify/SKILL.md`). This is a console rule, not a house rule for every stream —
   network attaches eagerly on purpose ([ADR 0002](./docs/adr/0002-eager-network-capture-lifecycle.md)). A new per-target
   stream picks its lifecycle from where its value sits, and records the choice as an ADR.
