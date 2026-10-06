@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.0] - 2026-10-06
+
+### Added
+- `scene` reads CesiumJS maps (`"webgl": { "engine": "cesiumjs" }`): every entity of `viewer.entities` and of each data source, with its id, name (the label text when it has none), graphics kinds and its point on the page — none when it has no position, is off the canvas or behind the globe. The viewer is found with no app code on a vue-cesium page (its `$VueCesium` registry) and on a page loading `Cesium.js` as a global script; an ESM build sets `window.__CESIUM_VIEWER__ = { viewer, Cesium }`. Every viewer found is kept in `window.__agentView.cesium` for `eval`.
+- `click --scene <object>`: clicks a scene object by id, name or label text where it is drawn now, so a window resize or a panel opening does not move the click. Refused when the object is not among the objects Cesium picks at that point or HTML covers it there.
+- `scene --goto <lon,lat[,height]>` or `scene --goto <object>`: moves the camera straight down over a place or a scene object, with no animation; with no height it keeps the current one.
+- `act click scene=<object>` and `act goto <place>`: steps on scene objects, saved and replayed. Replay finds the object again for up to 10 s: STALE when it is gone, FAIL when it stays covered. See ADR 0007.
+
 ## [0.24.0] - 2026-10-01
 
 ### Added
