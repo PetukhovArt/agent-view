@@ -56,6 +56,16 @@ _Avoid_: Test ref, QA id
 A `--testid` or `--selector` argument. Resolved against the live DOM on every call to the first visible match, so, unlike a Ref, it never goes stale.
 _Avoid_: Finder, Query
 
+## Scene
+
+**Scene Adapter**
+The per-engine part of `scene` (PixiJS, CesiumJS): page scripts that read the engine's scene graph, and for an engine that can, locate a Scene Object and move the camera.
+_Avoid_: Engine Plugin, Scene Driver
+
+**Scene Object**
+One object of a WebGL scene that has no DOM node, such as a Cesium entity. It is addressed by its id, name or label text, and its page point is looked up again at every click, so a pan, zoom or resize in between does not matter.
+_Avoid_: Map Object, Entity, Marker
+
 ## Console and network
 
 **Console Stream**

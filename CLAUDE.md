@@ -24,7 +24,7 @@ npx tsx bench/smoke-network.ts    # network capture: XHR/fetch, a 404, WebSocket
 npx tsx bench/smoke-dialogs.ts    # modals: JS dialog auto-answer, upload, file-chooser arm
 npx tsx bench/smoke-reach.ts      # coverage delta + listeners over real CDP
 npx tsx bench/smoke-heap.ts       # heap snapshot diff + retainers against a planted detached-DOM leak
-npx tsx bench/smoke-cesium.ts     # Cesium scene, click --scene, scene --goto, act scene=/goto on both map pages
+npx tsx bench/smoke-cesium.ts     # Cesium scene, click --scene, scene --goto, act scene=/goto on both map pages, plus the `?hook` viewer hook
 npx tsx bench/run.ts              # token / latency benchmark across scenarios
 ```
 
@@ -82,7 +82,8 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
     - **`ActSession`** (`server/act-session.ts`) — per-port state of the `act` step protocol; saved runs replay in
       `server/act-replay.ts`. See [ADR 0003](./docs/adr/0003-act-step-protocol-and-replay.md); where scripts are
       stored: [ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md); sections, use cases and the
-      store-only commands (`server/act-store.ts`): [ADR 0005](./docs/adr/0005-script-store-sections-and-use-cases.md).
+      store-only commands (`server/act-store.ts`): [ADR 0005](./docs/adr/0005-script-store-sections-and-use-cases.md);
+      steps on scene objects (`scene=`, `goto`): [ADR 0007](./docs/adr/0007-act-steps-on-scene-objects.md).
 
 4. **`src/cli/`** — thin shells. `cli/index.ts` registers commander commands; `cli/commands/*.ts` opens a TCP socket to
    the server and writes a `ServerRequest` JSON line. No business logic here.
@@ -90,8 +91,10 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
 5. **`src/adapters/`** — per-runtime config (`electron`, `tauri`, `browser`). Each returns a `PageSession` via
    `listSupportedTargets` + `connectToPage`. Add new runtimes by registering in `adapters/registry.ts`.
 
-6. **`src/inspectors/`** — pure formatters (DOM tree → compact text, scene graph extractors). `scene/` is
-   engine-pluggable (currently PixiJS via `window.__PIXI_DEVTOOLS__`). `heap/` is the one that also parses: it turns
+6. **`src/inspectors/`** — mostly pure formatters (DOM tree → compact text, scene graph extractors). `scene/` is
+   engine-pluggable through a scene adapter per engine (`scene/adapters/`: PixiJS, CesiumJS); an adapter that can
+   locate scene objects (CesiumJS) also drives the page: `click --scene`, `scene --goto` and the act `scene=` / `goto`
+   steps run its page scripts. `heap/` also parses: it turns
    the `.heapsnapshot` JSON into the typed-array graph the server keeps, then formats views of it. `format.ts` holds
    the helpers every inspector prints with (`capLines`, `formatBytes`).
 

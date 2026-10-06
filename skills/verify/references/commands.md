@@ -68,7 +68,7 @@ agent-view click <ref> --right          # Right-click (fires contextmenu); works
 agent-view click <ref> --modifiers ctrl # Keys held through the click: alt|ctrl|meta|shift, comma-separated (ctrl = multi-select)
 agent-view click --testid save-btn      # By test id (see "Test ids" above)
 agent-view click --selector "tr:nth-child(3) button"  # By CSS selector
-agent-view click --scene "Канал 3"      # cesiumjs: a map object by id or name, where it is drawn now; --right / --double too
+agent-view click --scene "Tower 3"      # cesiumjs: a scene object by id, name or label, where it is drawn now; --right / --double too
 agent-view fill <ref> "text"            # Type into input field
 agent-view fill --testid email "a@b.c"  # A test id on a wrapper resolves to the input/textarea inside
 agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
@@ -105,12 +105,14 @@ testid "x" is visible` when every match is hidden. Pass exactly one of `<ref>`, 
 `--testid`, `--selector`, `--pos`, `--scene`. `fill` exits 1 with `No input or textarea at or inside the
 element` when the element holds no field.
 
-`--scene <object>` (engine `cesiumjs`) matches the entity id or name exactly, as `scene` prints them,
-and clicks its point on the canvas at the time of the call, so a pan, zoom or resize in between does
-not matter: `Clicked scene "Канал 3" at (633, 515)`. Exit 1 with ``No scene object "x". Run
-`agent-view scene` ``, `2 scene objects "x": <id>, <id>` (click by id instead), or `Scene object "x" is
-covered or off screen` when it has no point or another object is picked over it (behind the globe:
-`scene --goto "x"` first). On another engine: `Scene objects by name need the cesiumjs engine, not pixi`.
+`--scene <object>` (engine `cesiumjs`) matches the entity id, name or label text exactly, and clicks
+its point on the canvas at the time of the call, so a pan, zoom or resize in between does not
+matter: `Clicked scene "Tower 3" at (640, 410)`. Exit 1 with ``No scene object "x". Run
+`agent-view scene` ``, `2 scene objects "x": <id>, <id> — address one by id; …` (an id `scene` shows
+as a uuid is generated per load: fine for one click, refused in a saved act script), or `Scene object
+"x" is covered or off screen` when it has no point, is not among the objects drawn at that point, or
+HTML over the canvas would take the click (behind the globe: `scene --goto "x"` first). On an engine
+whose adapter cannot locate objects: `The pixi adapter cannot locate scene objects`.
 
 **Coordinates are a last resort.** `--pos` / `--from-pos` / `--to-pos` exist for canvas and WebGL,
 where no ref exists. On DOM, use `--testid` when `dom` shows one. Otherwise run
@@ -226,8 +228,8 @@ agent-view act dblclick 3               # double-click (fires dblclick); recorde
 agent-view act rightclick 3             # right-click (fires contextmenu); then pick the menu row from the next table
 agent-view act click "css=#content-area canvas@120,80"   # what is no row: testid=<id> | css=<selector>; @x,y = px from its top-left
 agent-view act rightclick 3@10,5        # a row, at a point of it; without @ — its centre
-agent-view act click "scene=Канал 3"    # cesiumjs: a map object by id or name, as click --scene; replay finds it again (up to 10 s)
-agent-view act goto "Канал 3"           # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too)
+agent-view act click "scene=Tower 3"    # cesiumjs: a scene object by id, name or label, as click --scene; replay finds it again (up to 10 s)
+agent-view act goto "Tower 3"           # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25)
 agent-view act click 4 --modifiers ctrl # keys held: alt|ctrl|meta|shift, comma-separated; recorded and replayed (ctrl = add to a selection)
 agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
@@ -655,29 +657,34 @@ agent-view scene --diff                 # Changes since last call
 agent-view scene --compact              # Merge single-child chains onto one line (reduces output)
 agent-view snap                         # DOM + Scene combined
 agent-view snap --scale 0.5             # DOM + Scene + Screenshot (path appended as === Screenshot === section)
-agent-view scene --goto 37.62,55.75,5000   # cesiumjs: camera straight down over lon,lat (degrees) at height (m)
-agent-view scene --goto 37.62,55.75     # … keeping the current height
-agent-view scene --goto "Канал 3"       # … over a scene object by id or name
+agent-view scene --goto 10.5,45.25,5000    # cesiumjs: camera straight down over lon,lat (degrees) at height (m)
+agent-view scene --goto -70.5,-33.25    # … keeping the current height; negative lon/lat as is
+agent-view scene --goto "Tower 3"       # … over a scene object by id, name or label
 ```
 
 Engines: `"engine": "pixi"` reads `window.__PIXI_DEVTOOLS__`; `"engine": "cesiumjs"` finds the
-viewer in this order: a vue-cesium app (`$VueCesium` of each `[data-v-app]` root), then
-`window.__CESIUM_VIEWER__`, then plain CesiumJS through the global `window.Cesium` (the scene is read
-on the next frame). A Cesium scene prints one entity per line, keyed by its id; the name is the
-entity's `name`, else its label text, and the type lists its graphics:
+viewer in this order: a vue-cesium app (`$VueCesium` of each `[data-v-app]` root), then the hook
+`window.__CESIUM_VIEWER__ = { viewer, Cesium }` (the app sets it; an ESM build has no `window.Cesium`),
+then plain CesiumJS through the global `window.Cesium` (the scene is read on the next frame). A Cesium
+scene prints one entity per line, keyed by its id; the name is the entity's `name`, else its label
+text, and the type lists its graphics:
 
 ```
 Viewer "cesiumContainer" via=vue-cesium
   Entities
-    billboard+label "Канал 3" (633,515) id=757cdd69-…
-    billboard+label "За глобусом" id=9f6ff9e9-…
+    billboard+label "Tower 3" (640,410) id=tower-3
+    billboard+label "Far side" id=9f6ff9e9-…
     polygon id=5e5f034f-…
   DataSource "clusters"
     billboard (358,76) id=cl-2
 ```
 
 `(x,y)` is the page point a click lands on; none means no position, off the canvas or behind the
-globe. `--verbose` adds `lonlat=lon,lat,height`. `--goto` prints `Camera over (37.6200, 55.7500) at
-5000 m`, or `Camera over "Канал 3" (…) at … m` for an object. Every found viewer is also kept in
-`window.__agentView.cesium` (`[{ key, via, viewer, scene, Cesium }]`, no `viewer` for plain CesiumJS),
-so `eval` reaches the Cesium API without hunting for it.
+globe. `--verbose` adds `lonlat=lon,lat,height`. `--goto` prints `Camera over (10.5000, 45.2500) at
+5000 m`, or `Camera over "Tower 3" (…) at … m` for an object. A `scene`, `click --scene` or `--goto`
+call also keeps every viewer it found in `window.__agentView.cesium` (`[{ key, via, viewer, scene,
+Cesium }]`), so a later `eval` reaches the Cesium API without hunting for it; before the first such
+call it is unset, and plain CesiumJS found by its frames has no `viewer` there, only `scene` and `Cesium`.
+
+An act step on a scene object needs an id the app sets or a unique name or label: a uuid id Cesium
+generates for an entity without one changes on every load, and `act save` refuses a script holding one.
