@@ -1037,6 +1037,39 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
 const FRAMES_EXPRESSION = 'new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 100) })'
 const BOX_REST_MS = 1000
 
+const NOT_PAINTING =
+  'The app window stopped painting: it is minimized or covered by another window. Bring it to the front and retry. '
+  + 'An app that must work while covered can start with the Chromium switches --disable-backgrounding-occluded-windows --disable-renderer-backgrounding.'
+
+class NotPaintingError extends Error {
+  constructor() {
+    super(NOT_PAINTING)
+    this.name = 'NotPaintingError'
+  }
+}
+
+const PAINT_GRACE_MS = 1_000
+/** A hidden page still runs timers, so the timeout winning proves no frame is coming, not a busy page. */
+const PAINT_PROBE = 'new Promise(r => { requestAnimationFrame(() => r(true)); setTimeout(() => r(false), 1000) })'
+
+/**
+ * Chromium answers `call` only after a frame (an AX query, a screenshot, a mouse move), and a minimized or
+ * covered window draws none, so it would wait forever. Unanswered past the grace, a probe settles it:
+ * no frame rejects with NotPaintingError; a frame keeps waiting on `call`.
+ */
+async function failWhenNotPainting<T>(call: Promise<T>, runtime: RawCDPClient['Runtime']): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const grace = new Promise<void>((resolve) => { timer = setTimeout(resolve, PAINT_GRACE_MS) })
+  const stopped = grace
+    .then(() => runtime.evaluate({ expression: PAINT_PROBE, awaitPromise: true, returnByValue: true }))
+    .then(({ result }) => (result.value === false ? Promise.reject(new NotPaintingError()) : call))
+  try {
+    return await Promise.race([call, stopped])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** CDP `Input.dispatchMouseEvent` `modifiers` bits. */
 const MODIFIER_BITS: Record<Modifier, number> = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 const DRAG_INTERCEPT_TIMEOUT_MS = 1000
@@ -1144,7 +1177,8 @@ export async function connectToPage(
     const unsub = mode === 'pointer' ? undefined : Input.dragIntercepted(({ data }) => { intercepted = data })
     if (unsub) await Input.setInterceptDrags({ enabled: true })
     try {
-      await Input.dispatchMouseEvent({ type: 'mouseMoved', x: from.x, y: from.y })
+      // Checked before the press: a drag failing later would leave its events to land once the window paints.
+      await failWhenNotPainting(Input.dispatchMouseEvent({ type: 'mouseMoved', x: from.x, y: from.y }), Runtime)
       await Input.dispatchMouseEvent({ type: 'mousePressed', x: from.x, y: from.y, button, clickCount: 1 })
       if (holdMs > 0) await sleep(holdMs)
 
@@ -1366,14 +1400,16 @@ export async function connectToPage(
     async queryAXTree({ accessibleName, role }: { accessibleName?: string; role?: string }): Promise<AXNode[] | null> {
       if (queryAXTreeAvailable === false) return null
       try {
-        const { nodes } = await Accessibility.queryAXTree({
+        const query = Accessibility.queryAXTree({
           backendNodeId: documentBackendNodeId,
           accessibleName,
           role,
         })
+        const { nodes } = await failWhenNotPainting(query, Runtime)
         queryAXTreeAvailable = true
         return nodes
-      } catch {
+      } catch (err) {
+        if (err instanceof NotPaintingError) throw err
         queryAXTreeAvailable = false
         return null
       }
@@ -1381,7 +1417,7 @@ export async function connectToPage(
 
     async captureScreenshot(opts?: ScreenshotOpts): Promise<ScreenshotResult> {
       // Never pass `clip` to Chromium: see cropScalePng for why.
-      const { data } = await Page.captureScreenshot({ format: 'png' })
+      const { data } = await failWhenNotPainting(Page.captureScreenshot({ format: 'png' }), Runtime)
       const png = Buffer.from(data, 'base64')
       // The capture is in device pixels. It comes out in CSS pixels, the unit of clip rects and of
       // every click and drag coordinate, so a point read off a screenshot clicks that spot.

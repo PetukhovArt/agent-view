@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { deflateSync, inflateSync } from 'node:zlib'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
@@ -512,6 +512,51 @@ describe('connectToRuntime', () => {
     restarted()
 
     expect(client.Runtime.runIfWaitingForDebugger).toHaveBeenCalledOnce()
+  })
+})
+
+describe('a window that stopped painting', () => {
+  const connectWithProbe = async (isFrameDrawn: boolean) => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const client = await mockCDP.mock.results[mockCDP.mock.results.length - 1].value as {
+      Runtime: { evaluate: ReturnType<typeof vi.fn> }
+      Accessibility: { queryAXTree: ReturnType<typeof vi.fn> }
+    }
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { value: isFrameDrawn } })
+    return { conn, client }
+  }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('a screenshot Chromium never answers fails with the bring-to-front error', async () => {
+    const { conn } = await connectWithProbe(false)
+    mockCaptureScreenshot.mockReturnValueOnce(new Promise(() => {}))
+    const pending = conn.captureScreenshot()
+    pending.catch(() => {})
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    await expect(pending).rejects.toThrow(/stopped painting.*Bring it to the front/)
+  })
+
+  it('a slow screenshot on a window still painting is waited for', async () => {
+    const { conn } = await connectWithProbe(true)
+    mockCaptureScreenshot.mockReturnValueOnce(new Promise(r => setTimeout(() => r({ data: twoColorPng() }), 3_000)))
+    const pending = conn.captureScreenshot()
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    expect((await pending).format).toBe('png')
+  })
+
+  // The AX query's catch fell back to the full tree on any error, which would hide the painting one.
+  it('an AX query fails with the bring-to-front error, not the full-tree fallback', async () => {
+    const { conn, client } = await connectWithProbe(false)
+    client.Accessibility.queryAXTree.mockReturnValueOnce(new Promise(() => {}))
+    const pending = conn.queryAXTree({ accessibleName: 'Save' })
+    pending.catch(() => {})
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    await expect(pending).rejects.toThrow(/stopped painting/)
   })
 })
 
