@@ -87,6 +87,12 @@ describe('markParams', () => {
     expect(paramsOf(marked as typeof script)).toEqual(['NAME', 'ROW'])
   })
 
+  it('marks the --height of a goto step, which a script saves as typed', () => {
+    const gotoScript = { until: { testid: 'camera' }, steps: [{ op: 'goto' as const, place: { scene: 'Tower 3' }, height: '2000' }] }
+
+    expect(markParams(gotoScript, ['HEIGHT=2000'])).toMatchObject({ steps: [{ height: '${HEIGHT}' }] })
+  })
+
   it('refuses a value that occurs nowhere, so a typo does not save a fixed script', () => {
     expect(markParams(script, ['ROW=library/Нет'])).toEqual({ error: '--param ROW: "library/Нет" is in no step and not in the until' })
   })

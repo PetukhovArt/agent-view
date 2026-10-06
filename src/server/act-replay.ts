@@ -2,7 +2,7 @@ import type { PageSession, Point } from '../cdp/types.js'
 import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
 import type { ServerResponse, WebGLEngine } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
-import { clickSceneObject, describePlace, moveSceneCamera, type SceneMiss } from '../inspectors/scene/index.js'
+import { clickSceneObject, describePlace, moveSceneCamera, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
 import {
   CLICKS,
@@ -314,7 +314,10 @@ export async function replay(
         continue
       }
       if (step.op === 'goto') {
-        const moved = await untilAnswered(deps, `${at} goto ${describePlace(step.place)}`, c => moveSceneCamera(c, deps.engine, step.place))
+        const what = `${at} goto ${describePlace(step.place)}`
+        const place = withHeight(step.place, step.height)
+        if ('error' in place) return verdict(EXIT_STALE, `STALE: ${what} — ${place.error}`)
+        const moved = await untilAnswered(deps, what, c => moveSceneCamera(c, deps.engine, place))
         if ('line' in moved) return verdict(moved.exitCode, moved.line)
         continue
       }

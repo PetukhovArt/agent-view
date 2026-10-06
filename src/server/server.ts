@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { isAppTarget } from '../adapters/target-filter.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
-import { getSceneGraph, getRawScene, diffScenes, clickSceneObject, moveSceneCamera, parseScenePlace, type SceneNode } from '../inspectors/scene/index.js'
+import { getSceneGraph, getRawScene, diffScenes, clickSceneObject, moveSceneCamera, parseScenePlace, withHeight, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning, installCDPErrorGuard, PortConflictError } from './launcher.js'
 import { readConfig } from '../config/manager.js'
@@ -1317,8 +1317,12 @@ export class AgentViewServer {
     const conn = await this.getPageSession(req, targetId)
 
     const goto = argStr(req.args, 'goto')
+    const height = argStr(req.args, 'height')
+    if (height !== undefined && goto === undefined) return { ok: false, error: '--height goes with --goto' }
     if (goto !== undefined) {
-      const moved = await moveSceneCamera(conn, req.engine, parseScenePlace(goto))
+      const place = withHeight(parseScenePlace(goto), height)
+      if ('error' in place) return { ok: false, error: place.error }
+      const moved = await moveSceneCamera(conn, req.engine, place)
       return 'error' in moved ? { ok: false, error: moved.error } : { ok: true, data: moved.text }
     }
 

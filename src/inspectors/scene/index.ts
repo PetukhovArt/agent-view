@@ -6,6 +6,7 @@ import type { SceneOptions, SceneNode, SceneAdapter, SceneGoto, SceneMiss } from
 
 const NO_ENGINE = 'No WebGL engine configured. Add "webgl": { "engine": "pixi" | "cesiumjs" } to agent-view.config.json'
 const LON_LAT = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,(-?\d+(?:\.\d+)?))?$/
+const METRES = /^-?\d+(?:\.\d+)?$/
 /** Decimal places of the lon/lat a camera move prints: about 10 m. */
 const CAMERA_DIGITS = 4
 
@@ -69,6 +70,14 @@ export function parseScenePlace(place: string): SceneGoto {
   const m = LON_LAT.exec(place.replace(/\s+/g, ''))
   if (!m) return { scene: place }
   return { lon: Number(m[1]), lat: Number(m[2]), ...(m[3] === undefined ? {} : { height: Number(m[3]) }) }
+}
+
+/** `place` with the camera at `--height` metres; a string, as a saved act step holds it (maybe a filled `${NAME}`). */
+export function withHeight(place: SceneGoto, height: string | undefined): SceneGoto | { error: string } {
+  if (height === undefined) return place
+  if (!METRES.test(height.trim())) return { error: `--height <metres>: "${height}" is not a number` }
+  if (place.height !== undefined) return { error: `height given twice: in ${describePlace(place)} and as --height ${height}` }
+  return { ...place, height: Number(height) }
 }
 
 export const describePlace = (place: SceneGoto): string =>

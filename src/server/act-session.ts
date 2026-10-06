@@ -12,7 +12,7 @@ import {
   type Control,
 } from '../inspectors/controls/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
-import { clickSceneObject, moveSceneCamera, parseScenePlace } from '../inspectors/scene/index.js'
+import { clickSceneObject, moveSceneCamera, parseScenePlace, withHeight } from '../inspectors/scene/index.js'
 import {
   CLICKS,
   EDGES,
@@ -159,7 +159,7 @@ export async function runAct(
     return waitStep(run, expr)
   }
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
-  if (op === 'goto') return gotoStep(run, str(args, 'place'))
+  if (op === 'goto') return gotoStep(run, str(args, 'place'), str(args, 'height'))
   if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
     const target = parseTarget(str(args, 'target')!)
@@ -356,13 +356,15 @@ async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: M
 }
 
 /** The camera over a place: recorded, so a replay sees the scene the clicks after it were decided on. */
-async function gotoStep(run: Run, raw: string | undefined): Promise<ServerResponse> {
-  if (!raw) return { ok: false, error: 'act goto <lon,lat[,height] | scene object>' }
+async function gotoStep(run: Run, raw: string | undefined, height: string | undefined): Promise<ServerResponse> {
+  if (!raw) return { ok: false, error: 'act goto <lon,lat[,height] | scene object> [--height <metres>]' }
   const place = parseScenePlace(raw)
+  const lifted = withHeight(place, height)
+  if ('error' in lifted) return { ok: false, error: lifted.error }
   const before = tableKey(await snapshot(run))
-  const moved = await moveSceneCamera(run.deps.conn, run.deps.engine, place)
+  const moved = await moveSceneCamera(run.deps.conn, run.deps.engine, lifted)
   if ('error' in moved) return { ok: false, error: moved.error }
-  run.session.steps.push({ op: 'goto', place })
+  run.session.steps.push({ op: 'goto', place, ...(height === undefined ? {} : { height }) })
   return finishStep(run, { before, done: moved.text })
 }
 

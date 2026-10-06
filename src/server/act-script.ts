@@ -47,8 +47,8 @@ export type RecordedStep =
   | { op: 'drag'; target: NodeTarget; at?: Point; to?: NodeTarget; edge: Edge; toAt?: Point; isHtml5?: boolean }
   /** A state no element shows (data loaded, an animation over): runs page JS, so `allowEval` only. */
   | { op: 'wait'; expr: string }
-  /** The camera over a place, as `scene --goto`. */
-  | { op: 'goto'; place: SceneGoto }
+  /** The camera over a place, as `scene --goto`; `height` is `--height` as typed, a string so `--param` can mark it. */
+  | { op: 'goto'; place: SceneGoto; height?: string }
 
 export type SceneClickStep = { op: ClickOp; target: SceneTarget; modifiers?: Modifier[] }
 

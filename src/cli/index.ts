@@ -181,6 +181,7 @@ program
   .option('--diff', 'Show only changes since last call')
   .option('--compact', 'Merge single-child chains onto one line')
   .option('--goto <place>', 'Point the camera straight down over lon,lat[,height] (degrees, metres) or a scene object by id, name or label (cesiumjs)')
+  .option('--height <metres>', 'With --goto: the camera height, else the current one is kept')
   .action(async (options) => {
     const config = requireConfig()
     await runScene(config, options)
@@ -499,7 +500,8 @@ act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, 
 act.command('goto <place>').description('Point the camera straight down over lon,lat[,height] or a scene object by id, name or label, as `scene --goto` (cesiumjs)')
   // `-142.38,-55.75` would read as an unknown option.
   .allowUnknownOption()
-  .action(async (place: string) => { await runAct(requireConfig(), { op: 'goto', place }) })
+  .option('--height <metres>', 'The camera height, else the current one is kept')
+  .action(async (place: string, opts: { height?: string }) => { await runAct(requireConfig(), { op: 'goto', place, height: opts.height }) })
 
 act.command('do <steps...>').description('Several ops decided from one table, e.g. act do "type 2 root" "type 3 secret" "click 1"')
   .action(async (steps: string[]) => { await runAct(requireConfig(), { op: 'do', steps }) })

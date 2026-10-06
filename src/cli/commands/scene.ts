@@ -9,6 +9,7 @@ type SceneOptions = {
   diff?: boolean
   compact?: boolean
   goto?: string
+  height?: string
 }
 
 export async function runScene(config: AgentViewConfig, options: SceneOptions): Promise<void> {
@@ -20,6 +21,7 @@ export async function runScene(config: AgentViewConfig, options: SceneOptions): 
   if (options.diff) args.diff = true
   if (options.compact) args.compact = true
   if (options.goto !== undefined) args.goto = options.goto
+  if (options.height !== undefined) args.height = options.height
 
   const response = await sendCommand({
     command: 'scene',
