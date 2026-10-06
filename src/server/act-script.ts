@@ -16,7 +16,13 @@ export type RowTarget = { testid?: string; role: string; name: string; nth?: num
 /** Any element by test id or CSS: what is no table row (a canvas, a drop zone). */
 export type ElementTarget = { testid: string } | { selector: string }
 
-export type Target = RowTarget | ElementTarget
+/** A map object by id or name (`scene` of the cesiumjs engine): located on the canvas at each click, no DOM node. */
+export type SceneTarget = { scene: string }
+
+/** A target with a DOM node to act on. */
+export type NodeTarget = RowTarget | ElementTarget
+
+export type Target = NodeTarget | SceneTarget
 
 export const isRowTarget = (target: Target): target is RowTarget => 'role' in target
 
@@ -32,14 +38,22 @@ export const isClickOp = (op: string): op is ClickOp => Object.keys(CLICKS).incl
 
 /** `at`: a point from the target's top-left corner, px, instead of its centre (a spot on a canvas). */
 export type RecordedStep =
-  | { op: ClickOp | 'type' | 'select'; target: Target; value?: string; isPassword: boolean; at?: Point; modifiers?: Modifier[] }
+  | { op: ClickOp | 'type' | 'select'; target: NodeTarget; value?: string; isPassword: boolean; at?: Point; modifiers?: Modifier[] }
+  | SceneClickStep
   /** `target`: the element under the wheel; absent = the viewport centre. */
-  | { op: 'scroll'; direction: 'up' | 'down'; target?: Target }
+  | { op: 'scroll'; direction: 'up' | 'down'; target?: NodeTarget }
   /** `to`: a row, any element, or absent = the viewport; `toAt` replaces the `edge` point. */
   /** `isHtml5`: a native drag-and-drop (draggable rows), not pointer events. */
-  | { op: 'drag'; target: Target; at?: Point; to?: Target; edge: Edge; toAt?: Point; isHtml5?: boolean }
+  | { op: 'drag'; target: NodeTarget; at?: Point; to?: NodeTarget; edge: Edge; toAt?: Point; isHtml5?: boolean }
   /** A state no element shows (data loaded, an animation over): runs page JS, so `allowEval` only. */
   | { op: 'wait'; expr: string }
+  /** The map camera over `lon,lat[,height]` or a scene object (`scene --goto`). */
+  | { op: 'goto'; place: string }
+
+export type SceneClickStep = { op: ClickOp; target: SceneTarget; modifiers?: Modifier[] }
+
+export const isSceneClick = (step: RecordedStep): step is SceneClickStep =>
+  'target' in step && step.target !== undefined && 'scene' in step.target
 
 /** Exactly one is set; `expr` is a JS expression in the page. */
 export type UntilArgs = { testid?: string; selector?: string; expr?: string }
@@ -379,11 +393,13 @@ export const pointIn = (box: Rect, at?: Point): Point =>
 export const elementLocator = (target: ElementTarget, testIdAttribute: string | undefined): Locator =>
   ('testid' in target ? testIdLocator(target.testid, testIdAttribute) : { css: target.selector, label: `selector "${target.selector}"` })
 
-/** A target on the CLI: row n of the last table, or any element; `at` = px from its top-left. */
-export type CliTarget = ({ n: number } | { element: ElementTarget }) & { at?: Point }
+/** A target on the CLI: row n of the last table, any element, or a scene object; `at` = px from its top-left. */
+export type CliTarget = ({ n: number } | { element: ElementTarget } | SceneTarget) & { at?: Point }
 
-/** `3` (a row), `testid=<id>` or `css=<selector>`, each optionally ending in `@x,y`. */
+/** `3` (a row), `testid=<id>` or `css=<selector>`, each optionally ending in `@x,y`; or `scene=<object>`. */
 export function parseTarget(raw: string): CliTarget | undefined {
+  // A name may hold `@`: a scene target takes no `@x,y`.
+  if (/^scene=./s.test(raw.trim())) return { scene: raw.trim().slice('scene='.length) }
   const m = /^(.*?)(?:@(-?\d+),(-?\d+))?$/s.exec(raw.trim())!
   const at = m[2] === undefined ? undefined : { x: Number(m[2]), y: Number(m[3]) }
   const head = m[1]
@@ -422,6 +438,7 @@ export async function dragNode(
 }
 
 export const describeTarget = (target: Target): string => {
+  if ('scene' in target) return `scene=${target.scene}`
   if (!isRowTarget(target)) return 'testid' in target ? `testid=${target.testid}` : `css=${target.selector}`
   const named = target.name ? `${target.role} "${target.name}"` : target.role
   return `${named}${target.testid ? ` testid=${target.testid}` : ''}${target.nth ? ` #${target.nth + 1}` : ''}`

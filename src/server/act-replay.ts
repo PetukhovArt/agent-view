@@ -1,9 +1,11 @@
 import type { PageSession, Point } from '../cdp/types.js'
 import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
-import type { ServerResponse } from '../types.js'
+import type { ServerResponse, WebGLEngine } from '../types.js'
 import { extractControls, type Control } from '../inspectors/controls/index.js'
+import { locateSceneObject, moveSceneCamera } from '../inspectors/scene/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
 import {
+  CLICKS,
   DEFAULT_UNTIL_TIMEOUT_S,
   GLANCE_MS,
   clickNode,
@@ -16,6 +18,7 @@ import {
   findScript,
   isClickOp,
   isRowTarget,
+  isSceneClick,
   isScriptName,
   isUseCase,
   paramsOf,
@@ -24,10 +27,11 @@ import {
   type ActScript,
   type Condition,
   type ElementTarget,
+  type NodeTarget,
   type RecordedStep,
   type RowTarget,
   type SavedScript,
-  type Target,
+  type SceneClickStep,
 } from './act-script.js'
 
 const POLL_MS = 50
@@ -47,6 +51,8 @@ export type ActDeps = {
   reconnect: () => Promise<PageSession>
   /** The project's `allowEval`: an expression until or wait step runs page JS. */
   isEvalAllowed: boolean
+  /** The project's WebGL engine: scene click and goto steps need one that maps objects to places. */
+  engine?: WebGLEngine
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -202,7 +208,7 @@ export async function replay(
     return 'error' in found ? undefined : found.backendDOMNodeId
   }, timeoutMs)
   /** The node a step acts on: a row found again, or any visible element (a canvas has no row). */
-  const resolve = async (target: Target, isEnabledRequired: boolean, timeoutMs = STEP_TIMEOUT_MS): Promise<{ nodeId?: number; seen?: string }> => {
+  const resolve = async (target: NodeTarget, isEnabledRequired: boolean, timeoutMs = STEP_TIMEOUT_MS): Promise<{ nodeId?: number; seen?: string }> => {
     if (!isRowTarget(target)) return { nodeId: await findElement(target, timeoutMs) }
     const { control, seen } = await find(target, { isEnabledRequired, timeoutMs })
     return { nodeId: control?.backendDOMNodeId, seen }
@@ -215,7 +221,7 @@ export async function replay(
    * that toggled shut).
    */
   const onNode = async (
-    target: Target,
+    target: NodeTarget,
     { isEnabledRequired, what }: { isEnabledRequired: boolean; what: string },
     use: (nodeId: number, msLeft: number) => Promise<ServerResponse | undefined>,
   ): Promise<ServerResponse | undefined> => {
@@ -239,7 +245,19 @@ export async function replay(
     }
   }
 
-  type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' }>
+  /** Polls `probe` for the step's time until it answers no `{ error }` (a map still loading): its answer, or a STALE verdict. */
+  const untilAnswered = async <T extends object>(what: string, probe: (c: PageSession) => Promise<T | { error: string }>): Promise<T | ServerResponse> => {
+    let reason = ''
+    const answer = await poll(deps, async (c) => {
+      const result = await probe(c)
+      if (!('error' in result)) return result
+      reason = result.error
+      return undefined
+    }, STEP_TIMEOUT_MS)
+    return answer ?? verdict(EXIT_STALE, `STALE: ${what} — ${reason} after ${STEP_TIMEOUT_MS / 1000}s`)
+  }
+
+  type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' } | SceneClickStep>
   /** Acts on the found node: a verdict when the app cannot take the step, else undefined. */
   const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
     try {
@@ -284,6 +302,18 @@ export async function replay(
         const condition = exprCondition(step.expr)
         const reason = await waitFor(deps, condition, STEP_TIMEOUT_MS)
         if (reason) return verdict(EXIT_FAIL, `FAIL: ${at} wait ${condition.label} ${reason} after ${STEP_TIMEOUT_MS / 1000}s`)
+        continue
+      }
+      if (step.op === 'goto') {
+        const moved = await untilAnswered(`${at} goto ${step.place}`, c => moveSceneCamera(c, deps.engine, step.place))
+        if ('ok' in moved) return moved
+        continue
+      }
+      if (isSceneClick(step)) {
+        const found = await untilAnswered(`${at} ${step.op} ${describeTarget(step.target)}`, c => locateSceneObject(c, deps.engine, step.target.scene))
+        if ('ok' in found) return found
+        await deps.conn.clickAtPosition(found.x, found.y, { ...CLICKS[step.op], modifiers: step.modifiers })
+        deps.invalidateAxCache()
         continue
       }
       const what = `${at} ${step.op} ${describeTarget(step.target)}`

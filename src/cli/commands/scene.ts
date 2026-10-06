@@ -8,6 +8,7 @@ type SceneOptions = {
   verbose?: boolean
   diff?: boolean
   compact?: boolean
+  goto?: string
 }
 
 export async function runScene(config: AgentViewConfig, options: SceneOptions): Promise<void> {
@@ -18,6 +19,7 @@ export async function runScene(config: AgentViewConfig, options: SceneOptions): 
   if (options.verbose) args.verbose = true
   if (options.diff) args.diff = true
   if (options.compact) args.compact = true
+  if (options.goto !== undefined) args.goto = options.goto
 
   const response = await sendCommand({
     command: 'scene',

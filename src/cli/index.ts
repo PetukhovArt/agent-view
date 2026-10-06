@@ -97,11 +97,12 @@ const MODIFIERS_HELP = 'Keys held through the click, comma-separated: alt|ctrl|m
 
 program
   .command('click [ref]')
-  .description('Click DOM element by ref, filter, test id, selector, or position')
+  .description('Click DOM element by ref, filter, test id, selector, or position; or a scene object')
   .option('-f, --filter <text>', 'Find element by text and click')
   .option('--testid <id>', 'Find element by test id (see testIdAttribute)')
   .option('--selector <css>', 'Find element by CSS selector')
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
+  .option('--scene <object>', 'Click a map object by id or name, where it is drawn now (cesiumjs engine)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('--double', 'Double-click (fires dblclick handlers)')
   .option('--right', 'Right-click (fires contextmenu)')
@@ -172,13 +173,14 @@ program
 
 program
   .command('scene')
-  .description('Get PixiJS scene graph')
+  .description('Get the WebGL scene graph (PixiJS, CesiumJS)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-f, --filter <text>', 'Filter by name')
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
   .option('-v, --verbose', 'Show extended properties')
   .option('--diff', 'Show only changes since last call')
   .option('--compact', 'Merge single-child chains onto one line')
+  .option('--goto <place>', 'Point the map camera straight down over lon,lat[,height] (degrees, metres) or a scene object by id or name (cesiumjs)')
   .action(async (options) => {
     const config = requireConfig()
     await runScene(config, options)
@@ -438,7 +440,7 @@ const parseSeconds = (value: string): number => {
 const EXPR_HOLDS = 'is truthy, or its promise resolves'
 const UNTIL_EXPR_FLAG = '--until-expr <js>'
 const UNTIL_EXPR_HELP = `Done when this JS expression in the page ${EXPR_HOLDS} (state no element shows); needs allowEval`
-const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre'
+const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre; or scene=<object>, a map object by id or name (cesiumjs)'
 /** Candidates for `${NAME}`: the server keeps only the names a script uses. */
 const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
 
@@ -493,6 +495,9 @@ act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, 
   .action(async (from: string, to: string | undefined, edge: string | undefined, opts: { html5?: boolean }) => {
     await runAct(requireConfig(), { op: 'drag', target: from, to, edge, html5: opts.html5 === true })
   })
+
+act.command('goto <place>').description('Point the map camera straight down over lon,lat[,height] or a scene object by id or name, as `scene --goto` (cesiumjs)')
+  .action(async (place: string) => { await runAct(requireConfig(), { op: 'goto', place }) })
 
 act.command('do <steps...>').description('Several ops decided from one table, e.g. act do "type 2 root" "type 3 secret" "click 1"')
   .action(async (steps: string[]) => { await runAct(requireConfig(), { op: 'do', steps }) })

@@ -10,18 +10,21 @@ type ClickOptions = {
   double?: boolean
   right?: boolean
   modifiers?: string
+  scene?: string
 }
 
 export async function runClick(config: AgentViewConfig, refArg: string | undefined, options: ClickOptions): Promise<void> {
-  const ways = [refArg, options.pos, options.filter, options.testid, options.selector].filter(f => f !== undefined)
+  const ways = [refArg, options.pos, options.filter, options.testid, options.selector, options.scene].filter(f => f !== undefined)
   if (ways.length !== 1) {
-    console.error('Usage: agent-view click <ref> | --filter <text> | --testid <id> | --selector <css> | --pos <x,y> — exactly one')
+    console.error('Usage: agent-view click <ref> | --filter <text> | --testid <id> | --selector <css> | --pos <x,y> | --scene <object> — exactly one')
     process.exit(1)
   }
 
   const args: Record<string, unknown> = { testIdAttribute: config.testIdAttribute }
 
-  if (options.testid !== undefined || options.selector !== undefined) {
+  if (options.scene !== undefined) {
+    args.scene = options.scene
+  } else if (options.testid !== undefined || options.selector !== undefined) {
     args.testid = options.testid
     args.selector = options.selector
   } else if (options.filter) {
@@ -51,6 +54,7 @@ export async function runClick(config: AgentViewConfig, refArg: string | undefin
     command: 'click',
     port: config.port,
     runtime: config.runtime,
+    engine: config.webgl?.engine,
     args,
   })
 

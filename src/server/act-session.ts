@@ -12,7 +12,9 @@ import {
   type Control,
 } from '../inspectors/controls/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
+import { locateSceneObject, moveSceneCamera } from '../inspectors/scene/index.js'
 import {
+  CLICKS,
   EDGES,
   GLANCE_MS,
   clickNode,
@@ -38,9 +40,9 @@ import {
   type CliTarget,
   type ClickOp,
   type Condition,
+  type NodeTarget,
   type RecordedStep,
   type RowTarget,
-  type Target,
   type UntilArgs,
 } from './act-script.js'
 import { cwdOf, isOneUntil, modifiersOf, refuseStepSave, str, strs, untilArgsOf } from './act-store.js'
@@ -157,12 +159,14 @@ export async function runAct(
     return waitStep(run, expr)
   }
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
+  if (op === 'goto') return gotoStep(run, str(args, 'place'))
   if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
     const target = parseTarget(str(args, 'target')!)
-    if (!target) return { ok: false, error: `act ${op} <n | testid=<id> | css=<selector>>[@x,y]` }
+    if (!target) return { ok: false, error: `act ${op} <n | testid=<id> | css=<selector>>[@x,y] | scene=<object>` }
     const modifiers = modifiersOf(args)
     if (modifiers && 'error' in modifiers) return { ok: false, error: modifiers.error }
+    if ('scene' in target) return sceneClickStep(run, op, target.scene, modifiers)
     if ('n' in target && !target.at) return rowStep(run, { op, n: target.n, text: '', modifiers })
     return clickStep(run, op, target, modifiers)
   }
@@ -311,10 +315,11 @@ async function locate(run: Run, n: number): Promise<{ target: Control; fresh: Co
   return { target: resolved.control, fresh }
 }
 
-type Picked = { nodeId: number; target: Target; label: string; before: string }
+type Picked = { nodeId: number; target: NodeTarget; label: string; before: string }
 
 /** Row n of the last table (stale guard, hit check), or any visible element by test id / CSS — a canvas is no row. */
 async function pick(run: Run, target: CliTarget): Promise<Picked | ServerResponse> {
+  if ('scene' in target) return { ok: false, error: 'scene=<object> is a click target only' }
   if ('n' in target) {
     const located = await locate(run, target.n)
     if (!('target' in located)) return located
@@ -337,6 +342,28 @@ async function clickStep(run: Run, op: ClickOp, target: CliTarget, modifiers: Mo
   deps.invalidateAxCache()
   session.steps.push({ op, target: picked.target, isPassword: false, at, modifiers })
   return finishStep(run, { before: picked.before, done: `${describeOp(op, modifiers)} ${picked.label}${describeAt(at)}` })
+}
+
+/** A click op on a map object where it is drawn now; it has no row and no DOM node. */
+async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: Modifier[] | undefined): Promise<ServerResponse> {
+  const { session, deps } = run
+  const found = await locateSceneObject(deps.conn, deps.engine, query)
+  if ('error' in found) return { ok: false, error: found.error }
+  const before = tableKey(await snapshot(run))
+  await deps.conn.clickAtPosition(found.x, found.y, { ...CLICKS[op], modifiers })
+  deps.invalidateAxCache()
+  session.steps.push({ op, target: { scene: query }, modifiers })
+  return finishStep(run, { before, done: `${describeOp(op, modifiers)} scene=${query} at (${found.x}, ${found.y})` })
+}
+
+/** The map camera over a place: recorded, so a replay sees the map the clicks after it were decided on. */
+async function gotoStep(run: Run, place: string | undefined): Promise<ServerResponse> {
+  if (!place) return { ok: false, error: 'act goto <lon,lat[,height] | scene object>' }
+  const before = tableKey(await snapshot(run))
+  const moved = await moveSceneCamera(run.deps.conn, run.deps.engine, place)
+  if ('error' in moved) return { ok: false, error: moved.error }
+  run.session.steps.push({ op: 'goto', place })
+  return finishStep(run, { before, done: moved.text })
 }
 
 /**

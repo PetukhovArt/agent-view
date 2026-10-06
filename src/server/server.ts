@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { isAppTarget } from '../adapters/target-filter.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
-import { getSceneGraph, getRawScene, diffScenes, type SceneNode } from '../inspectors/scene/index.js'
+import { getSceneGraph, getRawScene, diffScenes, locateSceneObject, moveSceneCamera, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning, installCDPErrorGuard, PortConflictError } from './launcher.js'
 import { readConfig } from '../config/manager.js'
@@ -741,6 +741,15 @@ export class AgentViewServer {
       return { ok: true, data: `${verb} at (${x}, ${y})${held}` }
     }
 
+    const sceneQuery = argStr(req.args, 'scene')
+    if (sceneQuery !== undefined) {
+      const found = await locateSceneObject(conn, req.engine, sceneQuery)
+      if ('error' in found) return { ok: false, error: found.error }
+      await conn.clickAtPosition(found.x, found.y, clickOpts)
+      this.axTreeCache.invalidate(cacheKey)
+      return { ok: true, data: `${verb} scene "${sceneQuery}" at (${found.x}, ${found.y})${held}` }
+    }
+
     const locator = locatorFromArgs(req.args)
     if (locator) {
       const found = await findByLocator(conn, locator)
@@ -765,7 +774,7 @@ export class AgentViewServer {
 
     const ref = argNum(req.args, 'ref')
     if (ref === undefined) {
-      return { ok: false, error: 'click requires --ref, --filter, --testid, --selector, or --pos' }
+      return { ok: false, error: 'click requires --ref, --filter, --testid, --selector, --pos, or --scene' }
     }
     const entry = this.refStore.get(ref)
     if (!entry) {
@@ -792,6 +801,7 @@ export class AgentViewServer {
         return this.getPageSession(req, (await this.resolveWindow(req)).targetId)
       },
       isEvalAllowed: isEvalAllowedIn(argStr(req.args, 'cwd')),
+      engine: req.engine,
     })
   }
 
@@ -1306,6 +1316,12 @@ export class AgentViewServer {
   private async handleScene(req: ServerRequest): Promise<ServerResponse> {
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getPageSession(req, targetId)
+
+    const goto = argStr(req.args, 'goto')
+    if (goto !== undefined) {
+      const moved = await moveSceneCamera(conn, req.engine, goto)
+      return 'error' in moved ? { ok: false, error: moved.error } : { ok: true, data: moved.text }
+    }
 
     const isDiff = argBool(req.args, 'diff') ?? false
     const cacheKey = `${req.port}:${targetId}`
