@@ -1,11 +1,9 @@
-import { CAMERAS, CLUSTER, ICON, LABEL_OFFSET, SECTOR, START_VIEW, recordClicks } from './scene'
+import { CAMERAS, CLUSTER, ICON, LABEL_OFFSET, SECTOR, START_VIEW, naturalEarthLayer, recordClicks } from './scene'
 
 const Cesium = (window as unknown as { Cesium: any }).Cesium
 
 const viewer = new Cesium.Viewer('viewer', {
-  baseLayer: Cesium.ImageryLayer.fromProviderAsync(
-    Cesium.TileMapServiceImageryProvider.fromUrl(Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')),
-  ),
+  baseLayer: naturalEarthLayer(Cesium),
   baseLayerPicker: false,
   geocoder: false,
   animation: false,
@@ -49,3 +47,8 @@ clusters.entities.add({
 viewer.dataSources.add(clusters)
 
 recordClicks(Cesium, viewer)
+
+// `plain.html?hook`: the hook an ESM app sets, where no `window.Cesium` exists to catch frames through.
+if (new URLSearchParams(location.search).has('hook')) {
+  ;(window as unknown as { __CESIUM_VIEWER__: unknown }).__CESIUM_VIEWER__ = { viewer, Cesium }
+}

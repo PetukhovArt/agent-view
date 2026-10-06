@@ -92,6 +92,24 @@ async function resizeViewport(width: number, height: number): Promise<CDP.Client
   return client
 }
 
+/** `plain.html?hook` sets `window.__CESIUM_VIEWER__ = { viewer, Cesium }`, which wins over catching frames. */
+async function smokeHook(
+  run: (command: string, args: Record<string, unknown>) => Promise<Resp>,
+  hitAfter: (args: Record<string, unknown>) => Promise<{ clicked: Resp; hit: Hit | null }>,
+  check: (name: string, passed: boolean, detail?: string) => void,
+): Promise<void> {
+  const page = (await CDP.List({ port: CDP_PORT })).find(t => t.type === 'page')!
+  const client = await CDP({ port: CDP_PORT, target: page.id })
+  await client.Page.navigate({ url: page.url.replace(/\?.*$/, '') + '?hook' })
+  await client.close()
+  await sleep(3000)
+  const scene = await run('scene', {})
+  check('[plain?hook] scene names via=hook', String(scene.data).includes('via=hook'), String(scene.data ?? scene.error).split('\n')[0])
+  const left = await hitAfter({ scene: TARGET })
+  check(`[plain?hook] click --scene "${TARGET}" hits it`, left.clicked.ok && left.hit?.name === TARGET,
+    `${left.clicked.data ?? left.clicked.error} · ${JSON.stringify(left.hit)}`)
+}
+
 async function smokePage(page: 'index' | 'plain', token: string, check: (name: string, passed: boolean, detail?: string) => void): Promise<void> {
   const via = page === 'index' ? 'vue-cesium' : 'cesiumjs'
   const proc = spawn(process.execPath, ['start.mjs', ...(page === 'plain' ? ['--page=plain'] : [])], { cwd: APP_DIR, stdio: 'ignore' })
@@ -170,6 +188,8 @@ async function smokePage(page: 'index' | 'plain', token: string, check: (name: s
     await evaluate('window.__hits = []')
     const replayed = await act({ op: 'replay', name: 'far-side' })
     check(`${tag} act replay DONE`, replayed.ok && String(replayed.data).startsWith('DONE'), String(replayed.data ?? replayed.error))
+
+    if (page === 'plain') await smokeHook(run, hitAfter, check)
   } finally {
     killTree(proc)
     await rm(actDir, { recursive: true, force: true })

@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { CAMERAS, CLUSTER, ICON, LABEL_OFFSET, SECTOR, START_VIEW, recordClicks } from './scene'
+import { CAMERAS, CLUSTER, ICON, LABEL_OFFSET, SECTOR, START_VIEW, naturalEarthLayer, recordClicks } from './scene'
 
 const camera = { position: START_VIEW, heading: 0, pitch: -90, roll: 0 }
 
-const onReady = ({ Cesium, viewer }: { Cesium: unknown; viewer: unknown }) => recordClicks(Cesium, viewer)
+const onReady = ({ Cesium, viewer }: { Cesium: any; viewer: any }) => {
+  viewer.imageryLayers.add(naturalEarthLayer(Cesium))
+  recordClicks(Cesium, viewer)
+}
 </script>
 
 <template>
-  <vc-viewer :camera="camera" :infoBox="false" @ready="onReady">
+  <vc-viewer :camera="camera" :infoBox="false" :base-layer="false" @ready="onReady">
     <vc-entity v-for="cam in CAMERAS" :key="cam.name" :id="cam.id" :position="cam">
       <vc-graphics-billboard :image="ICON" />
       <vc-graphics-label :text="cam.name" :pixel-offset="LABEL_OFFSET" font="14px sans-serif" />

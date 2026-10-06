@@ -63,6 +63,11 @@ declare global {
   }
 }
 
+/** Imagery bundled with Cesium: no Ion token, no network. */
+export const naturalEarthLayer = (Cesium: any): unknown => Cesium.ImageryLayer.fromProviderAsync(
+  Cesium.TileMapServiceImageryProvider.fromUrl(Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')),
+)
+
 // Entities here carry no `name` (as in web-client), so the label text stands in for it.
 export const recordClicks = (Cesium: any, viewer: any): void => {
   window.__hits = []
