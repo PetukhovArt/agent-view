@@ -14,6 +14,7 @@ const viewer = new Cesium.Viewer('viewer', {
   sceneModePicker: false,
   navigationHelpButton: false,
   fullscreenButton: false,
+  infoBox: false,
 })
 
 viewer.camera.setView({

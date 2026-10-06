@@ -7,7 +7,7 @@ const onReady = ({ Cesium, viewer }: { Cesium: unknown; viewer: unknown }) => re
 </script>
 
 <template>
-  <vc-viewer :camera="camera" @ready="onReady">
+  <vc-viewer :camera="camera" :infoBox="false" @ready="onReady">
     <vc-entity v-for="cam in CAMERAS" :key="cam.name" :id="cam.id" :position="cam">
       <vc-graphics-billboard :image="ICON" />
       <vc-graphics-label :text="cam.name" :pixel-offset="LABEL_OFFSET" font="14px sans-serif" />
