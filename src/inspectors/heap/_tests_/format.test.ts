@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseHeapSnapshot, formatDiff, formatRetainers, formatSummary } from '../index.js'
+import { createHeapSnapshotParser, formatDiff, formatRetainers, formatSummary, type HeapSnapshot } from '../index.js'
 
 // A minimal V8 heap snapshot in the real wire layout: flat `nodes` / `edges`
 // arrays indexed through `meta`. The parser reads offsets from `meta`, never
@@ -10,7 +10,7 @@ const NODE_TYPES = ['hidden', 'array', 'string', 'object', 'code', 'closure', 'r
 const EDGE_TYPES = ['context', 'element', 'property', 'internal', 'hidden', 'shortcut', 'weak']
 const NODE_FIELDS = ['name', 'type', 'self_size', 'edge_count', 'detachedness']
 
-function snapshot(list: N[], name = 's', target = 'page:App'): ReturnType<typeof parseHeapSnapshot> {
+function snapshot(list: N[], name = 's', target = 'page:App', chunkSize = Infinity): HeapSnapshot {
   const strings: string[] = []
   const str = (s: string) => { let i = strings.indexOf(s); if (i < 0) { i = strings.length; strings.push(s) } return i }
   const nodes: number[] = []
@@ -22,13 +22,36 @@ function snapshot(list: N[], name = 's', target = 'page:App'): ReturnType<typeof
     }
   }
   const json = JSON.stringify({
-    snapshot: { meta: { node_fields: NODE_FIELDS, node_types: [NODE_TYPES], edge_fields: ['type', 'name_or_index', 'to_node'], edge_types: [EDGE_TYPES] } },
-    nodes, edges, strings,
+    snapshot: {
+      meta: { node_fields: NODE_FIELDS, node_types: [NODE_TYPES], edge_fields: ['type', 'name_or_index', 'to_node'], edge_types: [EDGE_TYPES] },
+      node_count: list.length,
+      edge_count: edges.length / 3,
+    },
+    nodes, edges, trace_function_infos: [], trace_tree: [], samples: [], locations: [], strings,
   })
-  return parseHeapSnapshot(json, name, target)
+  const parser = createHeapSnapshotParser(name, target)
+  for (let i = 0; i < json.length; i += chunkSize) parser.push(json.slice(i, i + chunkSize))
+  return parser.end()
 }
 
 describe('heap snapshot', () => {
+  // A ~700 MB heap's JSON overflowed V8's string limit when joined ('Invalid string length'),
+  // so it is parsed chunk by chunk, and a chunk border may fall inside any token.
+  it('reads the same snapshot whatever the chunk borders, escapes included', () => {
+    const list: N[] = [
+      { type: 'object', name: 'say "hi"\\ \\"x\\" é \n', size: 1234, edges: [{ type: 'property', name: 'next', to: 1 }] },
+      { type: 'native', name: 'HTMLDivElement', size: 56, detached: 2 },
+    ]
+    const whole = snapshot(list)
+    for (const chunkSize of [1, 2, 3, 5, 7]) {
+      const chunked = snapshot(list, 's', 'page:App', chunkSize)
+      expect(chunked.classes).toEqual(whole.classes)
+      expect(chunked.graph).toEqual(whole.graph)
+    }
+    expect([...whole.classes.keys()]).toEqual(['say "hi"\\ \\"x\\" é \n', 'Detached HTMLDivElement'])
+    expect(whole.totalSize).toBe(1290)
+  })
+
   // A detached wrapper hidden inside the attached class is the one thing this
   // command exists to expose; both V8 encodings (field and name prefix) occur.
   it('splits detached DOM wrappers into their own class from either encoding', () => {

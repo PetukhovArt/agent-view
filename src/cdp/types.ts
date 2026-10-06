@@ -224,10 +224,11 @@ export type RuntimeSession = {
    */
   takeCoverage: () => Promise<CoverageScript[] | null>
   /**
-   * `HeapProfiler.takeHeapSnapshot`, chunks joined into one `.heapsnapshot` JSON
-   * string. V8 runs a full GC first, so the result holds live objects only.
+   * `HeapProfiler.takeHeapSnapshot`: the `.heapsnapshot` JSON, chunk by chunk, resolving after
+   * the last. Never joined, as a large heap's text overflows a string. V8 runs a full GC first,
+   * so it holds live objects only.
    */
-  takeHeapSnapshot: () => Promise<string>
+  takeHeapSnapshot: (onChunk: (chunk: string) => void) => Promise<void>
   close: () => Promise<void>
 }
 

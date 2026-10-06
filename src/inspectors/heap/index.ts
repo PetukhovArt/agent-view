@@ -14,12 +14,7 @@ type Meta = {
   edge_types: [string[], ...unknown[]]
 }
 
-type RawSnapshot = {
-  snapshot: { meta: Meta }
-  nodes: number[]
-  edges: number[]
-  strings: string[]
-}
+type SnapshotHead = { meta: Meta; node_count?: number; edge_count?: number }
 
 export type ClassStat = { count: number; size: number }
 
@@ -55,13 +50,178 @@ type HeapGraph = {
 const DETACHED = 2
 const DETACHED_PREFIX = 'Detached '
 
-export function parseHeapSnapshot(json: string, name: string, target: string): HeapSnapshot {
-  const raw = JSON.parse(json) as RawSnapshot
-  const { meta } = raw.snapshot
+const NODES_KEY = '"nodes":['
+const EDGES_KEY = '"edges":['
+const STRINGS_KEY = '"strings":['
+
+export type HeapSnapshotParser = {
+  push(chunk: string): void
+  end(): HeapSnapshot
+}
+
+/**
+ * Reads a `.heapsnapshot` one CDP chunk at a time. A snapshot of a ~700 MB heap is a JSON text
+ * longer than V8's string limit (`Invalid string length`), so it is never joined: numbers go
+ * straight into typed arrays, each string is decoded on its own. Relies on V8's key order:
+ * `snapshot`, `nodes`, `edges`, the trace arrays, `strings`.
+ */
+export function createHeapSnapshotParser(name: string, target: string): HeapSnapshotParser {
+  type Phase = 'head' | 'nodes' | 'toEdges' | 'edges' | 'toStrings' | 'strings' | 'done'
+  let phase: Phase = 'head'
+  let pending = ''
+  let head: SnapshotHead | undefined
+  let numbers = new GrowingUint32(0)
+  let nodes: Uint32Array | undefined
+  let edges: Uint32Array | undefined
+  let value = 0
+  let inNumber = false
+  const strings: string[] = []
+  let inString = false
+  let escaped = false
+  let raw: string[] = []
+
+  /** Skips to `key`, which a chunk border may split. Returns where the text after it starts, or -1. */
+  const skipTo = (key: string, text: string): number => {
+    const at = (pending + text).indexOf(key)
+    if (at < 0) {
+      pending = (pending + text).slice(-(key.length - 1))
+      return -1
+    }
+    const after = at + key.length - pending.length
+    pending = ''
+    return after
+  }
+
+  /** Reads unsigned integers up to `]`. Returns where the text after `]` starts, or -1. */
+  const readNumbers = (text: string): number => {
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i)
+      if (c >= 48 && c <= 57) {
+        value = value * 10 + (c - 48)
+        inNumber = true
+        continue
+      }
+      if (inNumber) numbers.push(value)
+      value = 0
+      inNumber = false
+      if (c === 93) return i + 1
+    }
+    return -1
+  }
+
+  /** Reads JSON strings up to `]`. Returns where the text after `]` starts, or -1. */
+  const readStrings = (text: string): number => {
+    let i = 0
+    while (i < text.length) {
+      if (!inString) {
+        const c = text[i]
+        if (c === '"') { inString = true; raw = [] }
+        else if (c === ']') return i + 1
+        i++
+        continue
+      }
+      // `escaped` outlives the chunk: a backslash may end one and its escaped quote start the next.
+      let close = i
+      for (; close < text.length; close++) {
+        const c = text.charCodeAt(close)
+        if (escaped) escaped = false
+        else if (c === 92) escaped = true
+        else if (c === 34) break
+      }
+      if (close === text.length) {
+        raw.push(text.slice(i))
+        return -1
+      }
+      raw.push(text.slice(i, close))
+      const s = raw.join('')
+      strings.push(s.includes('\\') ? JSON.parse(`"${s}"`) as string : s)
+      inString = false
+      i = close + 1
+    }
+    return -1
+  }
+
+  const push = (chunk: string): void => {
+    let text = chunk
+    while (text.length > 0 && phase !== 'done') {
+      let rest = -1
+      switch (phase) {
+        case 'head': {
+          const at = (pending + text).indexOf(NODES_KEY)
+          if (at < 0) { pending += text; return }
+          const all = pending + text
+          const prefix = all.slice(0, at)
+          head = (JSON.parse(`${prefix.slice(0, prefix.lastIndexOf(','))}}`) as { snapshot: SnapshotHead }).snapshot
+          numbers = new GrowingUint32((head.node_count ?? 0) * head.meta.node_fields.length)
+          pending = ''
+          text = all.slice(at + NODES_KEY.length)
+          phase = 'nodes'
+          continue
+        }
+        case 'nodes':
+          rest = readNumbers(text)
+          if (rest >= 0) {
+            nodes = numbers.done()
+            numbers = new GrowingUint32((head!.edge_count ?? 0) * head!.meta.edge_fields.length)
+            phase = 'toEdges'
+          }
+          break
+        case 'toEdges':
+          rest = skipTo(EDGES_KEY, text)
+          if (rest >= 0) phase = 'edges'
+          break
+        case 'edges':
+          rest = readNumbers(text)
+          if (rest >= 0) { edges = numbers.done(); phase = 'toStrings' }
+          break
+        case 'toStrings':
+          rest = skipTo(STRINGS_KEY, text)
+          if (rest >= 0) phase = 'strings'
+          break
+        case 'strings':
+          rest = readStrings(text)
+          if (rest >= 0) phase = 'done'
+          break
+      }
+      if (rest < 0) return
+      text = text.slice(rest)
+    }
+  }
+
+  return {
+    push,
+    end() {
+      if (phase !== 'done' || !head || !nodes || !edges) throw new Error('Heap snapshot ended before its strings')
+      return buildSnapshot(name, target, head.meta, nodes, edges, strings)
+    },
+  }
+}
+
+/** A Uint32Array that doubles when full; sized up front when the snapshot head gives the count. */
+class GrowingUint32 {
+  private data: Uint32Array
+  private length = 0
+  constructor(expected: number) {
+    this.data = new Uint32Array(Math.max(expected, 1024))
+  }
+  push(v: number): void {
+    if (this.length === this.data.length) {
+      const bigger = new Uint32Array(this.data.length * 2)
+      bigger.set(this.data)
+      this.data = bigger
+    }
+    this.data[this.length++] = v
+  }
+  done(): Uint32Array {
+    return this.length === this.data.length ? this.data : this.data.slice(0, this.length)
+  }
+}
+
+function buildSnapshot(name: string, target: string, meta: Meta, nodes: Uint32Array, edges: Uint32Array, strings: string[]): HeapSnapshot {
   const graph: HeapGraph = {
-    nodes: Uint32Array.from(raw.nodes),
-    edges: Uint32Array.from(raw.edges),
-    strings: raw.strings,
+    nodes,
+    edges,
+    strings,
     nodeFieldCount: meta.node_fields.length,
     edgeFieldCount: meta.edge_fields.length,
     nodeTypes: meta.node_types[0],

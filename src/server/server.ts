@@ -33,7 +33,7 @@ import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/in
 import { formatDialogStatus, describePolicy, describeArm } from '../inspectors/dialog/index.js'
 import { formatCoverage } from '../inspectors/coverage/index.js'
 import { formatListeners } from '../inspectors/listeners/index.js'
-import { parseHeapSnapshot, describeSnapshot, formatSummary, formatDiff, formatRetainers, formatList, type HeapSnapshot } from '../inspectors/heap/index.js'
+import { createHeapSnapshotParser, describeSnapshot, formatSummary, formatDiff, formatRetainers, formatList, type HeapSnapshot } from '../inspectors/heap/index.js'
 import { formatBytes } from '../inspectors/format.js'
 import { buildTauriArmScript, buildTauriStatusScript, TauriShimResult, type TauriShimStatus } from './tauri-dialog-shim.js'
 import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
@@ -1144,9 +1144,9 @@ export class AgentViewServer {
         const target = await this.resolveTarget(req)
         const conn = await this.getRuntimeSession(req, target)
         const name = argStr(req.args, 'name') ?? this.freeHeapSnapshotName()
-        const json = await conn.takeHeapSnapshot()
-        const label = `${target.type}:${target.title || target.url}`
-        const snapshot = parseHeapSnapshot(json, name, label)
+        const parser = createHeapSnapshotParser(name, `${target.type}:${target.title || target.url}`)
+        await conn.takeHeapSnapshot((chunk) => parser.push(chunk))
+        const snapshot = parser.end()
         // Re-taking a name moves it to the end: "most recent" is insertion order, and `diff` defaults to the last two.
         this.heapSnapshots.delete(name)
         this.heapSnapshots.set(name, snapshot)

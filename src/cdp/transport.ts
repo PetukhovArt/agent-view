@@ -933,17 +933,23 @@ type HeapProfilerDomain = {
   addHeapSnapshotChunk: (cb: (p: { chunk: string }) => void) => () => void
 }
 
-/** Chunks arrive before the command resolves, so subscribing first and joining after is the whole protocol. */
-async function takeHeapSnapshotImpl(client: RawCDPClient): Promise<string> {
+/**
+ * Chunks arrive before the command resolves, so subscribing first is the whole protocol. A throw
+ * from `onChunk` would land in the socket's event loop; it is held and rethrown here instead.
+ */
+async function takeHeapSnapshotImpl(client: RawCDPClient, onChunk: (chunk: string) => void): Promise<void> {
   const HeapProfiler = client.HeapProfiler as HeapProfilerDomain
-  const chunks: string[] = []
-  const unsubscribe = HeapProfiler.addHeapSnapshotChunk(({ chunk }) => { chunks.push(chunk) })
+  let failure: unknown
+  const unsubscribe = HeapProfiler.addHeapSnapshotChunk(({ chunk }) => {
+    if (failure !== undefined) return
+    try { onChunk(chunk) } catch (err) { failure = err }
+  })
   try {
     await HeapProfiler.takeHeapSnapshot({ reportProgress: false, captureNumericValue: false })
   } finally {
     unsubscribe()
   }
-  return chunks.join('')
+  if (failure !== undefined) throw failure
 }
 
 type RawEventListener = {
@@ -1057,7 +1063,7 @@ export async function connectToRuntime(port: number, target: TargetInfo): Promis
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
     startCoverage: () => coverage.start(),
     takeCoverage: () => coverage.take(),
-    takeHeapSnapshot: () => takeHeapSnapshotImpl(client),
+    takeHeapSnapshot: (onChunk) => takeHeapSnapshotImpl(client, onChunk),
     async close() {
       await client.close()
     },
@@ -1324,7 +1330,7 @@ export async function connectToPage(
     getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
     startCoverage: () => coverage.start(),
     takeCoverage: () => coverage.take(),
-    takeHeapSnapshot: () => takeHeapSnapshotImpl(client),
+    takeHeapSnapshot: (onChunk) => takeHeapSnapshotImpl(client, onChunk),
 
     getEventListeners: (backendDOMNodeId, depth = 0) => withHandles(client, async (objectGroup) => {
       const { object } = await DOM.resolveNode({ backendNodeId: backendDOMNodeId, objectGroup })
