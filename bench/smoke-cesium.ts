@@ -176,8 +176,13 @@ async function smokePage(page: 'index' | 'plain', token: string, check: (name: s
     check(`${tag} after --goto click --scene "${FAR}" hits it`, farHit.clicked.ok && farHit.hit?.name === FAR,
       `${farHit.clicked.data ?? farHit.clicked.error} · ${JSON.stringify(farHit.hit)}`)
 
+    const low = await run('scene', { goto: FAR, height: '2000' })
+    check(`${tag} scene --goto "${FAR}" --height 2000`, low.ok && String(low.data).endsWith(' at 2000 m'), String(low.data ?? low.error))
+
     const home = await run('scene', { goto: '37.62,55.75,5000' })
     check(`${tag} scene --goto lon,lat,height`, home.ok && home.data === 'Camera over (37.6200, 55.7500) at 5000 m', String(home.data ?? home.error))
+    const twice = await run('scene', { goto: '37.62,55.75,5000', height: '2000' })
+    check(`${tag} a height given twice is refused`, !twice.ok && String(twice.error).startsWith('height given twice'), twice.error ?? String(twice.data))
 
     // act: an until only the far-side click meets; its cwd allows eval and holds the script store.
     await copyFile(join(APP_DIR, 'agent-view.config.json'), join(actDir, 'agent-view.config.json'))
@@ -186,17 +191,29 @@ async function smokePage(page: 'index' | 'plain', token: string, check: (name: s
     await evaluate('window.__hits = []')
     const started = await act({ op: 'start', untilExpr })
     check(`${tag} act start`, started.ok, started.error ?? '')
-    const actGoto = await act({ op: 'goto', place: FAR })
-    check(`${tag} act goto`, actGoto.ok && String(actGoto.data).startsWith('✓ Camera over'), String(actGoto.data ?? actGoto.error).split('\n')[0])
+    const actGoto = await act({ op: 'goto', place: FAR, height: '2000' })
+    const gotoLine = String(actGoto.data ?? actGoto.error).split('\n')[0]
+    check(`${tag} act goto --height 2000`, actGoto.ok && gotoLine.startsWith('✓ Camera over') && gotoLine.includes(' at 2000 m'), gotoLine)
     const actClick = await act({ op: 'click', target: `scene=${FAR}` })
     check(`${tag} act click scene=… reaches DONE`, actClick.ok && String(actClick.data).startsWith('DONE'), String(actClick.data ?? actClick.error).split('\n')[0])
-    const saved = await act({ op: 'save', name: 'far-side', in: 'map' })
-    check(`${tag} act save`, saved.ok, String(saved.data ?? saved.error))
+    const saved = await act({ op: 'save', name: 'far-side', in: 'map', params: ['HEIGHT=2000'] })
+    check(`${tag} act save --param HEIGHT=2000`, saved.ok, String(saved.data ?? saved.error))
 
     await run('scene', { goto: '37.62,55.75,5000' })
     await evaluate('window.__hits = []')
-    const replayed = await act({ op: 'replay', name: 'far-side' })
+    const replayed = await act({ op: 'replay', name: 'far-side', params: { HEIGHT: '2000' } })
     check(`${tag} act replay DONE`, replayed.ok && String(replayed.data).startsWith('DONE'), String(replayed.data ?? replayed.error))
+
+    // HTML over the map for 2 s stands in for a camera flight the app starts: a live act click waits it out.
+    await evaluate('window.__hits = []')
+    const restarted = await act({ op: 'start', untilExpr: `window.__hits.some(h => h.name === ${JSON.stringify(TARGET)})` })
+    const liveGoto = await act({ op: 'goto', place: TARGET, height: '2000' })
+    await evaluate("(() => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;inset:0;z-index:99999'; document.body.append(d); setTimeout(() => d.remove(), 2000); return true })()")
+    const covered = await run('click', { scene: TARGET })
+    check(`${tag} click --scene under HTML is refused at once`, !covered.ok && String(covered.error).includes('covered'), covered.error ?? String(covered.data))
+    const waited = await act({ op: 'click', target: `scene=${TARGET}` })
+    check(`${tag} live act click scene=… right after goto waits, DONE`, restarted.ok && liveGoto.ok && waited.ok && String(waited.data).startsWith('DONE'),
+      String(waited.data ?? waited.error ?? liveGoto.error ?? restarted.error).split('\n')[0])
 
     if (page === 'plain') await smokeHook(run, hitAfter, check)
   } finally {
