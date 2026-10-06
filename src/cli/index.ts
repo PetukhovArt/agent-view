@@ -102,7 +102,7 @@ program
   .option('--testid <id>', 'Find element by test id (see testIdAttribute)')
   .option('--selector <css>', 'Find element by CSS selector')
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
-  .option('--scene <object>', 'Click a map object by id or name, where it is drawn now (cesiumjs engine)')
+  .option('--scene <object>', 'Click a scene object by id, name or label, where it is drawn now (cesiumjs engine)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('--double', 'Double-click (fires dblclick handlers)')
   .option('--right', 'Right-click (fires contextmenu)')
@@ -180,7 +180,7 @@ program
   .option('-v, --verbose', 'Show extended properties')
   .option('--diff', 'Show only changes since last call')
   .option('--compact', 'Merge single-child chains onto one line')
-  .option('--goto <place>', 'Point the map camera straight down over lon,lat[,height] (degrees, metres) or a scene object by id or name (cesiumjs)')
+  .option('--goto <place>', 'Point the camera straight down over lon,lat[,height] (degrees, metres) or a scene object by id, name or label (cesiumjs)')
   .action(async (options) => {
     const config = requireConfig()
     await runScene(config, options)
@@ -440,7 +440,7 @@ const parseSeconds = (value: string): number => {
 const EXPR_HOLDS = 'is truthy, or its promise resolves'
 const UNTIL_EXPR_FLAG = '--until-expr <js>'
 const UNTIL_EXPR_HELP = `Done when this JS expression in the page ${EXPR_HOLDS} (state no element shows); needs allowEval`
-const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre; or scene=<object>, a map object by id or name (cesiumjs)'
+const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre; or scene=<object>, a scene object by id, name or label (cesiumjs)'
 /** Candidates for `${NAME}`: the server keeps only the names a script uses. */
 const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
 
@@ -496,7 +496,9 @@ act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, 
     await runAct(requireConfig(), { op: 'drag', target: from, to, edge, html5: opts.html5 === true })
   })
 
-act.command('goto <place>').description('Point the map camera straight down over lon,lat[,height] or a scene object by id or name, as `scene --goto` (cesiumjs)')
+act.command('goto <place>').description('Point the camera straight down over lon,lat[,height] or a scene object by id, name or label, as `scene --goto` (cesiumjs)')
+  // `-142.38,-55.75` would read as an unknown option.
+  .allowUnknownOption()
   .action(async (place: string) => { await runAct(requireConfig(), { op: 'goto', place }) })
 
 act.command('do <steps...>').description('Several ops decided from one table, e.g. act do "type 2 root" "type 3 secret" "click 1"')
