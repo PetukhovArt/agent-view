@@ -160,6 +160,28 @@ async function main(): Promise<void> {
 
     const list = await heap({ action: 'list' })
     check('list shows three snapshots', list.ok && String(list.data).split('\n').length === 3, String(list.data ?? list.error))
+
+    // A lookup that keeps a handle on the element it found keeps it alive after the app drops it.
+    // An IIFE: a top-level `const` would outlive the call in the global lexical scope.
+    const planted = await evalIn(`(() => {
+      const b = document.createElement('button');
+      b.className = 'lookup-target';
+      b.setAttribute('data-testid', 'lookup-target');
+      b.textContent = 'Lookup target';
+      document.body.appendChild(b);
+      return 1
+    })()`)
+    check('planted the lookup target', planted.ok, planted.error ?? '')
+    const waited = await sendCommand({ ...base, command: 'wait', args: { testid: 'lookup-target', timeout: 5, cwd } })
+    const clicked = await sendCommand({ ...base, command: 'click', args: { testid: 'lookup-target', cwd } })
+    check('wait and click --testid found the target', waited.ok && clicked.ok, String(waited.error ?? clicked.error ?? ''))
+    await evalIn(`document.querySelector('.lookup-target').remove()`)
+    await heap({ action: 'take', name: 'after-lookup' })
+    // Chromium's own input state (InternalNode) keeps the last clicked node, as after a user's
+    // click. The inspector's handles, retained as "DevTools console", are agent-view's.
+    const held = await heap({ action: 'retainers', name: 'after-lookup', class: 'Detached <button class="lookup-target" data-testid="lookup-target">' })
+    const hTxt = String(held.data ?? held.error)
+    check('a lookup keeps no handle on the element', held.ok && !hTxt.includes('DevTools console'), hTxt)
   } finally {
     await sendCommand({ token, command: 'stop', args: {} } as Record<string, unknown>).catch(() => {})
     proc.kill()

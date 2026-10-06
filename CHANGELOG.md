@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.27.0] - 2026-10-06
+
+### Fixed
+- `click`, `wait`, `fill`, `upload`, `listeners`, `screenshot` crops and the `act` steps no longer keep the element they found alive: each releases its DevTools handles when it ends. A heap diff after closing a widget used to show it as leaked (`DevTools console` among its retainers), WebGL context and all.
+
 ## [0.26.0] - 2026-10-06
 
 ### Added

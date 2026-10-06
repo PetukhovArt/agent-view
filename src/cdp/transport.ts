@@ -199,6 +199,7 @@ type RawCDPClient = {
       exceptionDetails?: { text?: string; exception?: { description?: string }; stackTrace?: { description?: string } }
     }>
     callFunctionOn: (params: Record<string, unknown>) => Promise<unknown>
+    releaseObjectGroup: (params: { objectGroup: string }) => Promise<unknown>
     runIfWaitingForDebugger: () => Promise<unknown>
     consoleAPICalled: (cb: (params: ConsoleAPICalledEvent) => void) => () => void
   }
@@ -1074,13 +1075,13 @@ export async function connectToPage(
   const fileChooserSub = attachFileChooserSubscription(
     Page,
     (backendNodeId, files) => DOM.setFileInputFiles({ backendNodeId, files }).then(() => undefined),
-    async (backendNodeId) => {
-      const { object } = await DOM.resolveNode({ backendNodeId })
+    (backendNodeId) => withHandles(async (objectGroup) => {
+      const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       await Runtime.callFunctionOn({
         objectId: object.objectId,
         functionDeclaration: `function() { this.dispatchEvent(new Event('cancel')) }`,
       })
-    },
+    }),
     consoleSub.emit,
   )
   const onDisconnect = attachDisconnectSubscription(client)
@@ -1127,6 +1128,20 @@ export async function connectToPage(
   }
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+  /**
+   * A RemoteObject outside a group lives until the page navigates: a lookup that left one on an
+   * element kept it, and everything it holds, out of GC, a false leak in a heap diff.
+   */
+  let handleGroupSeq = 0
+  async function withHandles<T>(fn: (objectGroup: string) => Promise<T>): Promise<T> {
+    const objectGroup = `agent-view-${++handleGroupSeq}`
+    try {
+      return await fn(objectGroup)
+    } finally {
+      await Runtime.releaseObjectGroup({ objectGroup }).catch(() => { /* socket gone */ })
+    }
+  }
 
   async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<DragResult> {
     const steps = Math.max(0, opts?.steps ?? 10)
@@ -1184,11 +1199,13 @@ export async function connectToPage(
     }
   }
 
-  async function scrollNodeIntoView(backendNodeId: number): Promise<void> {
-    const { object } = await DOM.resolveNode({ backendNodeId })
-    await Runtime.callFunctionOn({
-      objectId: object.objectId,
-      functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
+  function scrollNodeIntoView(backendNodeId: number): Promise<void> {
+    return withHandles(async (objectGroup) => {
+      const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
+      await Runtime.callFunctionOn({
+        objectId: object.objectId,
+        functionDeclaration: 'function() { this.scrollIntoViewIfNeeded() }',
+      })
     })
   }
 
@@ -1220,22 +1237,24 @@ export async function connectToPage(
    * A filter match usually lands on the text-bearing node (a heading), while the
    * interesting rect is its container.
    */
-  async function resolveAncestor(backendNodeId: number, levels: number): Promise<number> {
-    const { object } = await DOM.resolveNode({ backendNodeId })
-    const climbed = await Runtime.callFunctionOn({
-      objectId: object.objectId,
-      functionDeclaration: `function(levels) {
-        let el = this.nodeType === Node.TEXT_NODE ? this.parentElement : this;
-        for (let i = 0; i < levels && el.parentElement; i++) el = el.parentElement;
-        return el;
-      }`,
-      arguments: [{ value: levels }],
-    }) as { result?: { objectId?: string } }
-    const ancestorObjectId = climbed.result?.objectId
-    if (!ancestorObjectId) return backendNodeId
-    const { nodeId } = await DOM.requestNode({ objectId: ancestorObjectId })
-    const { node } = await DOM.describeNode({ nodeId })
-    return node.backendNodeId
+  function resolveAncestor(backendNodeId: number, levels: number): Promise<number> {
+    return withHandles(async (objectGroup) => {
+      const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
+      const climbed = await Runtime.callFunctionOn({
+        objectId: object.objectId,
+        functionDeclaration: `function(levels) {
+          let el = this.nodeType === Node.TEXT_NODE ? this.parentElement : this;
+          for (let i = 0; i < levels && el.parentElement; i++) el = el.parentElement;
+          return el;
+        }`,
+        arguments: [{ value: levels }],
+      }) as { result?: { objectId?: string } }
+      const ancestorObjectId = climbed.result?.objectId
+      if (!ancestorObjectId) return backendNodeId
+      const { nodeId } = await DOM.requestNode({ objectId: ancestorObjectId })
+      const { node } = await DOM.describeNode({ nodeId })
+      return node.backendNodeId
+    })
   }
 
   async function resolveBoxRect(backendNodeId: number, scrollIntoView: boolean): Promise<ScreenshotClip> {
@@ -1277,23 +1296,24 @@ export async function connectToPage(
     takeCoverage: () => coverage.take(),
     takeHeapSnapshot: () => takeHeapSnapshotImpl(client),
 
-    async getEventListeners(backendDOMNodeId, depth = 0): Promise<EventListenerInfo[]> {
-      const { object } = await DOM.resolveNode({ backendNodeId: backendDOMNodeId })
+    getEventListeners: (backendDOMNodeId, depth = 0) => withHandles(async (objectGroup) => {
+      const { object } = await DOM.resolveNode({ backendNodeId: backendDOMNodeId, objectGroup })
       return listenersOn(object.objectId, depth)
-    },
+    }),
 
-    async getEventListenersBySelector(selector, depth = 0): Promise<EventListenerInfo[] | null> {
+    getEventListenersBySelector: (selector, depth = 0) => withHandles(async (objectGroup) => {
       // objectId, not nodeId: `DOM.querySelector` needs a document nodeId, which is
       // renumbered on every navigation. Same reasoning as `uploadBySelector`.
       const { result, exceptionDetails } = await Runtime.evaluate({
         expression: `document.querySelector(${JSON.stringify(selector)})`,
         returnByValue: false,
+        objectGroup,
       })
       // A malformed selector throws a DOMException that arrives as a valid RemoteObject.
       if (exceptionDetails) return null
       if (!result.objectId || result.subtype === 'null') return null
       return listenersOn(result.objectId, depth)
-    },
+    }),
 
     async queryVisible(selector) {
       const all = `document.querySelectorAll(${JSON.stringify(selector)})`
@@ -1304,15 +1324,18 @@ export async function connectToPage(
 
       // objectId, not nodeId — same reasoning as `uploadBySelector`. `checkVisibility` is
       // Chromium 105+; the fallback still rules out `display:none`.
-      const { result } = await Runtime.evaluate({
-        expression: `[...${all}].find(el => el.checkVisibility
-          ? el.checkVisibility({ visibilityProperty: true })
-          : el.getClientRects().length > 0) ?? null`,
-        returnByValue: false,
+      return withHandles(async (objectGroup) => {
+        const { result } = await Runtime.evaluate({
+          expression: `[...${all}].find(el => el.checkVisibility
+            ? el.checkVisibility({ visibilityProperty: true })
+            : el.getClientRects().length > 0) ?? null`,
+          returnByValue: false,
+          objectGroup,
+        })
+        if (!result.objectId) return { backendDOMNodeId: null, count }
+        const { node } = await DOM.describeNode({ objectId: result.objectId })
+        return { backendDOMNodeId: node.backendNodeId, count }
       })
-      if (!result.objectId) return { backendDOMNodeId: null, count }
-      const { node } = await DOM.describeNode({ objectId: result.objectId })
-      return { backendDOMNodeId: node.backendNodeId, count }
     },
 
     async getTestIds(attributes) {
@@ -1421,13 +1444,14 @@ export async function connectToPage(
       await DOM.setFileInputFiles({ backendNodeId, files })
     },
 
-    async uploadBySelector(selector: string, files: string[]): Promise<boolean> {
+    uploadBySelector: (selector: string, files: string[]): Promise<boolean> => withHandles(async (objectGroup) => {
       // Addressed by objectId rather than nodeId: `DOM.querySelector` needs a
       // document nodeId, and the document node is re-numbered on every
       // navigation. A RemoteObject from the page skips that bookkeeping.
       const { result, exceptionDetails } = await Runtime.evaluate({
         expression: `document.querySelector(${JSON.stringify(selector)})`,
         returnByValue: false,
+        objectGroup,
       })
       // A malformed selector throws, and the thrown DOMException comes back as
       // a perfectly good RemoteObject — without this check it would be passed
@@ -1438,10 +1462,10 @@ export async function connectToPage(
       if (!result.objectId || result.subtype === 'null') return false
       await DOM.setFileInputFiles({ objectId: result.objectId, files })
       return true
-    },
+    }),
 
-    async fillByNodeId(backendNodeId: number, value: string): Promise<void> {
-      const { object } = await DOM.resolveNode({ backendNodeId })
+    fillByNodeId: (backendNodeId: number, value: string): Promise<void> => withHandles(async (objectGroup) => {
+      const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       // A test id usually sits on a component's wrapper, not on the field inside it.
       // tagName, not instanceof: a field in an iframe belongs to another realm. The
       // native setter is what framework value trackers (React) see.
@@ -1461,7 +1485,7 @@ export async function connectToPage(
         returnByValue: true,
       }) as { result?: { value?: unknown } }
       if (filled.result?.value !== true) throw new EvaluationError('No input or textarea at or inside the element')
-    },
+    }),
 
     async getLayoutSnapshot(): Promise<LayoutSnapshot> {
       const [{ documents, strings }, metrics] = await Promise.all([
@@ -1504,28 +1528,30 @@ export async function connectToPage(
         return null
       })
       if (!hit || hit.backendNodeId === backendNodeId) return null
-      const [target, other] = await Promise.all([
-        DOM.resolveNode({ backendNodeId }),
-        DOM.resolveNode({ backendNodeId: hit.backendNodeId }),
-      ])
-      const verdict = await Runtime.callFunctionOn({
-        objectId: target.object.objectId,
-        functionDeclaration: `function(hit, attrs) {
-          const el = hit.nodeType === Node.TEXT_NODE ? hit.parentElement : hit;
-          if (this.contains(el) || el.contains(this)) return null;
-          const id = el.id ? '#' + el.id : '';
-          const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).join('.') : '';
-          const attr = attrs.find(a => el.hasAttribute(a));
-          return el.tagName.toLowerCase() + id + cls + (attr ? ' testid=' + el.getAttribute(attr) : '');
-        }`,
-        arguments: [{ objectId: other.object.objectId }, { value: testIdAttributes }],
-        returnByValue: true,
-      }) as { result?: { value?: unknown } }
-      return typeof verdict.result?.value === 'string' ? verdict.result.value : null
+      return withHandles(async (objectGroup) => {
+        const [target, other] = await Promise.all([
+          DOM.resolveNode({ backendNodeId, objectGroup }),
+          DOM.resolveNode({ backendNodeId: hit.backendNodeId, objectGroup }),
+        ])
+        const verdict = await Runtime.callFunctionOn({
+          objectId: target.object.objectId,
+          functionDeclaration: `function(hit, attrs) {
+            const el = hit.nodeType === Node.TEXT_NODE ? hit.parentElement : hit;
+            if (this.contains(el) || el.contains(this)) return null;
+            const id = el.id ? '#' + el.id : '';
+            const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).join('.') : '';
+            const attr = attrs.find(a => el.hasAttribute(a));
+            return el.tagName.toLowerCase() + id + cls + (attr ? ' testid=' + el.getAttribute(attr) : '');
+          }`,
+          arguments: [{ objectId: other.object.objectId }, { value: testIdAttributes }],
+          returnByValue: true,
+        }) as { result?: { value?: unknown } }
+        return typeof verdict.result?.value === 'string' ? verdict.result.value : null
+      })
     },
 
-    async selectOption(backendNodeId: number, optionText: string): Promise<'ok' | 'not-select' | 'no-option'> {
-      const { object } = await DOM.resolveNode({ backendNodeId })
+    selectOption: (backendNodeId: number, optionText: string): Promise<'ok' | 'not-select' | 'no-option'> => withHandles(async (objectGroup) => {
+      const { object } = await DOM.resolveNode({ backendNodeId, objectGroup })
       const outcome = await Runtime.callFunctionOn({
         objectId: object.objectId,
         functionDeclaration: `function(text) {
@@ -1541,7 +1567,7 @@ export async function connectToPage(
         returnByValue: true,
       }) as { result?: { value?: 'ok' | 'not-select' | 'no-option' } }
       return outcome.result?.value ?? 'not-select'
-    },
+    }),
 
     async scrollWheel(direction: 'up' | 'down', at?: Point): Promise<void> {
       const { cssLayoutViewport } = await Page.getLayoutMetrics()

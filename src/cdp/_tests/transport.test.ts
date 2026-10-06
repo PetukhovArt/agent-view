@@ -3,7 +3,7 @@ import { deflateSync, inflateSync } from 'node:zlib'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
 
-const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
+const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockReleaseObjectGroup, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
   vi.hoisted(() => {
     const callOrder: string[] = []
 
@@ -31,6 +31,8 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       return Promise.resolve({})
     })
 
+    const mockReleaseObjectGroup = vi.fn().mockResolvedValue({})
+
     const mockDispatchMouse = vi.fn().mockImplementation(({ type }: { type: string }) => {
       callOrder.push(`Input.${type}`)
       return Promise.resolve({})
@@ -54,6 +56,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       Runtime: {
         enable: vi.fn().mockResolvedValue({}),
         callFunctionOn: mockCallFunctionOn,
+        releaseObjectGroup: mockReleaseObjectGroup,
         runIfWaitingForDebugger: vi.fn().mockResolvedValue({}),
         evaluate: vi.fn().mockResolvedValue({ result: { value: undefined } }),
         consoleAPICalled: vi.fn().mockReturnValue(() => {}),
@@ -121,7 +124,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDisp
       close: vi.fn().mockResolvedValue({}),
     })
 
-    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
+    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockReleaseObjectGroup, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
   })
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
@@ -268,8 +271,19 @@ describe('clickByNodeId', () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(99)
 
-    expect(mockDomResolve).toHaveBeenCalledWith({ backendNodeId: 99 })
+    expect(mockDomResolve).toHaveBeenCalledWith(expect.objectContaining({ backendNodeId: 99 }))
     expect(mockDomBoxModel).toHaveBeenCalledWith({ backendNodeId: 99 })
+  })
+
+  // A handle left on the element kept an unmounted widget alive: a false leak in a heap diff.
+  it('releases the handle it resolved the element to', async () => {
+    mockReleaseObjectGroup.mockClear()
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.clickByNodeId(42)
+
+    const { objectGroup } = mockDomResolve.mock.calls[0][0] as { objectGroup: string }
+    expect(objectGroup).toBeTruthy()
+    expect(mockReleaseObjectGroup).toHaveBeenCalledWith({ objectGroup })
   })
 
   it('uses objectId from resolveNode for scroll callFunctionOn', async () => {
