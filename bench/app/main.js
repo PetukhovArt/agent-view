@@ -1,9 +1,20 @@
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, screen } = require('electron')
 const path = require('path')
 const http = require('http')
 const crypto = require('crypto')
 
 const NET_PORT = 19333
+
+// For bench/smoke-background.ts. BG_MODE: normal | occluded | minimized | hidden.
+// BG_VARIANT: none | flags (Chromium backgrounding switches) | throttle (backgroundThrottling: false).
+const bgMode = process.env.BG_MODE || 'normal'
+const bgVariant = process.env.BG_VARIANT || 'none'
+
+if (bgVariant === 'flags') {
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+  app.commandLine.appendSwitch('disable-renderer-backgrounding')
+  app.commandLine.appendSwitch('disable-background-timer-throttling')
+}
 
 // ── Minimal HTTP + WebSocket-echo server for the `network` smoke ──────────────
 // Dependency-free: hand-rolled WS framing (text frames only, small payloads).
@@ -70,16 +81,24 @@ function startNetServer() {
   server.listen(NET_PORT, '127.0.0.1')
 }
 
-function createWindow() {
+async function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: bgVariant !== 'throttle',
     },
   })
-  win.loadFile(path.join(__dirname, 'index.html'))
+  await win.loadFile(path.join(__dirname, 'index.html'))
+  if (bgMode === 'occluded') {
+    const { width, height } = screen.getPrimaryDisplay().workAreaSize
+    const cover = new BrowserWindow({ x: 0, y: 0, width, height, alwaysOnTop: true })
+    cover.loadURL('about:blank')
+  }
+  if (bgMode === 'minimized') win.minimize()
+  if (bgMode === 'hidden') win.hide()
 }
 
 startNetServer()
