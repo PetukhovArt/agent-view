@@ -62,6 +62,15 @@ async function waitForMap(): Promise<void> {
   throw new Error(`no app page on CDP ${CDP_PORT}`)
 }
 
+/** Vite may rebuild its deps on the first load, so the viewer comes up a while after the page. */
+async function waitForViewer(run: (command: string, args: Record<string, unknown>) => Promise<Resp>): Promise<void> {
+  for (let i = 0; i < 60; i++) {
+    if (String((await run('scene', {})).data ?? '').startsWith('Viewer')) return
+    await sleep(500)
+  }
+  throw new Error('no Cesium viewer on the page')
+}
+
 /** The tree: start.mjs runs vite and Electron as children, which a plain kill leaves behind on Windows. */
 function killTree(proc: ChildProcess): void {
   if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
@@ -102,7 +111,7 @@ async function smokeHook(
   const client = await CDP({ port: CDP_PORT, target: page.id })
   await client.Page.navigate({ url: page.url.replace(/\?.*$/, '') + '?hook' })
   await client.close()
-  await sleep(3000)
+  await waitForViewer(run)
   const scene = await run('scene', {})
   check('[plain?hook] scene names via=hook', String(scene.data).includes('via=hook'), String(scene.data ?? scene.error).split('\n')[0])
   const left = await hitAfter({ scene: TARGET })
@@ -116,9 +125,9 @@ async function smokePage(page: 'index' | 'plain', token: string, check: (name: s
   const actDir = await mkdtemp(join(tmpdir(), 'smoke-cesium-'))
   try {
     await waitForMap()
-    await sleep(3000)
     const base = { token, runtime: RuntimeType.Electron, port: CDP_PORT, engine: WebGLEngine.CesiumJS }
     const run = (command: string, args: Record<string, unknown>) => sendCommand({ ...base, command, args: { ...args, cwd: APP_DIR } })
+    await waitForViewer(run)
     const evaluate = async (expression: string) => ((await run('eval', { expression })).data as { result: unknown }).result
     const lastHit = async () => JSON.parse(String(await evaluate('window.__hits.at(-1) ?? null'))) as Hit | null
     const hitAfter = async (args: Record<string, unknown>) => {

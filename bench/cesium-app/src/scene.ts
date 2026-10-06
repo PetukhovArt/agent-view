@@ -68,7 +68,7 @@ export const naturalEarthLayer = (Cesium: any): unknown => Cesium.ImageryLayer.f
   Cesium.TileMapServiceImageryProvider.fromUrl(Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')),
 )
 
-// Entities here carry no `name` (as in web-client), so the label text stands in for it.
+// Entities here carry no `name`, as apps often build them, so the label text stands in for it.
 export const recordClicks = (Cesium: any, viewer: any): void => {
   window.__hits = []
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
