@@ -1,0 +1,8 @@
+{
+  "productName": "bench-tauri-app",
+  "version": "0.1.0",
+  "identifier": "dev.agentview.bench",
+  "build": { "frontendDist": ["../../app/index.html"] },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false, "icon": ["icons/icon.ico", "icons/icon.png"] }
+}
