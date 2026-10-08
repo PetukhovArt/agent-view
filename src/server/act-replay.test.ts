@@ -20,6 +20,18 @@ const fakeConn = (attributes: Record<string, string> = {}) => ({
   clickByNodeId: vi.fn(async () => {}),
 })
 
+/** `run` driven to its end under fake timers: a FAIL waits out the step / until time. */
+const settled = async <T>(run: Promise<T>): Promise<T> => {
+  let isDone = false
+  void run.finally(() => { isDone = true })
+  while (!isDone) {
+    await vi.advanceTimersByTimeAsync(100)
+    await new Promise(r => setImmediate(r)) // real I/O (the store on disk) gets its turn
+  }
+  vi.useRealTimers()
+  return run
+}
+
 const fakeDeps = (conn: object, { isEvalAllowed = false } = {}): ActDeps => {
   const deps: ActDeps = { conn: conn as PageSession, invalidateAxCache: () => {}, reconnect: async () => deps.conn, isEvalAllowed }
   return deps
@@ -164,5 +176,39 @@ describe('replay', () => {
 
     expect(result).toMatchObject({ ok: true, exitCode: 0 })
     expect(conn.clickByNodeId).toHaveBeenCalledTimes(2)
+  })
+
+  it('ends FAIL naming the cover when a test-id target stays covered (a dialog left open), never clicking through it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
+    await writeScript({ store, name: 'filter' }, { until: { testid: 'done' }, steps: [{ op: 'click', target: { testid: 'filter-icon' } }] })
+    const conn = { ...fakeConn(), hitTest: async () => 'div.v-overlay__scrim' }
+    const deps = fakeDeps(conn)
+
+    const result = await settled(replay({ store, name: 'filter' }, deps))
+
+    expect(result).toMatchObject({ ok: true, exitCode: 1, data: expect.stringContaining('covered by div.v-overlay__scrim') })
+    expect(conn.clickByNodeId).not.toHaveBeenCalled()
+  })
+
+  it('a FAIL prints the notices on screen, so a refusal the app showed is read, not guessed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
+    await writeScript({ store, name: 'add' }, { until: { selector: 'body:not(:has(.dialog))' }, steps: [] })
+    const NOTICE_ID = 8
+    const conn = {
+      ...fakeConn(),
+      getAccessibilityTree: async () => [{ nodeId: 'ax8', role: { value: 'status' }, name: { value: 'Сервер недоступен' }, backendDOMNodeId: NOTICE_ID }],
+      getLayoutSnapshot: async () => ({
+        viewport: { width: 800, height: 600 },
+        nodes: new Map([[NOTICE_ID, { rect: { x: 10, y: 500, width: 300, height: 40 }, tag: 'div', attributes: {}, cursor: 'auto' }]]),
+      }),
+      queryVisible: async () => ({ backendDOMNodeId: null, count: 0 }),
+    }
+    const deps = fakeDeps(conn)
+
+    const result = await settled(replay({ store, name: 'add' }, deps))
+
+    expect(result).toMatchObject({ ok: true, exitCode: 1, data: expect.stringContaining('on screen: status "Сервер недоступен"') })
   })
 })

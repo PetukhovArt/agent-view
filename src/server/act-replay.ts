@@ -1,7 +1,7 @@
 import type { PageSession, Point } from '../cdp/types.js'
 import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
 import type { ServerResponse, WebGLEngine } from '../types.js'
-import { extractControls, type Control } from '../inspectors/controls/index.js'
+import { NOTICE_ROLES, describeControl, extractControls, type Control } from '../inspectors/controls/index.js'
 import { clickSceneObject, describePlace, moveSceneCamera, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
 import {
@@ -212,6 +212,15 @@ export async function replay(
     const [exitCode, word] = miss.reason === 'covered' ? [EXIT_FAIL, 'FAIL'] : [EXIT_STALE, 'STALE']
     return verdict(exitCode, `${word}: ${what} — ${miss.error} after ${STEP_TIMEOUT_MS / 1000}s`)
   }
+  /** What covers the node's centre, null for nothing, undefined when it detached between the snapshot and the hit test. */
+  const coverOf = async (c: PageSession, nodeId: number): Promise<string | null | undefined> => {
+    try {
+      return await c.hitTest(nodeId, attributes)
+    } catch (err) {
+      if (isDeadSocket(err)) throw err
+      return undefined
+    }
+  }
   /** The control, or why it is not usable yet: absent, or present but disabled / covered. */
   const find = async (target: RowTarget, { isEnabledRequired, timeoutMs }: { isEnabledRequired: boolean; timeoutMs: number }) => {
     let seen: string | undefined
@@ -230,25 +239,36 @@ export async function replay(
         seen = 'disabled'
         return undefined
       }
-      let covering: string | null
-      try {
-        covering = await c.hitTest(hit.backendDOMNodeId, attributes)
-      } catch (err) {
-        if (isDeadSocket(err)) throw err
-        return undefined // detached between the snapshot and the hit test: look again
-      }
+      const covering = await coverOf(c, hit.backendDOMNodeId)
       if (covering) seen = `covered by ${covering}`
-      return covering ? undefined : hit
+      return covering === null ? hit : undefined
     }, timeoutMs)
     return { control, seen }
   }
-  const findElement = (target: ElementTarget, timeoutMs: number) => poll(deps, async (c) => {
-    const found = await findByLocator(c, elementLocator(target, testIdAttribute))
-    return 'error' in found ? undefined : found.backendDOMNodeId
-  }, timeoutMs)
+  /**
+   * A visible element, or why it is not usable yet: covered. A step at a point of it (`@x,y` on a canvas) is
+   * not hit-tested: its centre may sit under an overlay the point is clear of.
+   */
+  const findElement = async (target: ElementTarget, { isCoverChecked, timeoutMs }: { isCoverChecked: boolean; timeoutMs: number }) => {
+    let seen: string | undefined
+    const nodeId = await poll(deps, async (c) => {
+      seen = undefined
+      const found = await findByLocator(c, elementLocator(target, testIdAttribute))
+      if ('error' in found) return undefined
+      if (!isCoverChecked) return found.backendDOMNodeId
+      const covering = await coverOf(c, found.backendDOMNodeId)
+      if (covering) seen = `covered by ${covering}`
+      return covering === null ? found.backendDOMNodeId : undefined
+    }, timeoutMs)
+    return { nodeId, seen }
+  }
   /** The node a step acts on: a row found again, or any visible element (a canvas has no row). */
-  const resolve = async (target: NodeTarget, isEnabledRequired: boolean, timeoutMs = STEP_TIMEOUT_MS): Promise<{ nodeId?: number; seen?: string }> => {
-    if (!isRowTarget(target)) return { nodeId: await findElement(target, timeoutMs) }
+  const resolve = async (
+    target: NodeTarget,
+    { isEnabledRequired, isCoverChecked = true }: { isEnabledRequired: boolean; isCoverChecked?: boolean },
+    timeoutMs = STEP_TIMEOUT_MS,
+  ): Promise<{ nodeId?: number; seen?: string }> => {
+    if (!isRowTarget(target)) return findElement(target, { isCoverChecked, timeoutMs })
     const { control, seen } = await find(target, { isEnabledRequired, timeoutMs })
     return { nodeId: control?.backendDOMNodeId, seen }
   }
@@ -261,12 +281,12 @@ export async function replay(
    */
   const onNode = async (
     target: NodeTarget,
-    { isEnabledRequired, what }: { isEnabledRequired: boolean; what: string },
+    { isEnabledRequired, isCoverChecked, what }: { isEnabledRequired: boolean; isCoverChecked?: boolean; what: string },
     use: (nodeId: number, msLeft: number) => Promise<ServerResponse | undefined>,
   ): Promise<ServerResponse | undefined> => {
     const deadline = Date.now() + STEP_TIMEOUT_MS
     for (;;) {
-      const { nodeId, seen } = await resolve(target, isEnabledRequired, deadline - Date.now())
+      const { nodeId, seen } = await resolve(target, { isEnabledRequired, isCoverChecked }, deadline - Date.now())
       if (!nodeId) {
         // Present but unusable is the app misbehaving; absent is the script out of date.
         return seen
@@ -289,7 +309,7 @@ export async function replay(
   const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
     try {
       if (step.op === 'drag') {
-        const dropId = step.to && (await resolve(step.to, false, msLeft)).nodeId
+        const dropId = step.to && (await resolve(step.to, { isEnabledRequired: false, isCoverChecked: !step.toAt }, msLeft)).nodeId
         if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
         await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
       } else if (isClickOp(step.op)) {
@@ -344,7 +364,8 @@ export async function replay(
         continue
       }
       const what = `${at} ${step.op} ${describeTarget(step.target)}`
-      const failed = await onNode(step.target, { isEnabledRequired: step.op !== 'drag', what }, (nodeId, msLeft) => actOn(step, nodeId, at, msLeft))
+      const isCoverChecked = !('at' in step && step.at)
+      const failed = await onNode(step.target, { isEnabledRequired: step.op !== 'drag', isCoverChecked, what }, (nodeId, msLeft) => actOn(step, nodeId, at, msLeft))
       if (failed) return failed
       // A `dom` right after the replay must not get the tree from before the last action.
       deps.invalidateAxCache()
@@ -352,6 +373,13 @@ export async function replay(
     return undefined
   }
 
+  /** A FAIL / STALE with the notices on screen under it (a snackbar, an alert): the app saying why. */
+  const withNotices = async (result: ServerResponse): Promise<ServerResponse> => {
+    if (!result.ok) return result
+    const notices = await Promise.all([deps.conn.getAccessibilityTree(), deps.conn.getLayoutSnapshot()])
+      .then(([ax, layout]) => extractControls(ax, layout, attributes).filter(c => NOTICE_ROLES.has(c.role)), () => [])
+    return notices.length ? { ...result, data: `${result.data}\non screen: ${notices.map(describeControl).join(', ')}` } : result
+  }
   /** Steps, then the until condition: a verdict when the script did not reach DONE, else how long its steps took. */
   const runScript = async ({ name: current, script, untilMs }: Link, until: Condition, isMain: boolean): Promise<ServerResponse | string> => {
     if (script.steps.some(s => 'isPassword' in s && s.isPassword) && !secret) {
@@ -359,12 +387,12 @@ export async function replay(
     }
     const stepsStart = Date.now()
     const failed = await runSteps(script, isMain ? '' : `${linkWord} ${current}: `)
-    if (failed) return failed
+    if (failed) return withNotices(failed)
     // Split the total: our steps vs the app answering them (auth, reload) — only the first is ours to speed up.
     const stepsTime = `${((Date.now() - stepsStart) / 1000).toFixed(1)}s`
     const reason = await waitFor(deps, until, untilMs)
     const who = isMain ? `replay ${current}` : `${linkWord} ${current}`
-    return reason ? verdict(EXIT_FAIL, `FAIL: ${who} — steps ran, ${until.label} ${reason} after ${untilMs / 1000}s`) : stepsTime
+    return reason ? withNotices(verdict(EXIT_FAIL, `FAIL: ${who} — steps ran, ${until.label} ${reason} after ${untilMs / 1000}s`)) : stepsTime
   }
   const untilOf = (current: string, script: ActScript): Condition | ServerResponse =>
     conditionOf(script.until, testIdAttribute)

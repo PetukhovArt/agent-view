@@ -395,7 +395,8 @@ The saved script names each control by test id, else role + name — never by ro
 of several visible controls sharing that role + name it is (the × of every tab, `#2` in replay lines);
 a `testid=` / `css=` target is saved as given, with its `@x,y`. It stores no password. `act replay`
 runs it inside the server: each step waits (50 ms polls, 10 s cap) only for its own control to be on
-screen, enabled and uncovered, then acts; a control found but not yet drawn (a virtual-list row, a list
+screen, enabled and uncovered, then acts (a `testid=` / `css=` target: on screen and uncovered; at a
+`@x,y` point, on screen only); a control found but not yet drawn (a virtual-list row, a list
 re-rendered under it) is found again and acted on within the same 10 s; a window reload mid-run is
 ridden over. A `wait --expr` step gets 10 s. The until then gets
 15 s, or the script's `--timeout`. The `after` chain runs first, checked nearest-first (once, no wait):
@@ -412,6 +413,7 @@ same way, labelled `step` instead of `prerequisite`. Its one line, ending in the
 | `FAIL: step project-open — steps ran, testid "tree-root" not visible after 60s · 61.0s` | 1 | same for a use-case step; its step lines read `STALE: step project-open: step 1/2 …` |
 | `FAIL: replay login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | the app did not answer — likely a bug |
 | `FAIL: step 2/2 click button "Войти" testid=login-btn — still disabled after 10s · 10.4s` | 1 | the control is there but stayed `disabled` / `covered by …` — likely a bug |
+| `FAIL: step 1/2 click testid=filter-icon — still covered by div.v-overlay__scrim after 10s · 10.2s` | 1 | same for a `testid=` / `css=` target: a dialog or overlay left open over it |
 | `STALE: step 2/2 click button "Войти" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
 | `STALE: step 3/3 drag target testid=video-panel not found · 10.5s` | 3 | same, for a drop target |
 | `STALE: step 1/2 select combobox "Период" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
@@ -420,6 +422,10 @@ same way, labelled `step` instead of `prerequisite`. Its one line, ending in the
 | `STALE: step 2/3 click treeitem "Насос" — Could not compute box model. · 10.4s` | 3 | the control was found but never drawn, or kept being re-rendered, for 10 s |
 | `STALE: step 2/3 click button "Закрыть" — <CDP error> · 0.4s` | 3 | acting failed otherwise (a panel that toggled shut); input already sent is never repeated |
 | `` STALE: step 1/2 goto Tower 3 --height 2000 — No scene object "Tower 3". Run `agent-view scene` after 10s · 10.2s `` | 3 | a scene step's object stayed missing; `FAIL` (1) when it stayed covered |
+
+A `FAIL` or `STALE` line is followed by `on screen: status "Сервер недоступен", alert "…"` when the page
+shows notices (`alert` / `status` roles with text: a snackbar, an error banner) — the app's own word on
+why, read before guessing.
 
 Exit 2, message on stderr: the replay could not run — `No saved script "x"` (also for a missing
 prerequisite), `"x" types a password — set AGENT_VIEW_SECRET`, `"x" has no done condition`,

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- `act replay` no longer clicks through a dialog left open over a `testid=` / `css=` target: it waits for the target to be uncovered, as for a table row, and ends `FAIL: … still covered by <what>`. It used to click the dialog and report a misleading `STALE` on the next step. A step at a `@x,y` point is not hit-tested.
+- A replay `FAIL` or `STALE` is followed by `on screen: …` with the notices the page shows (`alert` / `status` roles: a snackbar, an error banner), so a refusal the app reported is read instead of waited out in silence.
+
 ### Changed
 - A step or use case is saved into the section of its done condition's area: the screen it sits on, not the component (`license-server__…` → `license-server`, a widget on the workspace → `workspace`), and not the areas it passes through. `act-decider` derives the section from the done condition and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
 

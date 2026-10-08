@@ -5,7 +5,7 @@ const INTERACTIVE_ROLES: ReadonlySet<string> = new Set([
   'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'listbox', 'slider', 'spinbutton', 'treeitem',
 ])
 /** Not interactive, but the decider must see why the form it just sent came back (a snackbar). */
-const NOTICE_ROLES: ReadonlySet<string> = new Set(['alert', 'status'])
+export const NOTICE_ROLES: ReadonlySet<string> = new Set(['alert', 'status'])
 /** Rows text can be typed into. */
 export const TEXT_ROLES: ReadonlySet<string> = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton'])
 const VALUE_ROLES: ReadonlySet<string> = new Set([...TEXT_ROLES, 'slider'])
