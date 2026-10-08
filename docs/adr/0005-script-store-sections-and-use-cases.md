@@ -1,6 +1,6 @@
 # 0005. Script Store sections and use cases
 
-- Status: Accepted; what an index line carries is superseded by [ADR 0006](./0006-store-index-is-for-picking-scripts-hold-no-uuid.md)
+- Status: Accepted; what an index line carries is superseded by [ADR 0006](./0006-store-index-is-for-picking-scripts-hold-no-uuid.md); which section a script lies in is superseded by [ADR 0008](./0008-a-script-lies-in-the-area-of-its-goal.md)
 - Date: 2026-09-29
 
 ## Context
