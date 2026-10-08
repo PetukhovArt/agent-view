@@ -223,8 +223,12 @@ The directory holding a project's Act Scripts and Use Cases, split into Sections
 _Avoid_: Scratch, Script Dir
 
 **Section**
-A subdirectory of the Script Store named after a screen area (`auth`, `license-server`); a step or Use Case lies in the area its done condition names ([ADR 0008](./docs/adr/0008-a-script-lies-in-the-area-of-its-goal.md)). A script's name is unique across all Sections.
+A subdirectory of the Script Store named after an Area (`auth`, `workspace`); a step or Use Case lies in the Area of its done condition ([ADR 0008](./docs/adr/0008-a-script-lies-in-the-area-of-its-done-condition.md)). A script's name is unique across all Sections.
 _Avoid_: Feature Folder, Shared, Integration
+
+**Area**
+The screen of the app a done condition sits on (a page, the workspace, the login window), not the component that renders it: a widget on the workspace is in the `workspace` Area. Names the Section a script lies in.
+_Avoid_: Product Area, Feature, Component
 
 **Fixture**
 Setup outside the UI (files on disk) that a Use Case needs, kept in its Section's `fixtures/` and named in the Use Case's `requires`. Replay reminds, never runs it.
