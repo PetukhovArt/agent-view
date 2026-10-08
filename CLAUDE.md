@@ -137,7 +137,7 @@ sibling directories; `src/server/` and `src/config/` colocate them next to the s
   network attaches eagerly on purpose ([ADR 0002](./docs/adr/0002-eager-network-capture-lifecycle.md)). A new per-target
   stream picks its lifecycle from where its value sits, and records the choice as an ADR.
 - **Adapters return `PageSession`**, not raw CDP clients. Don't leak `chrome-remote-interface` types past `src/cdp/`.
-- **`dist/`** is gitignored but published — `pnpm build` runs from `prepublishOnly` only, never commit the output.
+- **`dist/`** is gitignored but published — never commit the output.
 
 ## Reference docs in repo
 
@@ -152,10 +152,12 @@ sibling directories; `src/server/` and `src/config/` colocate them next to the s
 
 ## Releasing
 
-A feature or fix ships in four steps: commit it, run `/review-smells` from the last release commit, commit the fixes
-it calls for, release.
+A feature or fix lands locally: commit it to `main`, add its line under `## [Unreleased]` in `CHANGELOG.md`, run
+`pnpm build`. The global `agent-view` is npm-linked to this checkout, so the build is what puts the change in use.
+Leave `main` unpushed: a push to `main` carrying an untagged version publishes it.
 
-A version bump landing on `main` *is* the release. Write the `## [x.y.z]` section in `CHANGELOG.md`, run
+A release batches several such changes and starts only when the user asks for one: run `/review-smells` from the last
+release commit, commit the fixes it calls for, rename `## [Unreleased]` to `## [x.y.z] - <date>`, run
 `npm version <major|minor|patch>` (the `version` hook syncs `.claude-plugin/plugin.json`), then push.
 `.github/workflows/release.yml` publishes to npm, creates the tag and writes the GitHub release with that
 CHANGELOG section as its body. A missing CHANGELOG section fails the run before `npm publish`.
