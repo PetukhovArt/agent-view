@@ -130,17 +130,18 @@ out of turns before it finishes any.
 
 Navigation is a recorded path, re-explored only when it broke:
 
-1. `agent-view act list` prints the sections of the project's script store, one per product area (`auth`, `tree`,
-   `editor/canvas`) plus `integration`; `act list <section>` prints its **steps** (one small action each) and
+1. `agent-view act list` prints the sections of the project's script store, one per screen area (`auth`, `tree`,
+   `editor/canvas`); `act list <section>` prints its **steps** (one small action each) and
    **use cases** (a user goal built from steps, name ending in `-use-case`), one line each, linked to
    the script's JSON. Scripts live in the main checkout, so every worktree sees the same store.
 2. A script lands where you need: `agent-view act replay <name>`. Its `after` prerequisite (a login), or a use case's
    steps, run first and are skipped when already met. DONE: go on. STALE: re-record under the same name.
-3. No script fits: record the missing steps, one small action each, into the section of the area they drive. Hand
-   the goal, a done condition, a name `<section>-<target>` (`settings-connections-open`) and the section to the
-   `act-decider` agent, or drive `act start … --save <name> --in <section> --note "…"` yourself. Then, when the
-   flow is worth repeating, chain the steps with `act save-use-case <name>-use-case --in <section> …` (`integration`
-   when it crosses areas). A step that act cannot record is a missing act op or a missing test id in the app, never a
+3. No script fits: record the missing steps, one small action each. A step or use case lies in the section of its
+   goal's area, the one its done condition names (`license-server__…` → `license-server`), whatever areas it passes
+   through. Hand the goal, a done condition and a name `<area>-<target>` (`settings-connections-open`) to the
+   `act-decider` agent, which derives the section from the goal, or drive
+   `act start … --save <name> --in <section> --note "…"` yourself. Then, when the flow is worth repeating, chain the
+   steps with `act save-use-case <name>-use-case --in <section> …`. A step that act cannot record is a missing act op or a missing test id in the app, never a
    shell script in the store; setup on disk is a fixture in `<section>/fixtures/`
    ([commands](references/commands.md#step-protocol-act)).
 

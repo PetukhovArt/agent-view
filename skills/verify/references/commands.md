@@ -270,8 +270,9 @@ agent-view act save-use-case pump-open-use-case --in libraries --until-testid pu
 Scripts live per project in `<project>/.agent-view/scripts/`, `<project>` being the directory of
 `agent-view.config.json`. In a git worktree they go to the **main** checkout (same subdirectory), so
 every worktree of a project shares one store. The store is split into **sections**, subdirectories named
-after the product area a script drives (`auth`, `tree`, `editor/canvas`), mirroring the project;
-`integration` holds use cases that cross areas. There is no `shared/`: any script is reusable from where
+after screen areas (`auth`, `tree`, `editor/canvas`). A step or use case lies in the area of its goal, the one
+its done condition names (`license-server__…` → `license-server`), not the areas it passes through on the
+way. There is no `shared/`: any script is reusable from where
 it lies. `act save` / `start --save` need `--in <section>`. A name is unique across the whole store and is
 all `replay`, `--after` and a use case use — moving a file to another section breaks nothing; saving a
 name that lies in another section is refused. A script in the store root (saved before sections) still
@@ -386,7 +387,7 @@ First line of an op's output:
   `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of left|right|top|bottom|center ``,
   `act click <n | testid=<id> | css=<selector>>[@x,y]`, `--modifiers x — comma-separated alt|ctrl|meta|shift`
 - `No element matches testid "x"` / `None of 3 element(s) matching selector "…" is visible` (a `testid=` / `css=` target)
-- `act save <name> --in <section>: the product area it belongs to …` (no or bad `--in`; `act start --save` checks it
+- `act save <name> --in <section>: the area of its goal …` (no or bad `--in`; `act start --save` checks it
   up front), `"x" already lies in tree — save it into --in tree, or move or delete <path>`,
   `act save x-use-case — a recording is a step, its name does not end in -use-case`
 

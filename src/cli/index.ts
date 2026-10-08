@@ -419,7 +419,7 @@ const PARAM_NOTE_HELP = 'What ${NAME} stands for, kept in the JSON for whoever b
 const NOTE_FLAG = '--note <text>'
 const NOTE_HELP = `The goal, shown in act list and index.md: one sentence of at most ${NOTE_MAX} characters, what it does; how it ends`
 const IN_FLAG = '--in <section>'
-const IN_HELP = 'Store section to save into: the product area (auth, libraries, editor/canvas)'
+const IN_HELP = 'Store section to save into: the area of the goal, the one the done condition names (auth, libraries, editor/canvas)'
 const TIMEOUT_FLAG = '--timeout <seconds>'
 const TIMEOUT_HELP = `How long replay waits for the until after the steps (a long operation); default ${DEFAULT_UNTIL_TIMEOUT_S}`
 const parseSeconds = (value: string): number => {
@@ -512,7 +512,7 @@ act.command('save <name>').description('Write the recorded steps as a replay scr
   .action(async (name: string, options) => { await runAct(requireConfig(), { op: 'save', name, in: options.in, note: options.note, after: options.after, params: options.param, paramNotes: options.paramNote, timeout: options.timeout }) })
 
 act.command('save-use-case <name> <steps...>').description('Save a use case: saved steps in order, each "<step> [NAME=value …] [timeout=<s>]", a value may be ${NAME} from env; the name ends in -use-case; needs no running app')
-  .option(IN_FLAG, `${IN_HELP}; integration when it crosses areas`)
+  .option(IN_FLAG, IN_HELP)
   .option('--until-testid <id>', 'Done when an element with this test id is visible')
   .option('--until-selector <css>', 'Done when a match of this selector is visible')
   .option(UNTIL_EXPR_FLAG, UNTIL_EXPR_HELP)

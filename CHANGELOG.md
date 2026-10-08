@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- A step or use case is saved into the section of its goal's area, the one its done condition names (`license-server__…` → `license-server`), not the areas it passes through. `act-decider` derives the section from the goal and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
+
 ## [0.27.0] - 2026-10-06
 
 ### Fixed
