@@ -419,7 +419,7 @@ const PARAM_NOTE_HELP = 'What ${NAME} stands for, kept in the JSON for whoever b
 const NOTE_FLAG = '--note <text>'
 const NOTE_HELP = `The goal, shown in act list and index.md: one sentence of at most ${NOTE_MAX} characters, what it does; how it ends`
 const IN_FLAG = '--in <section>'
-const IN_HELP = 'Store section to save into: the area of the goal, the one the done condition names (auth, libraries, editor/canvas)'
+const IN_HELP = 'Store section to save into: the area of the done condition, the screen it sits on (auth, libraries, editor/canvas)'
 const TIMEOUT_FLAG = '--timeout <seconds>'
 const TIMEOUT_HELP = `How long replay waits for the until after the steps (a long operation); default ${DEFAULT_UNTIL_TIMEOUT_S}`
 const parseSeconds = (value: string): number => {

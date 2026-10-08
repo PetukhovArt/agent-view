@@ -51,7 +51,7 @@ export function modifiersOf(args: Record<string, unknown>): Modifier[] | { error
     : { error: `--modifiers ${raw} — comma-separated ${MODIFIERS.join('|')}` }
 }
 
-const SECTION_HINT = '--in <section>: the area of its goal, the one its done condition names (auth, libraries, editor/canvas)'
+const SECTION_HINT = '--in <section>: the area of its done condition, the screen it sits on (auth, libraries, editor/canvas)'
 
 /** `act list [section]`: a section lists the ones below it too (`editor` → `editor/canvas`). */
 export async function listSaved(args: Record<string, unknown>): Promise<ServerResponse> {
