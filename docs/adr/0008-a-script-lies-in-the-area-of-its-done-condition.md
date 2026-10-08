@@ -10,7 +10,7 @@ ADR 0005 named sections after "product areas" and kept `integration/` for use ca
 ## Decision
 
 - **A step and a use case lie in the Area of their done condition**: the screen it sits on (a page, the workspace, the login window), not the component that renders it. A widget on the workspace lies in `workspace`. The areas passed through on the way do not count.
-- **The Area is read from the done condition.** A test id whose segments follow the nesting (`workspace__video-panel__grid`) names it in its first segment; otherwise the route or the screen title does.
+- **The Area is read from the done condition.** A test id whose segments follow the nesting names it in its first segment (`license-server__configuration__…`); one rooted at a component (`video-panel__grid`, a widget on the workspace) does not, and then the route or the screen title does.
 - **No `integration/`.** A use case that crosses areas lies in the Area of its done condition, like any other.
 - **The decider derives the section from the done condition.** A caller hands over the goal and the done condition, not a section; `--in` stays required and its value is the decider's reading.
 
