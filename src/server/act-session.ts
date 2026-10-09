@@ -4,7 +4,7 @@ import type { Modifier } from '../cdp/types.js'
 import type { ServerResponse } from '../types.js'
 import {
   PASSWORD_MASK,
-  TEXT_ROLES,
+  VALUE_ROLES,
   describeControl,
   extractControls,
   formatControlRow,
@@ -245,8 +245,8 @@ async function rowStep(run: Run, { op, n, text, modifiers }: RowStepArgs): Promi
   const located = await locate(run, n)
   if (!('target' in located)) return located
   const { target, fresh } = located
-  if (op === 'type' && !TEXT_ROLES.has(target.role)) {
-    return { ok: false, error: `[${n}] is a ${target.role}, not a text field — pick a textbox/combobox row` }
+  if (op === 'type' && !VALUE_ROLES.has(target.role)) {
+    return { ok: false, error: `[${n}] is a ${target.role}, not a field — pick a textbox, combobox or slider row` }
   }
 
   const { session, deps } = run

@@ -6,9 +6,8 @@ const INTERACTIVE_ROLES: ReadonlySet<string> = new Set([
 ])
 /** Not interactive, but the decider must see why the form it just sent came back (a snackbar). */
 export const NOTICE_ROLES: ReadonlySet<string> = new Set(['alert', 'status'])
-/** Rows text can be typed into. */
-export const TEXT_ROLES: ReadonlySet<string> = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton'])
-const VALUE_ROLES: ReadonlySet<string> = new Set([...TEXT_ROLES, 'slider'])
+/** Rows that show a value and take one typed in: a field, or a native slider set to a number. */
+export const VALUE_ROLES: ReadonlySet<string> = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider'])
 const STATE_PROPS = ['checked', 'expanded', 'selected', 'disabled'] as const
 const MAX_ROWS = 150
 const NAME_SEARCH_DEPTH = 5

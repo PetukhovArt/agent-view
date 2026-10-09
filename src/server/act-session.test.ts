@@ -8,10 +8,10 @@ import { runAct } from './act-session.js'
 const NODE_ID = 7
 
 describe('runAct', () => {
-  const app = (name = 'Индикатор') => {
+  const app = (name = 'Индикатор', role = 'button') => {
     const conn = {
       evaluate: vi.fn(async (_expression: string, _opts?: object): Promise<unknown> => ''),
-      getAccessibilityTree: async () => [{ nodeId: 'ax7', role: { value: 'button' }, name: { value: name }, backendDOMNodeId: NODE_ID }],
+      getAccessibilityTree: async () => [{ nodeId: 'ax7', role: { value: role }, name: { value: name }, backendDOMNodeId: NODE_ID }],
       getLayoutSnapshot: async () => ({
         viewport: { width: 800, height: 600 },
         nodes: new Map([[NODE_ID, { rect: { x: 10, y: 10, width: 100, height: 20 }, tag: 'button', attributes: {}, cursor: 'pointer' }]]),
@@ -52,6 +52,18 @@ describe('runAct', () => {
     expect(replayed).toMatchObject({ ok: true, exitCode: 0 })
     const presses = pressKeys.mock.calls.map(([chords, opts]) => [(chords as { def: { key: string } }[]).map(c => c.def.key), opts])
     expect(presses).toEqual([[['z'], { nodeId: NODE_ID }], [['z'], { nodeId: NODE_ID }]])
+  })
+
+  it('types a number into a slider row, as a native range input takes it', async () => {
+    const { conn, deps, holder, cwd } = app('Непрозрачность', 'slider')
+    const fillByNodeId = vi.fn(async (_nodeId: number, _value: string) => {})
+    Object.assign(conn, { fillByNodeId })
+
+    await runAct(holder, { op: 'start', untilTestid: 'never', cwd }, deps)
+    const typed = await runAct(holder, { op: 'type', n: 1, text: '0.5' }, deps)
+
+    expect(typed).toMatchObject({ ok: true, data: expect.stringMatching(/^✓ type \[1\] slider/) })
+    expect(fillByNodeId).toHaveBeenCalledExactlyOnceWith(NODE_ID, '0.5')
   })
 
   it('refuses a uuid parameter value at start --save, before a run that could not be saved', async () => {
