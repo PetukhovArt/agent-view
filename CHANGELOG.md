@@ -3,7 +3,8 @@
 ## [Unreleased]
 
 ### Added
-- `key <keys>` and `act key <keys> [target]`: real key presses over CDP, any hotkey — chords of `alt|ctrl|meta|shift` and a DOM key name or one character (`ctrl+z`, `ctrl+shift+z`, `Escape`, `F5`, `"ArrowDown ArrowDown Enter"`). The page gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own, and a printable key types into a focused field. With `--testid` / `--selector` (or an `act` target) the keys are aimed first: the pointer moves onto the element and focus goes to it, so a hotkey scoped to a panel reaches it. `act key` is recorded and replayed; replay waits for its target as for a click.
+- `key <keys>` and `act key <keys> [target]`: real key presses over CDP, any hotkey — chords of `alt|ctrl|meta|shift` and a DOM key name or one character (`ctrl+z`, `ctrl+shift+z`, `Escape`, `F5`, `"ArrowDown ArrowDown Enter"`). The page gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own, and a printable key types into a focused field. With `--testid` / `--selector` (or an `act` target) the keys are aimed first: the pointer moves onto the element and focus goes to it, so a hotkey scoped to a panel reaches it; an `act` target takes `@x,y`, a point of it (an empty spot of a canvas). `act key` is recorded and replayed; replay waits for its target as for a click.
+- `act type <n> <number>` sets a native slider row (`input type=range`), recorded and replayed like a field. It used to refuse the row as `not a text field`.
 
 ### Fixed
 - `launch` with an npm / pnpm / yarn command (`"launch": "npm run dev:cdp"`) works on Windows again: Node refuses to spawn a `.cmd` directly since its CVE-2024-27980 fix, and launch failed with `spawn EINVAL`. A `.cmd` / `.bat` now runs through cmd.exe, each argument quoted.

@@ -252,12 +252,13 @@ agent-view act rightclick 3@10,5        # a row, at a point of it; without @ —
 agent-view act click "scene=Tower 3"    # cesiumjs: a scene object by id, name or label, as click --scene; the step and replay wait for it up to 10 s (a camera still flying)
 agent-view act goto "Tower 3" --height 2000   # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25); --param HEIGHT=2000 saves the height as ${HEIGHT}
 agent-view act click 4 --modifiers ctrl # keys held: alt|ctrl|meta|shift, comma-separated; recorded and replayed (ctrl = add to a selection)
-agent-view act type 1 "admin"           # fill
+agent-view act type 1 "admin"           # fill; a native slider row takes a number: act type 53 0.5
 agent-view act select 4 "Monthly"       # native <select> only
 agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
 agent-view act scroll down testid=properties-panel   # wheel over a row / element: a panel scrolls only under the pointer
 agent-view act key ctrl+z              # keys to whatever has focus, as `key`; recorded and replayed
 agent-view act key ctrl+d testid=editor-stage   # aimed first: pointer onto it, focus into it (a row or css= too); replay waits for it as for a click
+agent-view act key ctrl+v "css=#content-area canvas@700,650"   # aimed at a point of it (an empty spot of a canvas); replay does not hit-test a point
 agent-view act do "type 2 root" "type 3 secret" "click 1"   # several ops, all numbered from ONE table; stops at the first BLOCKED/DONE/error
 agent-view act drag 5                   # pointer-drag row 5 onto the viewport centre
 agent-view act drag 5 2                 # … onto the centre of row 2
@@ -397,12 +398,12 @@ First line of an op's output:
 - `--height <metres>: "x" is not a number`, `height given twice: in 10.5,45.25,5000 and as --height 2000` (`act goto`)
 - `` this act run is DONE — `agent-view act start` for a new one `` (any step after DONE; `table` / `wait` still work)
 - `No row [n] in the last table (1-N)`
-- `[n] is a <role>, not a text field — pick a textbox/combobox row` (`type` on a non-text row);
+- `[n] is a <role>, not a field — pick a textbox, combobox or slider row` (`type` on a row that takes no value);
   `No input or textarea at or inside the element` (`type` on a native `<select>` — use `select`)
 - `not a native select — click it`, `No option "x" in [n]`
 - `act do: "…" — each step is click|dblclick|rightclick|type|select <n> [text]` (checked before any step runs; a
   failing step prints the `✓` lines of the ones before it)
-- `act key <keys> [n | testid=<id> | css=<selector>] — keys: ctrl+z, Escape, "ArrowDown ArrowDown Enter"` (after
+- `act key <keys> [n | testid=<id> | css=<selector>][@x,y] — keys: ctrl+z, Escape, "ArrowDown ArrowDown Enter"` (after
   a bad chord's own line, as for `key`),
   `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
   `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of left|right|top|bottom|center ``,
