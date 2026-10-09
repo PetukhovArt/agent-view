@@ -1,4 +1,5 @@
 import { isDeadSocket } from '../cdp/transport.js'
+import { parseKeys } from '../cdp/keys.js'
 import type { Modifier } from '../cdp/types.js'
 import type { ServerResponse } from '../types.js'
 import {
@@ -159,6 +160,7 @@ export async function runAct(
     return waitStep(run, expr)
   }
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
+  if (op === 'key') return keyStep(run, str(args, 'keys'), str(args, 'target'))
   if (op === 'goto') return gotoStep(run, str(args, 'place'), str(args, 'height'))
   if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
@@ -410,6 +412,31 @@ async function scrollStep(run: Run, direction: string | undefined, over: string 
   run.deps.invalidateAxCache()
   run.session.steps.push({ op: 'scroll', direction, target: picked?.target })
   return finishStep(run, { before, done: `scroll ${direction}${picked ? ` ${picked.label}` : ''}` })
+}
+
+/** Keys to whatever has focus, or aimed at a row / element: the pointer onto it, focus into it. */
+async function keyStep(run: Run, raw: string | undefined, on: string | undefined): Promise<ServerResponse> {
+  const usage = 'act key <keys> [n | testid=<id> | css=<selector>] — keys: ctrl+z, Escape, "ArrowDown ArrowDown Enter"'
+  const chords = parseKeys(raw ?? '')
+  if ('error' in chords) return { ok: false, error: `${chords.error}\n${usage}` }
+  const target = on === undefined ? undefined : parseTarget(on)
+  if (on !== undefined && (!target || target.at)) return { ok: false, error: usage }
+  const picked = target && await pick(run, target)
+  if (picked && !('nodeId' in picked)) return picked
+  const before = picked?.before ?? tableKey(await snapshot(run))
+  const keys = raw!.trim().split(/\s+/).join(' ')
+  const done = `key ${keys}${picked ? ` → ${picked.label}` : ''}`
+  let isReloaded = false
+  try {
+    await run.deps.conn.pressKeys(chords, { nodeId: picked?.nodeId })
+  } catch (err) {
+    // Enter on a login form: the window reloaded under the keys, which went out.
+    if (!isDeadSocket(err)) throw err
+    isReloaded = true
+  }
+  run.deps.invalidateAxCache()
+  run.session.steps.push({ op: 'key', keys, target: picked?.target })
+  return finishStep(run, { before, done: isReloaded ? `${done} · window reloaded` : done })
 }
 
 async function blocked(run: Run, reason: string, fresh: Control[]): Promise<ServerResponse> {

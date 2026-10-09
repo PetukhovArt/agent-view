@@ -38,6 +38,7 @@ import { formatBytes } from '../inspectors/format.js'
 import { buildTauriArmScript, buildTauriStatusScript, TauriShimResult, type TauriShimStatus } from './tauri-dialog-shim.js'
 import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
+import { parseKeys } from '../cdp/keys.js'
 import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
 import { buildMatcher } from './pattern.js'
@@ -245,6 +246,7 @@ export class AgentViewServer {
     click: (req: ServerRequest) => this.handleClick(req),
     drag: (req: ServerRequest) => this.handleDrag(req),
     fill: (req: ServerRequest) => this.handleFill(req),
+    key: (req: ServerRequest) => this.handleKey(req),
     wait: (req: ServerRequest) => this.handleWait(req),
     screenshot: (req: ServerRequest) => this.handleScreenshot(req),
     scene: (req: ServerRequest) => this.handleScene(req),
@@ -803,6 +805,20 @@ export class AgentViewServer {
     await conn.clickByNodeId(entry.backendDOMNodeId, clickOpts)
     this.axTreeCache.invalidate(cacheKey)
     return { ok: true, data: `${verb} ref ${ref}${held}` }
+  }
+
+  private async handleKey(req: ServerRequest): Promise<ServerResponse> {
+    const keys = argStr(req.args, 'keys') ?? ''
+    const chords = parseKeys(keys)
+    if ('error' in chords) return { ok: false, error: chords.error }
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const locator = locatorFromArgs(req.args)
+    const found = locator && await findByLocator(conn, locator)
+    if (found && 'error' in found) return { ok: false, error: found.error }
+    await conn.pressKeys(chords, { nodeId: found?.backendDOMNodeId })
+    this.axTreeCache.invalidate(`${req.port}:${targetId}`)
+    return { ok: true, data: `Pressed ${keys.trim()}${found ? ` on ${found.label}` : ''}` }
   }
 
   private async handleAct(req: ServerRequest): Promise<ServerResponse> {

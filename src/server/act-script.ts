@@ -49,6 +49,8 @@ export type RecordedStep =
   | { op: 'wait'; expr: string }
   /** The camera over a place, as `scene --goto`; `height` is `--height` as typed, a string so `--param` can mark it. */
   | { op: 'goto'; place: SceneGoto; height?: string }
+  /** `keys` as typed (`ctrl+z`, `ArrowDown Enter`); `target`: the node they are aimed at, else whatever has focus. */
+  | { op: 'key'; keys: string; target?: NodeTarget }
 
 export type SceneClickStep = { op: ClickOp; target: SceneTarget; modifiers?: Modifier[] }
 
@@ -148,7 +150,7 @@ export const isSection = (section: string | undefined): section is string =>
 const PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)\}/g
 const PARAM_ARG = /^([A-Z][A-Z0-9_]*)=(.+)$/s
 /** Protocol words: never a parameter, so a value that happens to equal `click` stays an op. */
-const FIXED_KEYS = new Set(['op', 'role', 'edge', 'direction', 'modifiers'])
+const FIXED_KEYS = new Set(['op', 'role', 'edge', 'direction', 'modifiers', 'keys'])
 
 /** Every string replay matches or types: test ids, names, typed text, the until. */
 function mapStrings<T>(value: T, fn: (s: string) => string): T {

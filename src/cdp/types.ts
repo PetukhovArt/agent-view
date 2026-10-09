@@ -1,3 +1,5 @@
+import type { KeyChord } from './keys.js'
+
 export type CDPTarget = {
   id: string
   type: string
@@ -318,6 +320,13 @@ export type PageSession = RuntimeSession & {
   selectOption: (backendDOMNodeId: number, optionText: string) => Promise<'ok' | 'not-select' | 'no-option'>
   /** Mouse wheel, ~0.8 viewport height, at `at` (a scrollable panel) or the viewport centre. */
   scrollWheel: (direction: 'up' | 'down', at?: Point) => Promise<void>
+  /**
+   * Presses `chords` in turn, each modifier down before its key and up after it, to the focused element.
+   * With `nodeId` the keys are aimed at that node first, as a user would: the pointer moves onto it (a
+   * hotkey scope that follows the pointer) and focus goes to it or its nearest focusable ancestor, else
+   * leaves whatever held it.
+   */
+  pressKeys: (chords: KeyChord[], opts?: { nodeId?: number }) => Promise<void>
 }
 
 export type LayoutNode = {

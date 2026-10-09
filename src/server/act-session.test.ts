@@ -37,6 +37,23 @@ describe('runAct', () => {
     expect(conn.clickByNodeId.mock.calls).toEqual([[NODE_ID, { modifiers: ['ctrl'] }], [NODE_ID, { modifiers: ['ctrl'] }]])
   })
 
+  it('records keys aimed at a row and replays them at that row', async () => {
+    const { conn, deps, holder, cwd } = app()
+    const pressKeys = vi.fn(async (_chords: unknown, _opts?: { nodeId?: number }) => {})
+    // The until shows once the keys went out.
+    Object.assign(conn, { pressKeys, queryVisible: async () => (pressKeys.mock.calls.length ? { backendDOMNodeId: 1, count: 1 } : { backendDOMNodeId: null, count: 0 }) })
+
+    await runAct(holder, { op: 'start', untilTestid: 'undone', cwd }, deps)
+    const recorded = await runAct(holder, { op: 'key', keys: 'ctrl+z', target: '1' }, deps)
+    await runAct(holder, { op: 'save', name: 'undo', in: 'editor', cwd }, deps)
+    const replayed = await runAct(holder, { op: 'replay', name: 'undo', cwd }, deps)
+
+    expect(recorded).toMatchObject({ ok: true, data: expect.stringMatching(/^DONE: /) })
+    expect(replayed).toMatchObject({ ok: true, exitCode: 0 })
+    const presses = pressKeys.mock.calls.map(([chords, opts]) => [(chords as { def: { key: string } }[]).map(c => c.def.key), opts])
+    expect(presses).toEqual([[['z'], { nodeId: NODE_ID }], [['z'], { nodeId: NODE_ID }]])
+  })
+
   it('refuses a uuid parameter value at start --save, before a run that could not be saved', async () => {
     const { deps, holder, cwd } = app()
 

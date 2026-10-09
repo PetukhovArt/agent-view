@@ -3,7 +3,7 @@ import { deflateSync, inflateSync } from 'node:zlib'
 
 // ── Mock setup (hoisted so vi.mock factory can reference these) ───────────────
 
-const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockReleaseObjectGroup, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
+const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockReleaseObjectGroup, mockDispatchMouse, mockDispatchKey, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP } =
   vi.hoisted(() => {
     const callOrder: string[] = []
 
@@ -37,6 +37,8 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockRele
       callOrder.push(`Input.${type}`)
       return Promise.resolve({})
     })
+
+    const mockDispatchKey = vi.fn().mockResolvedValue({})
 
     // Captures the `Input.dragIntercepted` listener so a test can fire it mid-drag.
     const dragHook: { fire?: (params: { data: unknown }) => void } = {}
@@ -99,6 +101,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockRele
       },
       Input: {
         dispatchMouseEvent: mockDispatchMouse,
+        dispatchKeyEvent: mockDispatchKey,
         dispatchDragEvent: mockDispatchDrag,
         setInterceptDrags: mockSetInterceptDrags,
         dragIntercepted: vi.fn().mockImplementation((cb: (params: { data: unknown }) => void) => {
@@ -124,13 +127,14 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockRele
       close: vi.fn().mockResolvedValue({}),
     })
 
-    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockReleaseObjectGroup, mockDispatchMouse, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
+    return { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockReleaseObjectGroup, mockDispatchMouse, mockDispatchKey, mockDispatchDrag, mockSetInterceptDrags, dragHook, mockCaptureScreenshot, mockGetLayoutMetrics, mockHandleJsDialog, dialogHook, chooserHook, navigatedHook, mockSetIntercept, mockSetFileInputFiles, mockCDP }
   })
 
 vi.mock('chrome-remote-interface', () => ({ default: mockCDP }))
 
 import { connectToPage, connectToRuntime, listTargets } from '../transport.js'
 import { AxTreeCache } from '../ax-cache.js'
+import { parseKeys } from '../keys.js'
 import { ConsoleLevel, JsDialogType, TargetType, UnawaitedPromiseError, type ConsoleMessage, type TargetInfo } from '../types.js'
 
 const pageTarget: TargetInfo = { id: 'target-1', type: TargetType.Page, title: 'Test', url: 'http://x' }
@@ -352,6 +356,50 @@ describe('clickByNodeId', () => {
     expect(mockDispatchMouse).toHaveBeenCalledTimes(4)
     const allAtSamePos = mockDispatchMouse.mock.calls.every((c) => c[0].x === 50 && c[0].y === 60)
     expect(allAtSamePos).toBe(true)
+  })
+})
+
+describe('pressKeys', () => {
+  beforeEach(() => {
+    mockDispatchKey.mockClear()
+    mockDispatchMouse.mockClear()
+  })
+
+  // Hotkey libraries track keys held from their keydown, not only from the event's ctrlKey.
+  it('presses each modifier as a key of its own around the chord, the mask growing and shrinking with them', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const chords = parseKeys('ctrl+shift+z')
+    if ('error' in chords) throw new Error(chords.error)
+    await conn.pressKeys(chords)
+
+    const events = mockDispatchKey.mock.calls.map((c) => `${c[0].type} ${c[0].key} ${c[0].modifiers}`)
+    expect(events).toEqual([
+      'rawKeyDown Control 2',
+      'rawKeyDown Shift 10',
+      'rawKeyDown Z 10',
+      'keyUp Z 10',
+      'keyUp Shift 2',
+      'keyUp Control 0',
+    ])
+  })
+
+  it('types the character of a printable key, so the page gets keypress and input', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const chords = parseKeys('a')
+    if ('error' in chords) throw new Error(chords.error)
+    await conn.pressKeys(chords)
+
+    expect(mockDispatchKey.mock.calls[0][0]).toMatchObject({ type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' })
+  })
+
+  it('aims the keys at a node: the pointer moves onto it before the first key', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    const chords = parseKeys('Escape')
+    if ('error' in chords) throw new Error(chords.error)
+    await conn.pressKeys(chords, { nodeId: 42 })
+
+    expect(mockDispatchMouse).toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseMoved', x: 20, y: 30 }))
+    expect(mockDispatchMouse.mock.invocationCallOrder[0]).toBeLessThan(mockDispatchKey.mock.invocationCallOrder[0])
   })
 })
 

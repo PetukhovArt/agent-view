@@ -1,5 +1,6 @@
 import type { PageSession, Point } from '../cdp/types.js'
 import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
+import { parseKeys } from '../cdp/keys.js'
 import type { ServerResponse, WebGLEngine } from '../types.js'
 import { NOTICE_ROLES, describeControl, extractControls, type Control } from '../inspectors/controls/index.js'
 import { clickSceneObject, describePlace, moveSceneCamera, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
@@ -304,7 +305,7 @@ export async function replay(
     }
   }
 
-  type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' } | SceneClickStep>
+  type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' | 'key' } | SceneClickStep>
   /** Acts on the found node: a verdict when the app cannot take the step, else undefined. */
   const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
     try {
@@ -354,6 +355,25 @@ export async function replay(
       if (step.op === 'goto') {
         const moved = await untilAnswered(deps, c => moveSceneCamera(c, deps.engine, step.place))
         if ('error' in moved) return missed(`${at} goto ${describePlace(step.place)}`, moved)
+        continue
+      }
+      if (step.op === 'key') {
+        const chords = parseKeys(step.keys)
+        if ('error' in chords) return { ok: false, error: `${at} key — ${chords.error}` }
+        const press = (nodeId?: number) => deps.conn.pressKeys(chords, { nodeId }).catch((err: unknown) => {
+          // Enter on a login form: the window reloaded under the keys, which went out.
+          if (!isDeadSocket(err)) throw err
+        })
+        if (step.target) {
+          const failed = await onNode(step.target, { isEnabledRequired: false, what: `${at} key ${step.keys} → ${describeTarget(step.target)}` }, async (nodeId) => {
+            await press(nodeId)
+            return undefined
+          })
+          if (failed) return failed
+        } else {
+          await press()
+        }
+        deps.invalidateAxCache()
         continue
       }
       if (isSceneClick(step)) {

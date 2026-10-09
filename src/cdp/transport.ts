@@ -42,6 +42,7 @@ import {
   type EventListenerInfo,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
+import { MODIFIER_KEYS, type KeyChord, type KeyDef } from './keys.js'
 import { cropScalePng } from './png.js'
 
 // CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
@@ -187,6 +188,7 @@ type NetworkSubscription = {
 
 type InputDomain = {
   dispatchMouseEvent: (p: Record<string, unknown>) => Promise<unknown>
+  dispatchKeyEvent: (p: Record<string, unknown>) => Promise<unknown>
   dispatchDragEvent: (p: Record<string, unknown>) => Promise<unknown>
   setInterceptDrags: (p: { enabled: boolean }) => Promise<unknown>
   dragIntercepted: (cb: (p: { data: DragData }) => void) => () => void
@@ -1715,6 +1717,48 @@ export async function connectToPage(
       await withTimeout(wheel, WHEEL_ACK_MS, 'mouseWheel').catch((err: unknown) => {
         if (!(err instanceof CDPTimeoutError)) throw err
       })
+    },
+
+    async pressKeys(chords: KeyChord[], opts?: { nodeId?: number }): Promise<void> {
+      if (opts?.nodeId !== undefined) {
+        const { x, y } = await resolveBoxCenter(opts.nodeId, true)
+        // A window drawing no frames (covered, minimised) acks a move only after ~5 s, yet the page
+        // gets it before the keys sent after it: wait for the ack only briefly.
+        await withTimeout(Input.dispatchMouseEvent({ type: 'mouseMoved', x, y }), WHEEL_ACK_MS, 'mouseMoved').catch((err: unknown) => {
+          if (!(err instanceof CDPTimeoutError)) throw err
+        })
+        await withHandles(client, async (objectGroup) => {
+          const { object } = await DOM.resolveNode({ backendNodeId: opts.nodeId, objectGroup })
+          // What a mousedown focuses: the node or its nearest focusable ancestor; on none, focus leaves for the body.
+          await Runtime.callFunctionOn({
+            objectId: object.objectId,
+            functionDeclaration: `function() {
+              const el = this.nodeType === Node.ELEMENT_NODE ? this : this.parentElement;
+              const focusable = el && el.closest('a[href], button, input, select, textarea, [tabindex], [contenteditable]:not([contenteditable="false"])');
+              if (focusable) focusable.focus({ preventScroll: true });
+              else if (document.activeElement) document.activeElement.blur();
+            }`,
+          })
+        })
+      }
+      const send = (type: string, def: KeyDef, modifiers: number, text?: string) => Input.dispatchKeyEvent({
+        type, modifiers, key: def.key, code: def.code, windowsVirtualKeyCode: def.keyCode, nativeVirtualKeyCode: def.keyCode,
+        location: def.location ?? 0, ...(text === undefined ? {} : { text, unmodifiedText: text }),
+      })
+      for (const { modifiers, def, text } of chords) {
+        let mask = 0
+        for (const m of modifiers) {
+          mask |= MODIFIER_BITS[m]
+          await send('rawKeyDown', MODIFIER_KEYS[m], mask)
+        }
+        // `keyDown` with text also fires keypress and types it; `rawKeyDown` is a key that types nothing.
+        await send(text === undefined ? 'rawKeyDown' : 'keyDown', def, mask, text)
+        await send('keyUp', def, mask)
+        for (const m of [...modifiers].reverse()) {
+          mask &= ~MODIFIER_BITS[m]
+          await send('keyUp', MODIFIER_KEYS[m], mask)
+        }
+      }
     },
 
     async close(): Promise<void> {

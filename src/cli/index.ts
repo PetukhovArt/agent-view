@@ -18,6 +18,7 @@ import { runDom } from './commands/dom.js'
 import { runClick } from './commands/click.js'
 import { runDrag } from './commands/drag.js'
 import { runFill } from './commands/fill.js'
+import { runKey } from './commands/key.js'
 import { runScreenshot } from './commands/screenshot.js'
 import { runScene } from './commands/scene.js'
 import { runSnap } from './commands/snap.js'
@@ -81,6 +82,8 @@ program
     await runDom(config, options)
   })
 
+const KEYS_HELP = 'space-separated chords pressed in turn, each alt|ctrl|meta|shift joined by + to a DOM key name (Enter, Escape, ArrowDown, Delete, F5, Tab, space) or one character: ctrl+z, ctrl+shift+z, "ArrowDown ArrowDown Enter"'
+const AIM_HELP = 'the pointer moves onto it and focus goes to it or its nearest focusable ancestor (a hotkey scope)'
 const MODIFIERS_FLAG = '--modifiers <keys>'
 const MODIFIERS_HELP = 'Keys held through the click, comma-separated: alt|ctrl|meta|shift (ctrl = multi-select)'
 
@@ -131,6 +134,16 @@ program
   .action(async (refOrValue, value, options) => {
     const config = requireConfig()
     await runFill(config, refOrValue, value, options)
+  })
+
+program
+  .command('key <keys>')
+  .description(`Press keys on the focused element: ${KEYS_HELP}`)
+  .option('--testid <id>', `Aim the keys at this element first: ${AIM_HELP}`)
+  .option('--selector <css>', 'Aim the keys at a match of this CSS selector first, as --testid')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (keys, options) => {
+    await runKey(requireConfig(), keys, options)
   })
 
 program
@@ -479,6 +492,9 @@ act.command('select <n> <option>').description('Pick an option of a native <sele
 
 act.command('scroll <direction> [over]').description('Wheel up or down by ~0.8 viewport, at the viewport centre or over `over` (a row, testid=<id>, css=<selector>) — a panel scrolls only under the pointer')
   .action(async (direction: string, over: string | undefined) => { await runAct(requireConfig(), { op: 'scroll', direction, target: over }) })
+
+act.command('key <keys> [on]').description(`Press keys on the focused element: ${KEYS_HELP}; with \`on\` (a row, testid=<id>, css=<selector>) aimed at it first: ${AIM_HELP}`)
+  .action(async (keys: string, on: string | undefined) => { await runAct(requireConfig(), { op: 'key', keys, target: on }) })
 
 act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, testid=<id>, css=<selector>; @x,y = px from its top-left, else its centre) onto `to` (same forms, or `center`/omitted = the viewport): at its @x,y, else near its left|right|top|bottom edge or center (default)')
   .option('--html5', 'Native HTML5 drag-and-drop (a draggable row) instead of pointer events')
