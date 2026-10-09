@@ -10,13 +10,6 @@
 - `launch` with an npm / pnpm / yarn command (`"launch": "npm run dev:cdp"`) works on Windows again: Node refuses to spawn a `.cmd` directly since its CVE-2024-27980 fix, and launch failed with `spawn EINVAL`. A `.cmd` / `.bat` now runs through cmd.exe, each argument quoted.
 - `act replay` no longer clicks through a dialog left open over a `testid=` / `css=` target: it waits for the target to be uncovered, as for a table row, and ends `FAIL: … still covered by <what>`. It used to click the dialog and report a misleading `STALE` on the next step. A step at a `@x,y` point is not hit-tested.
 - A replay `FAIL` or `STALE` is followed by `on screen: …` with the notices the page shows (`alert` / `status` roles: a snackbar, an error banner), so a refusal the app reported is read instead of waited out in silence.
-
-### Changed
-- A step or use case is saved into the section of its done condition's area: the screen it sits on, not the component (`license-server__…` → `license-server`, a widget on the workspace → `workspace`), and not the areas it passes through. `act-decider` derives the section from the done condition and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
-
-## [0.27.0] - 2026-10-06
-
-### Fixed
 - `click`, `wait`, `fill`, `upload`, `listeners`, `screenshot` crops and the `act` steps no longer keep the element they found alive: each releases its DevTools handles when it ends. A heap diff after closing a widget used to show it as leaked (`DevTools console` among its retainers), WebGL context and all.
 - The CLI no longer runs its commands on a leftover server of another agent-view version, which served them with its own code (an older one dropped `--until-expr` and failed every check). The server refuses a request from another version; the CLI stops it, starts its own and resends, printing `agent-view: server <old> replaced by <new>`. A server from 0.26 or older does not check: run `agent-view stop` once after upgrading.
 - On a minimised or covered window or a background tab, `click`/`wait`/`fill --filter` no longer hang until the 45 s deadline: they search the full accessibility tree, which needs no frame. `screenshot` fails at once with `Window is hidden …` and the launch flags that keep the window drawn (README, "Commands"); agent-view never brings the window to the front.
@@ -25,6 +18,9 @@
 - An `eval --await` that hits the 45 s deadline says the Promise still runs in the page and that what it patched stays patched until it settles. A probe re-run after the timeout used to wrap its own still-installed patch.
 - `heap take` reads the snapshot chunk by chunk as DevTools sends it, instead of joining it into one string first: a heap of ~700 MB and up failed with `Invalid string length`. The renderer's own memory while V8 writes the snapshot is unchanged.
 - Dedicated workers (`new Worker`) show up in `targets` and answer `eval --target` and `heap take --target`: they are reached through their page. Electron leaves them out of the DevTools target list, so they were missing. A worker the list does carry is reached through its page too, not over a connection of its own, which timed out in one app (`CDP session setup for worker timed out`). `console`, `logs` and `network` still do not see them.
+
+### Changed
+- A step or use case is saved into the section of its done condition's area: the screen it sits on, not the component (`license-server__…` → `license-server`, a widget on the workspace → `workspace`), and not the areas it passes through. `act-decider` derives the section from the done condition and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
 
 ## [0.26.0] - 2026-10-06
 
