@@ -11,7 +11,7 @@ listing call — always expand from the most recent one.
 
 - [Discovery & launch](#discovery--launch) — `launch`, `discover`, `stop`
 - [DOM inspection](#dom-inspection) — `dom`
-- [Interaction](#interaction) — `click`, `fill`, `drag`
+- [Interaction](#interaction) — `click`, `fill`, `key`, `drag`
 - [Modals & file pickers](#modals--file-pickers-dialog-upload) — `dialog`, `upload`
 - [Waiting](#waiting-wait) — `wait`
 - [Step protocol](#step-protocol-act) — `act`
@@ -76,6 +76,9 @@ agent-view click --selector "tr:nth-child(3) button"  # By CSS selector
 agent-view click --scene "Tower 3"      # cesiumjs: a scene object by id, name or label, where it is drawn now; --right / --double too
 agent-view fill <ref> "text"            # Type into input field
 agent-view fill --testid email "a@b.c"  # A test id on a wrapper resolves to the input/textarea inside
+agent-view key ctrl+z                   # Press keys on the focused element: hotkeys, Escape, Enter, arrows
+agent-view key "ArrowDown ArrowDown Enter"   # Space-separated chords, pressed in turn
+agent-view key ctrl+c --testid stage    # Aim first: pointer onto the element, focus into it (--selector too)
 agent-view drag --from <ref> --to <ref>          # Drag element to another element by ref
 agent-view drag --from-pos 50,80 --to-pos 200,300  # Drag by coordinates (for canvas / Pixi)
 agent-view drag --from <ref> --to <ref> --steps 25 --hold-ms 60  # Smoother movement, longer hold
@@ -93,6 +96,19 @@ ref and coordinate (e.g. `--from <ref> --to-pos 400,300`). For canvas/Pixi targe
 `--from-pos`/`--to-pos` — derive the centroid via `agent-view eval` from the scene graph.
 Refs are resolved fresh on each call, so window resizes between snapshots are tolerated.
 Increase `--steps` for handlers using `globalpointermove` so intermediate frames are not skipped.
+
+`key <keys>`: a chord is `alt|ctrl|meta|shift` joined by `+` to one key — a DOM key name, any case
+(`Enter`, `Escape`, `Tab`, `Delete`, `Backspace`, `ArrowDown`, `Home`, `PageUp`, `F5`, `Numpad7`; short
+`esc`, `del`, `space`, `up|down|left|right`) or one character (`ctrl+z`, `ctrl++`, `shift+/`). The page
+gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own
+around the chord, and a printable key without ctrl/alt/meta types its character into a focused field.
+Without `--testid` / `--selector` the keys go to whatever has focus. With one, they are aimed first as
+a user would: the pointer moves onto the element (an app that scopes hotkeys by the panel under the
+pointer) and focus goes to it or its nearest focusable ancestor, else leaves the focused element for the
+body. Output `Pressed ctrl+z` / `Pressed ctrl+c on testid "stage"`; exit 1 with `"hyper+z": hyper is
+no modifier — alt|ctrl|meta|shift` or `"ctrl+Escap": no key Escap — a DOM key name … or one character`.
+On macOS a native editing shortcut (`meta+c` in a text field) reaches the page's listeners but not the
+editor's built-in copy.
 
 With `--modifiers` the output ends in `holding ctrl+shift` (`Clicked ref 3 holding ctrl`); an unknown
 key exits 1 with `--modifiers x — comma-separated alt|ctrl|meta|shift`.
@@ -240,6 +256,8 @@ agent-view act type 1 "admin"           # fill
 agent-view act select 4 "Monthly"       # native <select> only
 agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
 agent-view act scroll down testid=properties-panel   # wheel over a row / element: a panel scrolls only under the pointer
+agent-view act key ctrl+z              # keys to whatever has focus, as `key`; recorded and replayed
+agent-view act key ctrl+d testid=editor-stage   # aimed first: pointer onto it, focus into it (a row or css= too); replay waits for it as for a click
 agent-view act do "type 2 root" "type 3 secret" "click 1"   # several ops, all numbered from ONE table; stops at the first BLOCKED/DONE/error
 agent-view act drag 5                   # pointer-drag row 5 onto the viewport centre
 agent-view act drag 5 2                 # … onto the centre of row 2
@@ -362,6 +380,7 @@ First line of an op's output:
 | `✓ click css=#cv @120,80 · 150ms` | a point of an element: `@x,y` from its top-left |
 | `✓ drag css=#cv @10,10 → css=#cv @200,150 · 200ms` | point to point |
 | `✓ scroll down testid=properties-panel · 120ms` | wheel over that element |
+| `✓ key ctrl+d → testid=editor-stage · 210ms` | keys pressed; `→` names where they were aimed |
 | `✓ wait expression "window.app.store.loaded" · 400ms` | `act wait --expr` held; recorded as a step |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
 | `BLOCKED: [3] button "Войти" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
@@ -383,7 +402,9 @@ First line of an op's output:
 - `not a native select — click it`, `No option "x" in [n]`
 - `act do: "…" — each step is click|dblclick|rightclick|type|select <n> [text]` (checked before any step runs; a
   failing step prints the `✓` lines of the ones before it)
-- `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
+- `act key <keys> [n | testid=<id> | css=<selector>] — keys: ctrl+z, Escape, "ArrowDown ArrowDown Enter"` (after
+  a bad chord's own line, as for `key`),
+  `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
   `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of left|right|top|bottom|center ``,
   `act click <n | testid=<id> | css=<selector>>[@x,y]`, `--modifiers x — comma-separated alt|ctrl|meta|shift`
 - `No element matches testid "x"` / `None of 3 element(s) matching selector "…" is visible` (a `testid=` / `css=` target)
@@ -398,7 +419,8 @@ runs it inside the server: each step waits (50 ms polls, 10 s cap) only for its 
 screen, enabled and uncovered, then acts (a `testid=` / `css=` target: on screen and uncovered; at a
 `@x,y` point, on screen only); a control found but not yet drawn (a virtual-list row, a list
 re-rendered under it) is found again and acted on within the same 10 s; a window reload mid-run is
-ridden over. A `wait --expr` step gets 10 s. The until then gets
+ridden over. A `key` step aimed at a target waits for it the same way; one without presses at once.
+A `wait --expr` step gets 10 s. The until then gets
 15 s, or the script's `--timeout`. The `after` chain runs first, checked nearest-first (once, no wait):
 the nearest prerequisite whose own until already holds is skipped together with every one before it,
 and the ones after it run; the main script's until is not pre-checked. A use case runs its steps the

@@ -22,7 +22,7 @@ read it before your first call in a session.
 |--------------------------------------|----------------------------------------------------------------|
 | `launch` `discover` `stop` `targets` | start the app; list windows and worker targets                 |
 | `dom`                                | accessibility tree — filter, count, diff, depth cap            |
-| `click` `fill` `drag`                | interaction by ref, text or coordinate; `click` `fill` also by test id or selector |
+| `click` `fill` `key` `drag`          | interaction by ref, text or coordinate; `click` `fill` `key` also by test id or selector |
 | `wait`                               | block until text, a test id or a selector appears; non-zero on timeout |
 | `act`                                | step protocol for a cheap driver: numbered control table, done check, replay |
 | `dialog` `upload`                    | JS modals and native file pickers                              |
@@ -53,6 +53,7 @@ Verifications cost very different amounts. Pick the cheapest tool that can actua
 | App state, store contents, computed values                       | `eval "expr"`                                                | DOM doesn't expose JS state; reading the tree to infer it is wasteful and unreliable        |
 | Does `window.X` / a globally-exposed API exist?                  | `eval "typeof window.X"`                                     | DOM doesn't show JS globals; only authoritative check                                       |
 | Acting on an element `dom` shows with `[testid=…]`               | `click` / `fill` / `wait --testid <id>`                      | Survives HMR, navigation and copy changes; a ref and a text filter do not                   |
+| A hotkey or a key (undo, copy, Escape, arrows, Enter)            | `key <keys>`, `--testid <id>` of the panel the hotkey belongs to | Trusted key events, aimed by pointer and focus as a user's; `act key` records it into a script |
 | An element that has not rendered yet                             | `wait --filter "<text>"`                                     | Exits on appearance and non-zero on timeout — a real gate, unlike a fixed pause             |
 | Getting to a screen or through a flow with a known end state (login, a form) | `act list [section]` → `act replay <name>`; none fits → `act start --until-testid <id> --save <name> --in <section>`, or `--until-selector <css>` when the end state has no test id | Replay takes seconds and no model; a new path goes to the `act-decider` agent and is saved for the next run. The control table is read from the accessibility tree, so test ids are optional. See [Reaching the screen](#reaching-the-screen-under-test) |
 | State *trajectory* — what changed during/after an action         | `watch "expr" --until …` or `--max-changes 1`                | `eval` shows the final snapshot only; `watch` shows the diffs in order                      |
