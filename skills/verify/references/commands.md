@@ -99,14 +99,17 @@ Increase `--steps` for handlers using `globalpointermove` so intermediate frames
 
 `key <keys>`: a chord is `alt|ctrl|meta|shift` joined by `+` to one key — a DOM key name, any case
 (`Enter`, `Escape`, `Tab`, `Delete`, `Backspace`, `ArrowDown`, `Home`, `PageUp`, `F5`, `Numpad7`; short
-`esc`, `del`, `space`, `up|down|left|right`) or one character (`ctrl+z`, `ctrl++`, `shift+/`). The page
-gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own
-around the chord, and a printable key without ctrl/alt/meta types its character into a focused field.
+`esc`, `del`, `space`, `up|down|left|right`) or one character (`ctrl+z`, `ctrl++`, `shift+/`; a letter
+in any case, `shift` makes it upper). The page gets `key`, `code` and `keyCode` as a US keyboard sends
+them, the modifiers pressed as keys of their own around the chord, and a printable key without
+ctrl/alt/meta types its character into a focused field. Any other DOM key name in its own casing
+(`MediaPlayPause`, `BrowserBack`) is sent as `key` and `code` with `keyCode` 0 — a misspelt one too, so
+read the app's reaction, not the `Pressed` line.
 Without `--testid` / `--selector` the keys go to whatever has focus. With one, they are aimed first as
 a user would: the pointer moves onto the element (an app that scopes hotkeys by the panel under the
 pointer) and focus goes to it or its nearest focusable ancestor, else leaves the focused element for the
 body. Output `Pressed ctrl+z` / `Pressed ctrl+c on testid "stage"`; exit 1 with `"hyper+z": hyper is
-no modifier — alt|ctrl|meta|shift` or `"ctrl+Escap": no key Escap — a DOM key name … or one character`.
+no modifier — alt|ctrl|meta|shift` or `"ctrl+escap": no key escap — a DOM key name (Enter, Escape, ArrowDown, F5, MediaPlayPause …) or one character`.
 On macOS a native editing shortcut (`meta+c` in a text field) reaches the page's listeners but not the
 editor's built-in copy.
 
@@ -399,7 +402,8 @@ First line of an op's output:
 - `` this act run is DONE — `agent-view act start` for a new one `` (any step after DONE; `table` / `wait` still work)
 - `No row [n] in the last table (1-N)`
 - `[n] is a <role>, not a field — pick a textbox, combobox or slider row` (`type` on a row that takes no value);
-  `No input or textarea at or inside the element` (`type` on a native `<select>` — use `select`)
+  `No input or textarea at or inside the element` (`type` on a native `<select>` — use `select`; on an ARIA
+  slider with no `input type=range` — use `act key ArrowRight <n>` on it)
 - `not a native select — click it`, `No option "x" in [n]`
 - `act do: "…" — each step is click|dblclick|rightclick|type|select <n> [text]` (checked before any step runs; a
   failing step prints the `✓` lines of the ones before it)

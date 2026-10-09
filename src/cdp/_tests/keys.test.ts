@@ -15,6 +15,7 @@ describe('parseKeys', () => {
     ['F5', { modifiers: [], def: { key: 'F5', code: 'F5', keyCode: 116 } }],
     ['Numpad7', { modifiers: [], def: { key: '7', code: 'Numpad7', keyCode: 103, location: 3 }, text: '7' }],
     ['ctrl+я', { modifiers: ['ctrl'], def: { key: 'я', code: '', keyCode: 0 } }],
+    ['MediaPlayPause', { modifiers: [], def: { key: 'MediaPlayPause', code: 'MediaPlayPause', keyCode: 0 } }],
   ])('%s', (raw, chord) => {
     expect(parseKeys(raw)).toEqual([chord])
   })
@@ -27,7 +28,7 @@ describe('parseKeys', () => {
 
   it.each([
     ['hyper+z', 'hyper is no modifier'],
-    ['ctrl+Escap', 'no key Escap'],
+    ['ctrl+escap', 'no key escap'],
     ['  ', 'no keys'],
   ])('refuses %j', (raw, error) => {
     expect(parseKeys(raw)).toEqual({ error: expect.stringContaining(error) })

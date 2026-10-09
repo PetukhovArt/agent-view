@@ -42,7 +42,7 @@ import {
   type EventListenerInfo,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
-import { MODIFIER_KEYS, type KeyChord, type KeyDef } from './keys.js'
+import { LOCATION_NUMPAD, MODIFIER_KEYS, type KeyChord, type KeyDef } from './keys.js'
 import { cropScalePng } from './png.js'
 
 // CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
@@ -990,7 +990,8 @@ type DebuggerDomain = {
 }
 
 const SCROLL_VIEWPORT_FRACTION = 0.8
-const WHEEL_ACK_MS = 1_000
+/** How long a wheel or a pointer move waits for its ack, which a window drawing no frames sends late or never. */
+const INPUT_ACK_MS = 1_000
 
 /** Bounds the wait for the `scriptParsed` replay when an id is still missing. */
 const SCRIPT_PARSED_DEADLINE_MS = 1_000
@@ -1714,7 +1715,7 @@ export async function connectToPage(
         deltaX: 0,
         deltaY,
       })
-      await withTimeout(wheel, WHEEL_ACK_MS, 'mouseWheel').catch((err: unknown) => {
+      await withTimeout(wheel, INPUT_ACK_MS, 'mouseWheel').catch((err: unknown) => {
         if (!(err instanceof CDPTimeoutError)) throw err
       })
     },
@@ -1726,7 +1727,7 @@ export async function connectToPage(
         const { x, y } = box ? { x: box.x + at.x, y: box.y + at.y } : await resolveBoxCenter(opts.nodeId, true)
         // A window drawing no frames (covered, minimised) acks a move only after ~5 s, yet the page
         // gets it before the keys sent after it: wait for the ack only briefly.
-        await withTimeout(Input.dispatchMouseEvent({ type: 'mouseMoved', x, y }), WHEEL_ACK_MS, 'mouseMoved').catch((err: unknown) => {
+        await withTimeout(Input.dispatchMouseEvent({ type: 'mouseMoved', x, y }), INPUT_ACK_MS, 'mouseMoved').catch((err: unknown) => {
           if (!(err instanceof CDPTimeoutError)) throw err
         })
         await withHandles(client, async (objectGroup) => {
@@ -1745,7 +1746,7 @@ export async function connectToPage(
       }
       const send = (type: string, def: KeyDef, modifiers: number, text?: string) => Input.dispatchKeyEvent({
         type, modifiers, key: def.key, code: def.code, windowsVirtualKeyCode: def.keyCode, nativeVirtualKeyCode: def.keyCode,
-        location: def.location ?? 0, ...(text === undefined ? {} : { text, unmodifiedText: text }),
+        location: def.location ?? 0, isKeypad: def.location === LOCATION_NUMPAD, ...(text === undefined ? {} : { text, unmodifiedText: text }),
       })
       for (const { modifiers, def, text } of chords) {
         let mask = 0

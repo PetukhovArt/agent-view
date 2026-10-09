@@ -6,15 +6,21 @@ export type KeyDef = { key: string; code: string; keyCode: number; location?: nu
 /** One press: modifiers held around the key; `text` is what it types, set only for a printable key without ctrl/alt/meta. */
 export type KeyChord = { modifiers: Modifier[]; def: KeyDef; text?: string }
 
+/** DOM `KeyboardEvent.location` values. */
+const LOCATION_LEFT = 1
+export const LOCATION_NUMPAD = 3
+
 export const MODIFIER_KEYS: Record<Modifier, KeyDef> = {
-  alt: { key: 'Alt', code: 'AltLeft', keyCode: 18, location: 1 },
-  ctrl: { key: 'Control', code: 'ControlLeft', keyCode: 17, location: 1 },
-  meta: { key: 'Meta', code: 'MetaLeft', keyCode: 91, location: 1 },
-  shift: { key: 'Shift', code: 'ShiftLeft', keyCode: 16, location: 1 },
+  alt: { key: 'Alt', code: 'AltLeft', keyCode: 18, location: LOCATION_LEFT },
+  ctrl: { key: 'Control', code: 'ControlLeft', keyCode: 17, location: LOCATION_LEFT },
+  meta: { key: 'Meta', code: 'MetaLeft', keyCode: 91, location: LOCATION_LEFT },
+  shift: { key: 'Shift', code: 'ShiftLeft', keyCode: 16, location: LOCATION_LEFT },
 }
 
 const named = (key: string, keyCode: number, code = key): [string, KeyDef] => [key.toLowerCase(), { key, code, keyCode }]
-const numpad = (code: string, key: string, keyCode: number): [string, KeyDef] => [code.toLowerCase(), { key, code, keyCode, location: 3 }]
+const numpad = (code: string, key: string, keyCode: number): [string, KeyDef] => [code.toLowerCase(), { key, code, keyCode, location: LOCATION_NUMPAD }]
+/** A DOM key name of the shape the spec gives them (`MediaPlayPause`, `BrowserBack`): any such key passes, sent with no key code. */
+const DOM_KEY_NAME = /^[A-Z][A-Za-z0-9]+$/
 
 /** DOM `key` names, lowercased; numpad keys by their `code`, as their `key` is a digit or a sign. */
 const NAMED = new Map<string, KeyDef>([
@@ -64,8 +70,9 @@ function parseChord(raw: string): KeyChord | { error: string } {
   }
   const lower = ALIASES[name.toLowerCase()] ?? name.toLowerCase()
   const char = lower === ' ' ? ' ' : [...name].length === 1 ? name : undefined
-  const def = NAMED.get(lower) ?? (char === undefined ? undefined : charKey(char))
-  if (!def) return { error: `"${raw}": no key ${name} — a DOM key name (Enter, Escape, ArrowDown, F5, Delete …) or one character` }
+  const unlisted = DOM_KEY_NAME.test(name) ? { key: name, code: name, keyCode: 0 } : undefined
+  const def = NAMED.get(lower) ?? (char === undefined ? unlisted : charKey(char))
+  if (!def) return { error: `"${raw}": no key ${name} — a DOM key name (Enter, Escape, ArrowDown, F5, MediaPlayPause …) or one character` }
   const key = modifiers.includes('shift') ? shifted(def.key) : def.key
   const isTyping = !modifiers.some(m => m !== 'shift')
   const text = key === 'Enter' ? '\r' : [...key].length === 1 ? key : undefined
