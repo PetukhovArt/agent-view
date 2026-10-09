@@ -6,6 +6,7 @@
 - `key <keys>` and `act key <keys> [target]`: real key presses over CDP, any hotkey — chords of `alt|ctrl|meta|shift` and a DOM key name or one character (`ctrl+z`, `ctrl+shift+z`, `Escape`, `F5`, `"ArrowDown ArrowDown Enter"`). The page gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own, and a printable key types into a focused field. With `--testid` / `--selector` (or an `act` target) the keys are aimed first: the pointer moves onto the element and focus goes to it, so a hotkey scoped to a panel reaches it. `act key` is recorded and replayed; replay waits for its target as for a click.
 
 ### Fixed
+- `launch` with an npm / pnpm / yarn command (`"launch": "npm run dev:cdp"`) works on Windows again: Node refuses to spawn a `.cmd` directly since its CVE-2024-27980 fix, and launch failed with `spawn EINVAL`. A `.cmd` / `.bat` now runs through cmd.exe, each argument quoted.
 - `act replay` no longer clicks through a dialog left open over a `testid=` / `css=` target: it waits for the target to be uncovered, as for a table row, and ends `FAIL: … still covered by <what>`. It used to click the dialog and report a misleading `STALE` on the next step. A step at a `@x,y` point is not hit-tested.
 - A replay `FAIL` or `STALE` is followed by `on screen: …` with the notices the page shows (`alert` / `status` roles: a snackbar, an error banner), so a refusal the app reported is read instead of waited out in silence.
 

@@ -1,6 +1,9 @@
 import { createServer, type Server } from 'node:net'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { parseCommand, launch, PortConflictError, detectPortConflict } from './launcher.js'
+import { parseCommand, launch, startDetached, PortConflictError, detectPortConflict } from './launcher.js'
 
 describe('parseCommand', () => {
   it('splits simple command', () => {
@@ -42,6 +45,18 @@ describe('parseCommand', () => {
   it('returns empty args for single-word command', () => {
     const [exe, args] = parseCommand('electron')
     expect(args).toEqual([])
+  })
+})
+
+describe('startDetached', () => {
+  // `launch: "npm run dev:cdp"` failed with spawn EINVAL: Node refuses to spawn a .cmd without a shell.
+  it.runIf(process.platform === 'win32')('runs a .cmd launch command, an argument holding & kept as text', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'av-launch-'))
+    writeFileSync(join(dir, 'start.cmd'), '@echo %*> "%~dp0out.txt"\r\n')
+
+    startDetached(`"${join(dir, 'start.cmd')}" "dev&cdp"`, dir)
+
+    await expect.poll(() => (existsSync(join(dir, 'out.txt')) ? readFileSync(join(dir, 'out.txt'), 'utf8').trim() : '')).toBe('"dev&cdp"')
   })
 })
 

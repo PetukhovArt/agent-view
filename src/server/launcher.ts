@@ -1,4 +1,4 @@
-import { spawn, execFile } from 'node:child_process'
+import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { createConnection } from 'node:net'
 import { promisify } from 'node:util'
 import { listTargets } from '../cdp/transport.js'
@@ -95,6 +95,19 @@ export async function detectPortConflict(port: number): Promise<PortConflictData
   return { port, ...owner }
 }
 
+/**
+ * `command` started with no shell of its own. A `.cmd` / `.bat` (npm, pnpm) runs only through cmd.exe —
+ * Node refuses to spawn one directly (EINVAL, since the CVE-2024-27980 fix) — with every argument
+ * quoted, so `&` or `|` in one stays text.
+ */
+export function startDetached(command: string, cwd?: string): ChildProcess {
+  const [exe, args] = parseCommand(command)
+  const opts = { detached: true, stdio: 'ignore', cwd, windowsHide: true } as const
+  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(exe)) return spawn(exe, args, { ...opts, shell: false })
+  const line = [exe, ...args].map(a => `"${a.replace(/"/g, '""')}"`).join(' ')
+  return spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { ...opts, windowsVerbatimArguments: true })
+}
+
 export async function launch(
   command: string,
   port: number,
@@ -109,15 +122,7 @@ export async function launch(
     throw new PortConflictError({ port, ...owner })
   }
 
-  const [exe, args] = parseCommand(command)
-  const child = spawn(exe, args, {
-    shell: false,
-    detached: true,
-    stdio: 'ignore',
-    cwd,
-    windowsHide: true,
-  })
-  child.unref()
+  startDetached(command, cwd).unref()
 
   const timeout = runtime === RuntimeType.Tauri ? TAURI_LAUNCH_TIMEOUT_MS : DEFAULT_LAUNCH_TIMEOUT_MS
   const start = Date.now()
