@@ -392,13 +392,17 @@ describe('pressKeys', () => {
     expect(mockDispatchKey.mock.calls[0][0]).toMatchObject({ type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' })
   })
 
-  it('aims the keys at a node: the pointer moves onto it before the first key', async () => {
+  // The node's content box runs from (10, 20) to (30, 40).
+  it.each([
+    ['its centre', undefined, { x: 20, y: 30 }],
+    ['a point of it (an empty spot of a canvas)', { x: 1, y: 2 }, { x: 11, y: 22 }],
+  ])('aims the keys at a node: the pointer moves onto %s before the first key', async (_, at, point) => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     const chords = parseKeys('Escape')
     if ('error' in chords) throw new Error(chords.error)
-    await conn.pressKeys(chords, { nodeId: 42 })
+    await conn.pressKeys(chords, { nodeId: 42, at })
 
-    expect(mockDispatchMouse).toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseMoved', x: 20, y: 30 }))
+    expect(mockDispatchMouse).toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseMoved', ...point }))
     expect(mockDispatchMouse.mock.invocationCallOrder[0]).toBeLessThan(mockDispatchKey.mock.invocationCallOrder[0])
   })
 })

@@ -1719,9 +1719,11 @@ export async function connectToPage(
       })
     },
 
-    async pressKeys(chords: KeyChord[], opts?: { nodeId?: number }): Promise<void> {
+    async pressKeys(chords: KeyChord[], opts?: { nodeId?: number; at?: Point }): Promise<void> {
       if (opts?.nodeId !== undefined) {
-        const { x, y } = await resolveBoxCenter(opts.nodeId, true)
+        const { at } = opts
+        const box = at && await resolveBoxRect(opts.nodeId, true)
+        const { x, y } = box ? { x: box.x + at.x, y: box.y + at.y } : await resolveBoxCenter(opts.nodeId, true)
         // A window drawing no frames (covered, minimised) acks a move only after ~5 s, yet the page
         // gets it before the keys sent after it: wait for the ack only briefly.
         await withTimeout(Input.dispatchMouseEvent({ type: 'mouseMoved', x, y }), WHEEL_ACK_MS, 'mouseMoved').catch((err: unknown) => {

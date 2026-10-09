@@ -49,8 +49,8 @@ export type RecordedStep =
   | { op: 'wait'; expr: string }
   /** The camera over a place, as `scene --goto`; `height` is `--height` as typed, a string so `--param` can mark it. */
   | { op: 'goto'; place: SceneGoto; height?: string }
-  /** `keys` as typed (`ctrl+z`, `ArrowDown Enter`); `target`: the node they are aimed at, else whatever has focus. */
-  | { op: 'key'; keys: string; target?: NodeTarget }
+  /** `keys` as typed (`ctrl+z`, `ArrowDown Enter`); `target`: the node they are aimed at (`at` a point of it), else whatever has focus. */
+  | { op: 'key'; keys: string; target?: NodeTarget; at?: Point }
 
 export type SceneClickStep = { op: ClickOp; target: SceneTarget; modifiers?: Modifier[] }
 

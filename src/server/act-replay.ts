@@ -11,6 +11,7 @@ import {
   GLANCE_MS,
   clickNode,
   conditionOf,
+  describeAt,
   describeTarget,
   dragNode,
   elementLocator,
@@ -360,12 +361,13 @@ export async function replay(
       if (step.op === 'key') {
         const chords = parseKeys(step.keys)
         if ('error' in chords) return { ok: false, error: `${at} key — ${chords.error}` }
-        const press = (nodeId?: number) => deps.conn.pressKeys(chords, { nodeId }).catch((err: unknown) => {
+        const press = (nodeId?: number) => deps.conn.pressKeys(chords, { nodeId, at: step.at }).catch((err: unknown) => {
           // Enter on a login form: the window reloaded under the keys, which went out.
           if (!isDeadSocket(err)) throw err
         })
         if (step.target) {
-          const failed = await onNode(step.target, { isEnabledRequired: false, what: `${at} key ${step.keys} → ${describeTarget(step.target)}` }, async (nodeId) => {
+          const what = `${at} key ${step.keys} → ${describeTarget(step.target)}${describeAt(step.at)}`
+          const failed = await onNode(step.target, { isEnabledRequired: false, isCoverChecked: !step.at, what }, async (nodeId) => {
             await press(nodeId)
             return undefined
           })

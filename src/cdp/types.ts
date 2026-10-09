@@ -322,11 +322,11 @@ export type PageSession = RuntimeSession & {
   scrollWheel: (direction: 'up' | 'down', at?: Point) => Promise<void>
   /**
    * Presses `chords` in turn, each modifier down before its key and up after it, to the focused element.
-   * With `nodeId` the keys are aimed at that node first, as a user would: the pointer moves onto it (a
-   * hotkey scope that follows the pointer) and focus goes to it or its nearest focusable ancestor, else
-   * leaves whatever held it.
+   * With `nodeId` the keys are aimed at that node first, as a user would: the pointer moves onto it, at
+   * `at` px from its top-left or its centre (a hotkey scope that follows the pointer), and focus goes to
+   * it or its nearest focusable ancestor, else leaves whatever held it.
    */
-  pressKeys: (chords: KeyChord[], opts?: { nodeId?: number }) => Promise<void>
+  pressKeys: (chords: KeyChord[], opts?: { nodeId?: number; at?: Point }) => Promise<void>
 }
 
 export type LayoutNode = {

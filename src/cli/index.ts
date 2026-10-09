@@ -493,7 +493,7 @@ act.command('select <n> <option>').description('Pick an option of a native <sele
 act.command('scroll <direction> [over]').description('Wheel up or down by ~0.8 viewport, at the viewport centre or over `over` (a row, testid=<id>, css=<selector>) — a panel scrolls only under the pointer')
   .action(async (direction: string, over: string | undefined) => { await runAct(requireConfig(), { op: 'scroll', direction, target: over }) })
 
-act.command('key <keys> [on]').description(`Press keys on the focused element: ${KEYS_HELP}; with \`on\` (a row, testid=<id>, css=<selector>) aimed at it first: ${AIM_HELP}`)
+act.command('key <keys> [on]').description(`Press keys on the focused element: ${KEYS_HELP}; with \`on\` (a row, testid=<id>, css=<selector>; @x,y appended = a point of it, else its centre) aimed at it first: ${AIM_HELP}`)
   .action(async (keys: string, on: string | undefined) => { await runAct(requireConfig(), { op: 'key', keys, target: on }) })
 
 act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, testid=<id>, css=<selector>; @x,y = px from its top-left, else its centre) onto `to` (same forms, or `center`/omitted = the viewport): at its @x,y, else near its left|right|top|bottom edge or center (default)')
