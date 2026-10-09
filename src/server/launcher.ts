@@ -103,7 +103,9 @@ export async function detectPortConflict(port: number): Promise<PortConflictData
 export function startDetached(command: string, cwd?: string): ChildProcess {
   const [exe, args] = parseCommand(command)
   const opts = { detached: true, stdio: 'ignore', cwd, windowsHide: true } as const
-  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(exe)) return spawn(exe, args, { ...opts, shell: false })
+  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(exe)) {
+    return spawn(exe, args, { ...opts, shell: false })
+  }
   const line = [exe, ...args].map(a => `"${a.replace(/"/g, '""')}"`).join(' ')
   return spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { ...opts, windowsVerbatimArguments: true })
 }

@@ -49,8 +49,8 @@ describe('parseCommand', () => {
 })
 
 describe('startDetached', () => {
-  // `launch: "npm run dev:cdp"` failed with spawn EINVAL: Node refuses to spawn a .cmd without a shell.
-  it.runIf(process.platform === 'win32')('runs a .cmd launch command, an argument holding & kept as text', async () => {
+  // Node refuses to spawn a .cmd without a shell (EINVAL).
+  it.runIf(process.platform === 'win32')('runs a .cmd launch command such as npm, not failing with spawn EINVAL; an argument holding & kept as text', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'av-launch-'))
     writeFileSync(join(dir, 'start.cmd'), '@echo %*> "%~dp0out.txt"\r\n')
 
