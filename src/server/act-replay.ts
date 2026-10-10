@@ -179,6 +179,13 @@ async function planRun(store: string, name: string, params: Record<string, strin
   return { chain, main: chain.pop()!, linkWord: 'prerequisite', requires: [] }
 }
 
+/** The longest a replay of `name` runs: each script's steps at their step time, then its until; 0 for one refused before its first step. */
+export async function replayTimeMs(store: string, name: string, params: Record<string, string> = {}): Promise<number> {
+  const plan = await planRun(store, name, params)
+  if ('ok' in plan) return 0
+  return [...plan.chain, plan.main].reduce((sum, link) => sum + link.script.steps.length * STEP_TIMEOUT_MS + link.untilMs, 0)
+}
+
 /**
  * A saved `act` run, executed with no model and no settle: each step waits only until
  * its own target is on screen, enabled and uncovered, then acts. First line of the

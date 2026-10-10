@@ -11,7 +11,7 @@ export async function runAct(config: AgentViewConfig, args: Record<string, unkno
     runtime: config.runtime,
     engine: config.webgl?.engine,
     args: { ...args, testIdAttribute: config.testIdAttribute, cwd: process.cwd() },
-  })
+  }, args.op === 'replay' ? { timeoutMs: 0 } : {})  // a replay outlasts any fixed backstop; the server bounds it by its scripts' timeouts
 
   if (!response.ok) {
     console.error(response.error)

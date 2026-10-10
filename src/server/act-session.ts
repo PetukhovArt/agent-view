@@ -47,7 +47,7 @@ import {
   type UntilArgs,
 } from './act-script.js'
 import { cwdOf, isOneUntil, modifiersOf, refuseStepSave, str, strs, untilArgsOf } from './act-store.js'
-import { ALLOW_EVAL_HINT, STEP_TIMEOUT_MS, replay, untilAnswered, waitFor, type ActDeps } from './act-replay.js'
+import { ALLOW_EVAL_HINT, STEP_TIMEOUT_MS, replay, replayTimeMs, untilAnswered, waitFor, type ActDeps } from './act-replay.js'
 
 const DEFAULT_MAX_STEPS = 30
 const SETTLE_POLL_MS = 100
@@ -104,6 +104,16 @@ const isRowOp = (op: string): op is RowOp => (ROW_OPS as readonly string[]).incl
 /** Machine-agnostic: the hash route, else path + query of a web page; never origin or a file path. */
 const START_EXPRESSION = "location.hash || (/^https?:$/.test(location.protocol) ? location.pathname + location.search : '')"
 
+const paramsOfArgs = (args: Record<string, unknown>): Record<string, string> | undefined =>
+  typeof args.params === 'object' && args.params ? args.params as Record<string, string> : undefined
+
+/** Time an act call spends on top of the CDP calls themselves: the replayed scripts' steps and untils, 0 for any other op. */
+export async function actTimeMs(args: Record<string, unknown>): Promise<number> {
+  const name = str(args, 'name')
+  if (str(args, 'op') !== 'replay' || !isScriptName(name)) return 0
+  return replayTimeMs(await scriptStore(cwdOf(args)), name, paramsOfArgs(args))
+}
+
 export async function runAct(
   holder: { act: ActSession | null },
   args: Record<string, unknown>,
@@ -114,8 +124,7 @@ export async function runAct(
     const name = str(args, 'name')
     if (!isScriptName(name)) return { ok: false, error: 'act replay <name>' }
     const store = await scriptStore(cwdOf(args))
-    const params = typeof args.params === 'object' && args.params ? args.params as Record<string, string> : undefined
-    return replay({ store, name, secret: str(args, 'secret'), params, testIdAttribute: str(args, 'testIdAttribute') }, deps)
+    return replay({ store, name, secret: str(args, 'secret'), params: paramsOfArgs(args), testIdAttribute: str(args, 'testIdAttribute') }, deps)
   }
   if (op === 'start') {
     // Done is agent-view's call, never the driver's: no run without a done condition.

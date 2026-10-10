@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { AgentViewServer, parseFilter, resolveDepth, textContentFallback, matchTarget, describeTargetMatchFailure, requestDeadlineMs, resolveUploadPath } from './server.js'
 import { join } from 'node:path'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { scriptStore, writeScript } from './act-script.js'
 import { VERSION } from '../version.js'
 import { listSupportedTargets } from '../cdp/transport.js'
 
@@ -275,18 +278,29 @@ describe('matchTarget', () => {
 // ── requestDeadlineMs ────────────────────────────────────────────────────────
 
 describe('requestDeadlineMs', () => {
-  it('bounds ordinary commands', () => {
-    expect(requestDeadlineMs('eval', {})).toBeGreaterThan(0)
+  it('bounds ordinary commands', async () => {
+    expect(await requestDeadlineMs('eval', {})).toBeGreaterThan(0)
   })
 
-  it('extends the budget by a poll command\'s own --timeout', () => {
-    const base = requestDeadlineMs('console', {})
-    const withFollow = requestDeadlineMs('console', { timeout: 30 })
+  it('extends the budget by a poll command\'s own --timeout', async () => {
+    const base = await requestDeadlineMs('console', {})
+    const withFollow = await requestDeadlineMs('console', { timeout: 30 })
     expect(withFollow).toBe((base ?? 0) + 30_000)
   })
 
-  it('leaves launch unbounded — it blocks for minutes by design', () => {
-    expect(requestDeadlineMs('launch', {})).toBeNull()
+  it('outlives the step timeouts of a replayed use case — they live in its scripts, not in the request', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'av-deadline-'))
+    const store = await scriptStore(cwd)
+    await writeScript({ store, name: 'gateway-break' }, { until: { testid: 'broken' }, steps: [], timeout: 60 })
+    await writeScript({ store, name: 'server-expect' }, { until: { testid: 'alarm' }, steps: [], timeout: 60 })
+    await writeScript({ store, name: 'break-use-case' }, { until: { testid: 'alarm' }, use: [{ step: 'gateway-break' }, { step: 'server-expect' }] })
+    const base = await requestDeadlineMs('act', {})
+    const replay = await requestDeadlineMs('act', { op: 'replay', name: 'break-use-case', cwd })
+    expect(replay).toBeGreaterThanOrEqual((base ?? 0) + 120_000)
+  })
+
+  it('leaves launch unbounded — it blocks for minutes by design', async () => {
+    expect(await requestDeadlineMs('launch', {})).toBeNull()
   })
 })
 

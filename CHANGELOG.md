@@ -7,6 +7,7 @@
 - `act type <n> <number>` sets a native slider row (`input type=range`), recorded and replayed like a field. It used to refuse the row as `not a text field`.
 
 ### Fixed
+- `act replay` of a use case whose scripts wait longer than the 45 s request deadline in total no longer times out midway: the server's deadline grows by each replayed script's step and `until` timeouts, and the CLI waits for the server to answer.
 - `launch` with an npm / pnpm / yarn command (`"launch": "npm run dev:cdp"`) works on Windows again: Node refuses to spawn a `.cmd` directly since its CVE-2024-27980 fix, and launch failed with `spawn EINVAL`. A `.cmd` / `.bat` now runs through cmd.exe, each argument quoted.
 - `act replay` no longer clicks through a dialog left open over a `testid=` / `css=` target: it waits for the target to be uncovered, as for a table row, and ends `FAIL: … still covered by <what>`. It used to click the dialog and report a misleading `STALE` on the next step. A step at a `@x,y` point is not hit-tested.
 - A replay `FAIL` or `STALE` is followed by `on screen: …` with the notices the page shows (`alert` / `status` roles: a snackbar, an error banner), so a refusal the app reported is read instead of waited out in silence.

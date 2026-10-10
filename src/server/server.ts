@@ -45,7 +45,7 @@ import { buildMatcher } from './pattern.js'
 import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
 import { VERSION } from '../version.js'
-import { runAct, type ActSession } from './act-session.js'
+import { actTimeMs, runAct, type ActSession } from './act-session.js'
 import { deleteScript, listSaved, modifiersOf, saveUseCase } from './act-store.js'
 import {
   DEFAULT_TAIL_LINES,
@@ -95,12 +95,16 @@ function envMs(name: string, fallback: number): number {
 /** A request without the project dir gets no `allowEval`, as `eval` refuses one. */
 const isEvalAllowedIn = (cwd: string | undefined): boolean => cwd !== undefined && readConfig(resolve(cwd))?.allowEval === true
 
-/** Poll-based commands carry their own `--timeout` (seconds); the deadline must outlive it. */
-export function requestDeadlineMs(command: string, args: Record<string, unknown>): number | null {
+/**
+ * Poll-based commands carry their own `--timeout` (seconds), an `act replay` the timeouts of its saved
+ * scripts; the deadline must outlive them.
+ */
+export async function requestDeadlineMs(command: string, args: Record<string, unknown>): Promise<number | null> {
   if (UNBOUNDED_COMMANDS.has(command)) return null
   const ownTimeout = args['timeout']
   const extra = typeof ownTimeout === 'number' && ownTimeout > 0 ? ownTimeout * 1000 : 0
-  return REQUEST_DEADLINE_MS + extra
+  const scriptsMs = command === 'act' ? await actTimeMs(args) : 0
+  return REQUEST_DEADLINE_MS + extra + scriptsMs
 }
 
 function argStr(args: Record<string, unknown>, key: string): string | undefined {
@@ -402,7 +406,7 @@ export class AgentViewServer {
    * behind the same dead socket.
    */
   private async runWithDeadline(req: ServerRequest): Promise<ServerResponse> {
-    const budget = requestDeadlineMs(req.command, req.args)
+    const budget = await requestDeadlineMs(req.command, req.args)
     if (budget === null) return this.handleCommand(req)
 
     const pending = this.handleCommand(req)
