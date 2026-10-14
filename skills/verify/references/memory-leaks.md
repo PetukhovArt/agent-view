@@ -13,8 +13,9 @@ alive by design. A leak is what **grows with repetition and does not come back**
    dismissed). `agent-view heap take --name baseline`.
 2. **Repeat the action ~10 times.** Open the dialog and close it, navigate away and back, run the
    search and clear it. Ten repetitions turn a per-action leak into a clear `+10 × N` in the diff
-   and drown out one-off allocations. Drive it with `click` / `fill` / `eval`, and finish in the
-   baseline state.
+   and drown out one-off allocations. Drive it as the user does, with `click` / `key` / `fill` /
+   `drag` or `act replay <name>` of a saved run, and finish in the baseline state. `eval` only
+   reads state between repetitions.
 3. **Target.** `agent-view heap take --name target`, then `agent-view heap diff baseline target`.
 4. **Final (optional).** Do whatever should release the memory (close the view, log out), take
    `final`, and `heap diff target final`. Growth that goes away here is a cache, not a leak.

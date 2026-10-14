@@ -21,6 +21,7 @@
 - Dedicated workers (`new Worker`) show up in `targets` and answer `eval --target` and `heap take --target`: they are reached through their page. Electron leaves them out of the DevTools target list, so they were missing. A worker the list does carry is reached through its page too, not over a connection of its own, which timed out in one app (`CDP session setup for worker timed out`). `console`, `logs` and `network` still do not see them.
 
 ### Changed
+- The verify skill's memory-leak method repeats the action with `click` / `key` / `fill` / `drag` or `act replay`, as the user would. It used to list `eval` among the ways to drive it; `eval` now only reads state between repetitions.
 - A step or use case is saved into the section of its done condition's area: the screen it sits on, not the component (`license-server__…` → `license-server`, a widget on the workspace → `workspace`), and not the areas it passes through. `act-decider` derives the section from the done condition and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
 
 ## [0.26.0] - 2026-10-06
