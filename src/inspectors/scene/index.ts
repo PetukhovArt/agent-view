@@ -4,7 +4,7 @@ import type { ClickOpts, PageSession, Point, RuntimeSession } from '../../cdp/ty
 import type { WebGLEngine } from '../../types.js'
 import type { SceneOptions, SceneNode, SceneAdapter, SceneGoto, SceneMiss } from './types.js'
 
-const NO_ENGINE = 'No WebGL engine configured. Add "webgl": { "engine": "pixi" | "cesiumjs" } to agent-view.config.json'
+const NO_ENGINE = 'No WebGL engine configured. Add "webgl": { "engine": "pixi" | "cesiumjs" | "app-hook" } to agent-view.config.json'
 const DECIMAL = String.raw`-?\d+(?:\.\d+)?`
 const LON_LAT = new RegExp(`^(${DECIMAL}),(${DECIMAL})(?:,(${DECIMAL}))?$`)
 const ONE_DECIMAL = new RegExp(`^${DECIMAL}$`)
@@ -19,9 +19,10 @@ export async function getSceneGraph(
   if (!engine) {
     return NO_ENGINE
   }
-  const tree = await extract(conn, engine)
+  const adapter = getAdapter(engine)
+  const tree = await extract(conn, adapter)
   if (!tree) {
-    return `No ${engine} scene found`
+    return adapter.noScene ?? `No ${engine} scene found`
   }
   const lines: string[] = []
   formatNode(tree, 0, lines, options)
@@ -36,11 +37,10 @@ export async function getRawScene(
   engine: WebGLEngine | undefined,
 ): Promise<SceneNode | null> {
   if (!engine) return null
-  return extract(conn, engine)
+  return extract(conn, getAdapter(engine))
 }
 
-async function extract(conn: RuntimeSession, engine: WebGLEngine): Promise<SceneNode | null> {
-  const adapter = getAdapter(engine)
+async function extract(conn: RuntimeSession, adapter: SceneAdapter): Promise<SceneNode | null> {
   const raw = await conn.evaluate(adapter.extractScript, { awaitPromise: true })
   return adapter.normalize(raw)
 }
@@ -53,7 +53,7 @@ function placeAdapter(engine: WebGLEngine | undefined): Required<Pick<SceneAdapt
 
 const isSceneMiss = (raw: unknown): raw is SceneMiss => {
   const miss = raw as SceneMiss | null
-  return typeof miss?.error === 'string' && (miss.reason === 'missing' || miss.reason === 'covered')
+  return typeof miss?.error === 'string' && ['missing', 'covered', 'fatal'].includes(miss.reason)
 }
 
 const isPoint = (raw: unknown): raw is Point =>

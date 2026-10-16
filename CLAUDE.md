@@ -96,7 +96,8 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
    `listSupportedTargets` + `connectToPage`. Add new runtimes by registering in `adapters/registry.ts`.
 
 6. **`src/inspectors/`** — mostly pure formatters (DOM tree → compact text, scene graph extractors). `scene/` is
-   engine-pluggable through a scene adapter per engine (`scene/adapters/`: PixiJS, CesiumJS); an adapter that can
+   engine-pluggable through a scene adapter per engine (`scene/adapters/`: PixiJS, CesiumJS, and `app-hook`, which calls the app's Scene Hook instead of reading an engine,
+   [ADR 0009](./docs/adr/0009-any-engine-through-the-app-scene-hook.md)); an adapter that can
    locate scene objects (CesiumJS) also drives the page: `click --scene`, `scene --goto` and the act `scene=` / `goto`
    steps run its page scripts. `heap/` also parses: it turns
    the `.heapsnapshot` JSON into the typed-array graph the server keeps, then formats views of it. `format.ts` holds

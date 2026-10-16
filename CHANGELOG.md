@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `"webgl": { "engine": "app-hook" }`: `scene`, `snap`, `click --scene`, `scene --goto` and the act `scene=` / `goto` steps on any engine (MapLibre, three.js, a 2D canvas) through a Scene Hook the app sets, `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)`. The contract is in the verify skill's command reference, Scene section. With no hook on the page `scene` prints `No scene: window.__AGENT_VIEW_SCENE__ is not on the page, …` and a scene step waits for it. See ADR 0009.
 - `key <keys>` and `act key <keys> [target]`: real key presses over CDP, any hotkey — chords of `alt|ctrl|meta|shift` and any DOM key name or one character (`ctrl+z`, `ctrl+shift+z`, `Escape`, `F5`, `MediaPlayPause`, `"ArrowDown ArrowDown Enter"`). The page gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own, and a printable key types into a focused field. With `--testid` / `--selector` (or an `act` target) the keys are aimed first: the pointer moves onto the element and focus goes to it, so a hotkey scoped to a panel reaches it; an `act` target takes `@x,y`, a point of it (an empty spot of a canvas). `act key` is recorded and replayed; replay waits for its target as for a click.
 - `act type <n> <number>` sets a native slider row (`input type=range`), recorded and replayed like a field. It used to refuse the row as `not a text field`.
 

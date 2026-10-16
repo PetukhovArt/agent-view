@@ -59,8 +59,12 @@ _Avoid_: Finder, Query
 ## Scene
 
 **Scene Adapter**
-The per-engine part of `scene` (PixiJS, CesiumJS): page scripts that read the engine's scene graph, and for an engine that can, locate a Scene Object and move the camera.
+The per-engine part of `scene` (PixiJS, CesiumJS, app-hook): page scripts that read the engine's scene graph, and for an engine that can, locate a Scene Object and move the camera.
 _Avoid_: Engine Plugin, Scene Driver
+
+**Scene Hook**
+The object `window.__AGENT_VIEW_SCENE__` an app sets so that agent-view reads its scene without knowing its engine: the app lists its Scene Objects, gives one's page point and moves its camera. The `app-hook` Scene Adapter only calls it.
+_Avoid_: Viewer Hook (that is the Cesium viewer global `__CESIUM_VIEWER__`), Scene API
 
 **Scene Object**
 One object of a WebGL scene that has no DOM node, such as a Cesium entity. It is addressed by its id, name or label text, and its page point is looked up again at every click, so a pan, zoom or resize in between does not matter.

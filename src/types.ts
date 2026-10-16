@@ -7,6 +7,7 @@ export enum RuntimeType {
 export enum WebGLEngine {
   Pixi = 'pixi',
   CesiumJS = 'cesiumjs',
+  AppHook = 'app-hook',
 }
 
 export type WindowInfo = {

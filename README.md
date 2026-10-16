@@ -320,7 +320,7 @@ Full form with all optional fields:
 | `runtime`           | yes      | `"electron"`, `"tauri"`, or `"browser"`                                                                                                               |
 | `port`              | yes      | CDP debugging port. Integer in range `1`–`65535`                                                                                                      |
 | `launch`            | yes      | Shell command used by `agent-view launch` to start the app (e.g. `"npm run dev"`). Pass an empty string if you always start the app yourself          |
-| `webgl.engine`      | no       | Scene-graph engine. Currently `"pixi"` ships an adapter; the architecture is pluggable for adding more engines                                        |
+| `webgl.engine`      | no       | Scene-graph engine: `"pixi"`, `"cesiumjs"`, or `"app-hook"` for any other engine, where the app exposes its scene through `window.__AGENT_VIEW_SCENE__`. Set by hand; `init` detects only `pixi` |
 | `allowEval`         | no       | `true` to enable `agent-view eval`, `watch`, `logs --probe` and `act` expressions (`--until-expr`, `wait --expr`). Off by default; opt-in for arbitrary JS execution |
 | `consoleBufferSize` | no       | Per-target console ring capacity. Positive integer. Default `500`                                                                                     |
 | `consoleTargets`    | no       | Target types `agent-view console` auto-attaches to on first call. Any subset of `["page", "iframe", "shared_worker", "service_worker", "worker"]`. Default `["page", "shared_worker", "service_worker"]` |
@@ -492,7 +492,7 @@ A text filter matches the text-bearing node, so cropping on a section title yiel
 
 ### `scene`
 
-Reads the WebGL scene graph for canvas-based apps. Currently supports PixiJS via `window.__PIXI_DEVTOOLS__`.
+Reads the WebGL scene graph for canvas-based apps: PixiJS via `window.__PIXI_DEVTOOLS__`, CesiumJS, and any other engine through `"engine": "app-hook"`, where the app sets `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)` (contract in [`commands.md`](./skills/verify/references/commands.md), Scene section).
 
 ```bash
 agent-view scene                    # Full scene graph

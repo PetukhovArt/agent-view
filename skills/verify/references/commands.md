@@ -719,14 +719,14 @@ agent-view scene --diff                 # Changes since last call
 agent-view scene --compact              # Merge single-child chains onto one line (reduces output)
 agent-view snap                         # DOM + Scene combined
 agent-view snap --scale 0.5             # DOM + Scene + Screenshot (path appended as === Screenshot === section)
-agent-view scene --goto 10.5,45.25,5000    # cesiumjs: camera straight down over lon,lat (degrees) at height (m)
+agent-view scene --goto 10.5,45.25,5000    # cesiumjs, app-hook: camera straight down over lon,lat (degrees) at height (m)
 agent-view scene --goto -70.5,-33.25    # … keeping the current height; negative lon/lat as is
 agent-view scene --goto "Tower 3"       # … over a scene object by id, name or label
 agent-view scene --goto "Tower 3" --height 2000   # … at 2000 m; --height fits either form, not lon,lat,height
 ```
 
 Engines: `"engine": "pixi"` reads `window.__PIXI_DEVTOOLS__`; `"engine": "cesiumjs"` finds the
-viewer in this order: a vue-cesium app (`$VueCesium` of each `[data-v-app]` root), then the hook
+viewer in this order: a vue-cesium app (`$VueCesium` of each `[data-v-app]` root), then the viewer global
 `window.__CESIUM_VIEWER__ = { viewer, Cesium }` (the app sets it; an ESM build has no `window.Cesium`),
 then plain CesiumJS through the global `window.Cesium` (the scene is read on the next frame). A Cesium
 scene prints one entity per line, keyed by its id; the name is the entity's `name`, else its label
@@ -751,5 +751,36 @@ call also keeps every viewer it found in `window.__agentView.cesium` (`[{ key, v
 Cesium }]`), so a later `eval` reaches the Cesium API without hunting for it; before the first such
 call it is unset, and plain CesiumJS found by its frames has no `viewer` there, only `scene` and `Cesium`.
 
-An act step on a scene object needs an id the app sets or a unique name or label: a uuid id Cesium
-generates for an entity without one changes on every load, and `act save` refuses a script holding one.
+An act step on a scene object needs a unique name or label, or an id that is no uuid: a uuid id Cesium
+generates for an entity without one changes on every load, a uuid the app or its backend sets differs
+between machines, and `act save` refuses a script holding one.
+
+`"engine": "app-hook"` serves any engine (MapLibre, three.js, a 2D canvas): agent-view reads no engine,
+it calls the Scene Hook the app sets. With no hook on the page, `scene` prints `No scene: window.__AGENT_VIEW_SCENE__
+is not on the page, or its nodes() returned no SceneNode[]`, and a scene step waits for it like a loading
+scene. The app implements, in its own types:
+
+```ts
+type SceneNode = {
+  type: string; name: string
+  x?: number; y?: number            // page CSS px of the click point; omit when off screen
+  visible: boolean
+  children?: SceneNode[]
+  extras?: Record<string, string>   // printed inline, e.g. { id }
+  verboseExtras?: Record<string, string> // printed with --verbose
+}
+type SceneMiss = { error: string; reason: 'missing' | 'covered' | 'fatal' }
+type SceneGoto = ({ lon: number; lat: number } | { scene: string }) & { height?: number }
+
+window.__AGENT_VIEW_SCENE__ = {
+  nodes(): SceneNode[] | Promise<SceneNode[]>,
+  // the object whose id, else name or label, is query: its page point if a click there reaches it,
+  // missing when none or several answer (name the ids), covered when it is hidden or under HTML
+  locate(query: string): { x: number; y: number } | SceneMiss | Promise<…>,
+  // camera straight down over target, no animation; height absent keeps the current one
+  goto(target: SceneGoto): { lonLat: [number, number, number] } | SceneMiss | Promise<…>,
+}
+```
+
+`scene` prints the nodes under one `Scene` root, in the order `nodes()` returns them; keep it stable, or
+`--diff` reports moves. A hook that throws ends the step with `__AGENT_VIEW_SCENE__.<method> threw: …`.

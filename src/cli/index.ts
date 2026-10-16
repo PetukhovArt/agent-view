@@ -94,7 +94,7 @@ program
   .option('--testid <id>', 'Find element by test id (see testIdAttribute)')
   .option('--selector <css>', 'Find element by CSS selector')
   .option('-p, --pos <x,y>', 'Click at coordinates (for canvas)')
-  .option('--scene <object>', 'Click a scene object by id, name or label, where it is drawn now (cesiumjs engine)')
+  .option('--scene <object>', 'Click a scene object by id, name or label, where it is drawn now (cesiumjs, app-hook engines)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('--double', 'Double-click (fires dblclick handlers)')
   .option('--right', 'Right-click (fires contextmenu)')
@@ -175,14 +175,14 @@ program
 
 program
   .command('scene')
-  .description('Get the WebGL scene graph (PixiJS, CesiumJS)')
+  .description('Get the WebGL scene graph (PixiJS, CesiumJS, or any engine through the app\'s scene hook)')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-f, --filter <text>', 'Filter by name')
   .option('-d, --depth <n>', 'Max tree depth', parseDepth)
   .option('-v, --verbose', 'Show extended properties')
   .option('--diff', 'Show only changes since last call')
   .option('--compact', 'Merge single-child chains onto one line')
-  .option('--goto <place>', 'Point the camera straight down over lon,lat[,height] (degrees, metres) or a scene object by id, name or label (cesiumjs)')
+  .option('--goto <place>', 'Point the camera straight down over lon,lat[,height] (degrees, metres) or a scene object by id, name or label (cesiumjs, app-hook)')
   .option('--height <metres>', 'With --goto: the camera height, else the current one is kept')
   .action(async (options) => {
     const config = requireConfig()
@@ -443,7 +443,7 @@ const parseSeconds = (value: string): number => {
 const EXPR_HOLDS = 'is truthy, or its promise resolves'
 const UNTIL_EXPR_FLAG = '--until-expr <js>'
 const UNTIL_EXPR_HELP = `Done when this JS expression in the page ${EXPR_HOLDS} (state no element shows); needs allowEval`
-const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre; or scene=<object>, a scene object by id, name or label (cesiumjs)'
+const TARGET_HELP = '<target>: row n of the last table, testid=<id> or css=<selector> (what is no row: a canvas); @x,y appended = px from its top-left instead of its centre; or scene=<object>, a scene object by id, name or label (cesiumjs, app-hook)'
 /** Candidates for `${NAME}`: the server keeps only the names a script uses. */
 const envParams = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && v))
 
@@ -502,7 +502,7 @@ act.command('drag <from> [to] [edge]').description('Pointer-drag `from` (a row, 
     await runAct(requireConfig(), { op: 'drag', target: from, to, edge, html5: opts.html5 === true })
   })
 
-act.command('goto <place>').description('Point the camera straight down over lon,lat[,height] or a scene object by id, name or label, as `scene --goto` (cesiumjs)')
+act.command('goto <place>').description('Point the camera straight down over lon,lat[,height] or a scene object by id, name or label, as `scene --goto` (cesiumjs, app-hook)')
   // `-142.38,-55.75` would read as an unknown option.
   .allowUnknownOption()
   .option('--height <metres>', 'The camera height, else the current one is kept')

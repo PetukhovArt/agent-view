@@ -30,6 +30,8 @@ export type SceneDiffResult = {
 export type SceneAdapter = {
   readonly engine: WebGLEngine
   readonly extractScript: string
+  /** What `scene` prints when `normalize` returns null; default `No <engine> scene found`. */
+  readonly noScene?: string
   // Returns null when the engine isn't present in the page.
   normalize(raw: unknown): SceneNode | null
   /** Script resolving to the page point `{ x, y }` of the object `query` names, or a `SceneMiss`. */
