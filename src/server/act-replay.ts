@@ -318,7 +318,7 @@ export async function replay(
   const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
     try {
       if (step.op === 'drag') {
-        const dropId = step.to && (await resolve(step.to, { isEnabledRequired: false, isCoverChecked: !step.toAt }, msLeft)).nodeId
+        const dropId = step.to && (await resolve(step.to, { isEnabledRequired: false, isCoverChecked: false }, msLeft)).nodeId
         if (step.to && !dropId) return verdict(EXIT_STALE, `STALE: ${at} drag target ${describeTarget(step.to)} not found`)
         await dragNode(deps.conn, nodeId, { at: step.at, dropId, toAt: step.toAt, edge: step.edge, isHtml5: step.isHtml5 })
       } else if (isClickOp(step.op)) {

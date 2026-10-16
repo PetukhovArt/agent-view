@@ -191,6 +191,28 @@ describe('replay', () => {
     expect(conn.clickByNodeId).not.toHaveBeenCalled()
   })
 
+  it('drops onto a target the dragged-from panel covers: the drag closes the panel, so the drop is not hit-tested', async () => {
+    const DROP_ID = 9
+    const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
+    await writeScript({ store, name: 'add' }, {
+      until: { testid: 'done' },
+      steps: [{ op: 'drag', target: { testid: 'item' }, to: { testid: 'panel' }, edge: 'right' }],
+    })
+    const conn = {
+      ...fakeConn(),
+      queryVisible: async (css: string) => ({ backendDOMNodeId: css.includes('panel') ? DROP_ID : NODE_ID, count: 1 }),
+      hitTest: async (nodeId: number) => (nodeId === DROP_ID ? 'div.widget-bar' : null),
+      getBoxCenter: async () => ({ x: 60, y: 20 }),
+      getBoxRect: async () => ({ x: 200, y: 0, width: 600, height: 600 }),
+      dragBetweenPositions: vi.fn(async () => {}),
+    }
+
+    const result = await replay({ store, name: 'add' }, fakeDeps(conn))
+
+    expect(result).toMatchObject({ ok: true, exitCode: 0 })
+    expect(conn.dragBetweenPositions).toHaveBeenCalledOnce()
+  })
+
   it('a FAIL prints the notices on screen, so a refusal the app showed is read, not guessed', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     const store = mkdtempSync(join(tmpdir(), 'av-replay-'))
