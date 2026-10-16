@@ -32,21 +32,21 @@ describe('saveUseCase', () => {
   })
 
   it('indexes each script as one line: link, goal, params, after, requires; until, steps and param notes stay in the JSON', async () => {
-    await save({ note: 'FEA-10 TC-01: выделяет строку; строка выделена', paramNotes: ['LABEL=имя строки'], requires: ['tree/fixtures/demo.sh'] })
+    await save({ note: 'picks a row; the row is selected', paramNotes: ['LABEL=имя строки'], requires: ['tree/fixtures/demo.sh'] })
 
     expect(readFileSync(join(store, 'tree', 'index.md'), 'utf8')).toContain([
       'Steps:',
       '- [tree-row-select](tree-row-select.json) — Выделяет строку дерева; строка выделена · params ROW ROW_LABEL · after scene-open',
       '',
       'Use cases:',
-      '- [pick-use-case](pick-use-case.json) — FEA-10 TC-01: выделяет строку; строка выделена · params LABEL · requires tree/fixtures/demo.sh',
+      '- [pick-use-case](pick-use-case.json) — picks a row; the row is selected · params LABEL · requires tree/fixtures/demo.sh',
       '',
     ].join('\n'))
     expect(JSON.parse(readFileSync(join(store, 'tree', 'pick-use-case.json'), 'utf8'))).toMatchObject({ paramNotes: { LABEL: 'имя строки' } })
   })
 
   it('refuses a uuid in a parameter value: it differs between projects and machines', async () => {
-    const saved = await save({ steps: [`tree-row-select ROW=scene-component:${UUID} ROW_LABEL=A`] })
+    const saved = await save({ steps: [`tree-row-select ROW=row:${UUID} ROW_LABEL=A`] })
 
     expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('uuid') })
   })

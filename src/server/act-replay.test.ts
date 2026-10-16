@@ -107,7 +107,7 @@ describe('replay', () => {
     const step = { op: 'click' as const, target: { testid: 'row-${ROW}', role: 'button', name: '' }, isPassword: false }
     await writeScript({ store, name: 'row' }, { until: { testid: 'row-selected' }, steps: [step] })
     await writeScript({ store, name: 'row-then' }, { until: { testid: 'done' }, steps: [], after: 'row' })
-    const conn = fakeConn({ 'data-testid': 'row-library/Насосы' })
+    const conn = fakeConn({ 'data-testid': 'row-files/Docs' })
     // The prerequisite's until shows only once its row was clicked, so replay runs it.
     conn.queryVisible = async (css: string) =>
       css.includes('row-selected') && !conn.clickByNodeId.mock.calls.length ? { backendDOMNodeId: null, count: 0 } : { backendDOMNodeId: 1, count: 1 }
@@ -118,7 +118,7 @@ describe('replay', () => {
   it('fills a ${NAME} target from params, through the after chain', async () => {
     const { store, conn, deps } = await saveRowClick()
 
-    const result = await replay({ store, name: 'row-then', params: { ROW: 'library/Насосы' } }, deps)
+    const result = await replay({ store, name: 'row-then', params: { ROW: 'files/Docs' } }, deps)
 
     expect(result).toMatchObject({ ok: true, exitCode: 0 })
     expect(conn.clickByNodeId).toHaveBeenCalledOnce()
@@ -137,7 +137,7 @@ describe('replay', () => {
     const { store, conn, deps } = await saveRowClick()
     await writeScript({ store, name: 'low' }, { until: { testid: 'done' }, steps: [{ op: 'goto', place: { scene: 'Tower 3' }, height: '${HEIGHT}' }], after: 'row' })
 
-    const result = await replay({ store, name: 'low', params: { ROW: 'library/Насосы', HEIGHT: 'abc' } }, deps)
+    const result = await replay({ store, name: 'low', params: { ROW: 'files/Docs', HEIGHT: 'abc' } }, deps)
 
     expect(result).toEqual({ ok: false, error: '"low": goto Tower 3 — --height <metres>: "abc" is not a number' })
     expect(conn.clickByNodeId).not.toHaveBeenCalled()

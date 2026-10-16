@@ -5,9 +5,9 @@
 
 ## Context
 
-`act save` wrote every recording to one global `~/.agent-view/scratch/`. Scripts of different apps mixed with throwaway ones, nothing said which project a script belonged to or where it started, and agents did not look there: on web-client each verifier re-explored the same paths (admin → rights, settings → connections, licenses → keys) at Opus cost instead of a 1–2 s replay ([ADR 0003](./0003-act-step-protocol-and-replay.md)).
+`act save` wrote every recording to one global `~/.agent-view/scratch/`. Scripts of different apps mixed with throwaway ones, nothing said which project a script belonged to or where it started, and agents did not look there: in one Electron app each verifier re-explored the same paths (admin → rights, settings → users) at Opus cost instead of a 1–2 s replay ([ADR 0003](./0003-act-step-protocol-and-replay.md)).
 
-A script belongs to the app it drives, and one app is usually checked out many times: the owner of web-client runs a dozen git worktrees, and verifiers often work inside one of them.
+A script belongs to the app it drives, and one app is usually checked out many times: an Electron app with a dozen git worktrees is common, and verifiers often work inside one of them.
 
 ## Decision
 
@@ -24,6 +24,6 @@ Scripts carry what an agent needs to pick one without replaying it: a `note`, th
 
 ## Consequences
 
-- A worktree run can write into the main checkout's working tree. The store is expected to be gitignored (`.agent-view/` already is in web-client), so this touches no branch.
+- A worktree run can write into the main checkout's working tree. The store is expected to be gitignored (projects already using it ignore `.agent-view/`), so this touches no branch.
 - Committing the store later is a one-line `.gitignore` change. Once committed, a branch's scripts still resolve from the main checkout, not the worktree's branch; a UI change on a branch that breaks a script shows up as STALE and is re-recorded.
 - Recorded values other than passwords (a login name) are stored as typed. Before the store is committed they need replacing by an env reference.

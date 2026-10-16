@@ -5,7 +5,7 @@
 
 ## Context
 
-[ADR 0004](./0004-act-scripts-live-in-the-main-checkout.md) put in the index what lets an agent pick a script without replaying it: the note, the start route, the `after` prerequisite. [ADR 0005](./0005-script-store-sections-and-use-cases.md) added the until and a use case's step chain. On frontend FEA-10 the `library` section index grew to 46 KB, with lines up to 1400 characters. The full until took 18 % of the file, and the notes held preconditions, file checks, md5 sums, uuids, coordinates and code links. To pick one script, an agent had to read all of it. Scripts recorded against uuid test ids (`scene-component:<uuid>`) fitted only the project they were recorded in.
+[ADR 0004](./0004-act-scripts-live-in-the-main-checkout.md) put in the index what lets an agent pick a script without replaying it: the note, the start route, the `after` prerequisite. [ADR 0005](./0005-script-store-sections-and-use-cases.md) added the until and a use case's step chain. On one canvas-editor project a section index grew to 46 KB, with lines up to 1400 characters. The full until took 18 % of the file, and the notes held preconditions, file checks, md5 sums, uuids, coordinates and code links. To pick one script, an agent had to read all of it. Scripts recorded against uuid test ids (`component:<uuid>`) fitted only the project they were recorded in.
 
 ## Decision
 

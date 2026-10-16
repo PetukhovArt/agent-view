@@ -265,7 +265,7 @@ agent-view act key ctrl+v "css=#content-area canvas@700,650"   # aimed at a poin
 agent-view act do "type 2 root" "type 3 secret" "click 1"   # several ops, all numbered from ONE table; stops at the first BLOCKED/DONE/error
 agent-view act drag 5                   # pointer-drag row 5 onto the viewport centre
 agent-view act drag 5 2                 # … onto the centre of row 2
-agent-view act drag 7 testid=video-panel right   # … onto any visible element by test id, 20 px inside its right edge
+agent-view act drag 7 testid=dashboard right   # … onto any visible element by test id, 20 px inside its right edge
 agent-view act drag 7 center left       # … near the viewport's left edge; edge: left|right|top|bottom|center (default)
 agent-view act drag "css=canvas@10,10" "css=canvas@200,150"   # from a point to a point: a selection frame on a canvas
 agent-view act drag 7 "css=canvas@300,200"   # a tree row dropped at a point of the canvas
@@ -277,23 +277,23 @@ agent-view act save login --in auth     # writes <project>/.agent-view/scripts/a
 agent-view act start --until-testid x --save auth-login --in auth   # same, written automatically on DONE (one turn fewer)
 agent-view act start --until-testid settings-root --save settings-open --in settings --after auth-login --note "opens settings; the settings page is shown"
 agent-view act save settings-open --in settings --after auth-login --note "opens settings; the settings page is shown"   # --note / --after on either
-agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
-agent-view act save tree-row-select --in libraries --param ROW=library/Насосы/Насос --param-note "ROW=tree id of the row"   # what ${ROW} stands for: in the JSON, not the index; on start and save-use-case too
+agent-view act save tree-row-select --in files --param ROW=files/docs/readme   # each occurrence of the value saved as ${ROW}; --param on start too, repeatable
+agent-view act save tree-row-select --in files --param ROW=files/docs/readme --param-note "ROW=tree id of the row"   # what ${ROW} stands for: in the JSON, not the index; on start and save-use-case too
 agent-view act save project-import --in projects --timeout 120   # replay waits up to 120 s for the until (default 15)
 AGENT_VIEW_SECRET=… agent-view act replay auth-login   # re-run it with no model; exit 0 DONE, 1 FAIL, 3 STALE, 2 error
-ROW=library/Насосы/Пожарный agent-view act replay tree-row-select   # ${ROW} filled from $ROW, in the after chain too
+ROW=files/docs/changelog agent-view act replay tree-row-select   # ${ROW} filled from $ROW, in the after chain too
 agent-view act list                     # sections of the store; needs no running app
-agent-view act list libraries           # the steps and use cases of one section (and of the sections below it)
+agent-view act list files           # the steps and use cases of one section (and of the sections below it)
 agent-view act delete tree-row-old      # removes the script and regenerates the indexes; needs no running app
-agent-view act save-use-case pump-open-use-case --in libraries --until-testid pump-card \
-  auth-login 'project-open PROJECT=${PROJECT}' "tree-row-select ROW=library/Насосы/Насос timeout=30" --note "opens the pump card; the card is shown"
+agent-view act save-use-case file-open-use-case --in files --until-testid file-card \
+  auth-login 'project-open PROJECT=${PROJECT}' "tree-row-select ROW=files/docs/readme timeout=30" --note "opens the file card; the card is shown"
 ```
 
 Scripts live per project in `<project>/.agent-view/scripts/`, `<project>` being the directory of
 `agent-view.config.json`. In a git worktree they go to the **main** checkout (same subdirectory), so
 every worktree of a project shares one store. The store is split into **sections**, subdirectories named
 after screen areas (`auth`, `tree`, `editor/canvas`). A step or use case lies in the area of its done condition:
-the screen it sits on, not the component (`license-server__…` → `license-server`; a widget on the workspace →
+the screen it sits on, not the component (`billing__invoices__…` → `billing`; a widget on the workspace →
 `workspace`), not the areas it passes through on the way. There is no `shared/`: any script is reusable from where
 it lies. `act save` / `start --save` need `--in <section>`. A name is unique across the whole store and is
 all `replay`, `--after` and a use case use — moving a file to another section breaks nothing; saving a
@@ -311,7 +311,7 @@ Each save and delete rewrites `index.md` in every section and in the store root.
 ```
 C:\proj\.agent-view\scripts · replay: agent-view act replay <name> · one section: act list <section>
 - `auth/` — 1 step
-- `libraries/` — 2 steps, 1 use case
+- `files/` — 2 steps, 1 use case
 - `settings/` — 1 step
 
 C:\proj\.agent-view\scripts\libraries · replay: agent-view act replay <name>
@@ -319,7 +319,7 @@ Steps:
 - [project-open](project-open.json) — opens the project; the tree is shown · params PROJECT · after auth-login
 - [tree-row-select](tree-row-select.json) — selects a tree row; the row is highlighted · params ROW
 Use cases:
-- [pump-open-use-case](pump-open-use-case.json) — opens the pump card; the card is shown · params PROJECT · requires libraries/fixtures/pumps.sh
+- [file-open-use-case](file-open-use-case.json) — opens the file card; the card is shown · params PROJECT · requires files/fixtures/docs.sh
 ```
 
 A line is `- [<name>](<name>.json) — <note> · params … · after <step> · requires <fixture>`, empty fields
@@ -366,28 +366,28 @@ that control. Password values print as `••••`, or `empty`:
 
 ```
 act step 2/30 · 14 controls · until testid "workspace-root"
-[1] textbox "Логин" testid=login-input · "admin"
-[2] textbox "Пароль" testid=password · ••••
-[3] button "Войти" testid=login-btn
-[4] checkbox "Запомнить" · checked
+[1] textbox "Login" testid=login-input · "admin"
+[2] textbox "Password" testid=password · ••••
+[3] button "Sign in" testid=login-btn
+[4] checkbox "Remember me" · checked
 ```
 
 First line of an op's output:
 
 | Line | Meaning |
 |---|---|
-| `✓ click [3] button "Войти" · 240ms` | acted and settled; the new table follows |
-| `✓ rightclick [5] treeitem "Сцена 1" · 180ms` | same for `dblclick` / `rightclick`: the line names the op |
-| `✓ ctrl+click [4] treeitem "Индикатор" · 160ms` | `--modifiers`: the keys held prefix the op |
-| `✓ click [3] button "Войти" · window reloaded · 900ms` | the window reloaded under the action (login); settled on the new document |
-| `✓ drag [7] item "ГИС" testid=nav__widgetbar__item-GisWidget → testid=video-panel right · 310ms` | dragged: `→` names the target and edge |
+| `✓ click [3] button "Sign in" · 240ms` | acted and settled; the new table follows |
+| `✓ rightclick [5] treeitem "Scene 1" · 180ms` | same for `dblclick` / `rightclick`: the line names the op |
+| `✓ ctrl+click [4] treeitem "Gauge" · 160ms` | `--modifiers`: the keys held prefix the op |
+| `✓ click [3] button "Sign in" · window reloaded · 900ms` | the window reloaded under the action (login); settled on the new document |
+| `✓ drag [7] item "Chart" testid=widget-bar__chart → testid=dashboard right · 310ms` | dragged: `→` names the target and edge |
 | `✓ click css=#cv @120,80 · 150ms` | a point of an element: `@x,y` from its top-left |
 | `✓ drag css=#cv @10,10 → css=#cv @200,150 · 200ms` | point to point |
 | `✓ scroll down testid=properties-panel · 120ms` | wheel over that element |
 | `✓ key ctrl+d → testid=editor-stage · 210ms` | keys pressed; `→` names where they were aimed |
 | `✓ wait expression "window.app.store.loaded" · 400ms` | `act wait --expr` held; recorded as a step |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
-| `BLOCKED: [3] button "Войти" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
+| `BLOCKED: [3] button "Sign in" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
 | `BLOCKED: [3] covered by div.overlay testid=spinner` | something else receives the click; fresh table follows, nothing was done |
 | `BLOCKED: step budget 30 exhausted` | `--max-steps` reached |
 
@@ -435,22 +435,22 @@ same way, labelled `step` instead of `prerequisite`. Its one line, ending in the
 |---|---|---|
 | `DONE: replay login · 2 steps in 0.1s, then testid "x" · 1.8s` | 0 | until met; the steps took 0.1 s, the app the rest |
 | `DONE: replay settings-open · after login skipped · 1 steps in 0.1s, then testid "y" · 0.6s` | 0 | same; prerequisites listed `skipped` or `ran` |
-| `DONE: replay pump-open-use-case · auth-login skipped, project-open ran, tree-row-select ran, then testid "pump-card" · 4.2s` | 0 | a use case: each step `skipped` or `ran` |
+| `DONE: replay file-open-use-case · auth-login skipped, project-open ran, tree-row-select ran, then testid "file-card" · 4.2s` | 0 | a use case: each step `skipped` or `ran` |
 | `FAIL: prerequisite login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | a prerequisite did not reach DONE; its step lines read `FAIL:` / `STALE: prerequisite login: step 2/2 …` |
 | `FAIL: step project-open — steps ran, testid "tree-root" not visible after 60s · 61.0s` | 1 | same for a use-case step; its step lines read `STALE: step project-open: step 1/2 …` |
 | `FAIL: replay login — steps ran, testid "x" not visible after 15s · 16.2s` | 1 | the app did not answer — likely a bug |
-| `FAIL: step 2/2 click button "Войти" testid=login-btn — still disabled after 10s · 10.4s` | 1 | the control is there but stayed `disabled` / `covered by …` — likely a bug |
+| `FAIL: step 2/2 click button "Sign in" testid=login-btn — still disabled after 10s · 10.4s` | 1 | the control is there but stayed `disabled` / `covered by …` — likely a bug |
 | `FAIL: step 1/2 click testid=filter-icon — still covered by div.v-overlay__scrim after 10s · 10.2s` | 1 | same for a `testid=` / `css=` target: a dialog or overlay left open over it |
-| `STALE: step 2/2 click button "Войти" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
-| `STALE: step 3/3 drag target testid=video-panel not found · 10.5s` | 3 | same, for a drop target |
-| `STALE: step 1/2 select combobox "Период" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
+| `STALE: step 2/2 click button "Sign in" — not on screen within 10s · 10.3s` | 3 | the script no longer fits the app — re-record it |
+| `STALE: step 3/3 drag target testid=dashboard not found · 10.5s` | 3 | same, for a drop target |
+| `STALE: step 1/2 select combobox "Period" — no option "Monthly" · 0.2s` | 3 | same, for an option (or `not a native select`) |
 | `FAIL: replay data-load — steps ran, expression "window.app.loaded" not true after 15s · 15.3s` | 1 | an `--until-expr` never held; also `still pending`, `threw <error>` |
 | `FAIL: step 2/3 wait expression "window.app.loaded" not true after 10s · 10.2s` | 1 | a `wait --expr` step never held |
-| `STALE: step 2/3 click treeitem "Насос" — Could not compute box model. · 10.4s` | 3 | the control was found but never drawn, or kept being re-rendered, for 10 s |
-| `STALE: step 2/3 click button "Закрыть" — <CDP error> · 0.4s` | 3 | acting failed otherwise (a panel that toggled shut); input already sent is never repeated |
+| `STALE: step 2/3 click treeitem "readme" — Could not compute box model. · 10.4s` | 3 | the control was found but never drawn, or kept being re-rendered, for 10 s |
+| `STALE: step 2/3 click button "Close" — <CDP error> · 0.4s` | 3 | acting failed otherwise (a panel that toggled shut); input already sent is never repeated |
 | `` STALE: step 1/2 goto Tower 3 --height 2000 — No scene object "Tower 3". Run `agent-view scene` after 10s · 10.2s `` | 3 | a scene step's object stayed missing; `FAIL` (1) when it stayed covered |
 
-A `FAIL` or `STALE` line is followed by `on screen: status "Сервер недоступен", alert "…"` when the page
+A `FAIL` or `STALE` line is followed by `on screen: status "Server unavailable", alert "…"` when the page
 shows notices (`alert` / `status` roles with text: a snackbar, an error banner) — the app's own word on
 why, read before guessing.
 

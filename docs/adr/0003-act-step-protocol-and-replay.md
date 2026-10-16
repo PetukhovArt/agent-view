@@ -5,7 +5,7 @@
 
 ## Context
 
-Driving a UI scenario with the regular commands costs a strong model 20–30 turns: `dom` to find refs, `click`/`fill`, `wait`, re-`dom` after refs go stale. Measured on web-client (Electron, MW login and "add a GIS widget next to the video panel"): Opus via `cdp-verifier` took 146 s / $0.35 and 376 s / $0.45. Each turn replays the whole context, so the bill is turns × context, and the model spends most turns re-deriving what the tool could decide.
+Driving a UI scenario with the regular commands costs a strong model 20–30 turns: `dom` to find refs, `click`/`fill`, `wait`, re-`dom` after refs go stale. Measured on an Electron app (a login, and "add a widget next to another panel"): an Opus verifier subagent took 146 s / $0.35 and 376 s / $0.45. Each turn replays the whole context, so the bill is turns × context, and the model spends most turns re-deriving what the tool could decide.
 
 A cheap model can pick "which control next" if every call answers with a small numbered table and the tool does everything deterministic. agent-view cannot call a model itself (no API key, no SDK in the package), so the loop has to be driven from outside — by whatever reads the table.
 

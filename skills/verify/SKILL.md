@@ -138,9 +138,9 @@ Navigation is a recorded path, re-explored only when it broke:
 2. A script lands where you need: `agent-view act replay <name>`. Its `after` prerequisite (a login), or a use case's
    steps, run first and are skipped when already met. DONE: go on. STALE: re-record under the same name.
 3. No script fits: record the missing steps, one small action each. A step or use case lies in the section of the area
-   of its done condition: the screen it sits on, not the component (`license-server__…` → `license-server`; a widget
+   of its done condition: the screen it sits on, not the component (`billing__invoices__…` → `billing`; a widget
    on the workspace → `workspace`), whatever areas it passes through. Hand the goal, a done condition and a name
-   `<area>-<target>` (`settings-connections-open`) to the `act-decider` agent, which derives the section from the done
+   `<area>-<target>` (`settings-users-open`) to the `act-decider` agent, which derives the section from the done
    condition, or drive
    `act start … --save <name> --in <section> --note "…"` yourself. Then, when the flow is worth repeating, chain the
    steps with `act save-use-case <name>-use-case --in <section> …`. A step that act cannot record is a missing act op or a missing test id in the app, never a
@@ -165,7 +165,7 @@ One line per step, so the report stays machine-readable:
 
 ```
 <step label> | pass | fail | requires_visual_review | skipped — <evidence command and its result, or why it was skipped>
-login form error | fail — dom --filter "Неверный пароль" --count → 0
+login form error | fail — dom --filter "Wrong password" --count → 0
 ```
 
 Close with passed / failed / visual-review / skipped counts. Do not paste raw stdout unless asked.

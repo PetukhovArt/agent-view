@@ -50,9 +50,9 @@ describe('extractControls + formatControlTable', () => {
     const snap = layout([
       [1, { rect: { x: 0, y: 0, width: 200, height: 40 }, cursor: 'pointer' }],
       [2, { rect: { x: 10, y: 10, width: 50, height: 20 }, cursor: 'pointer', attributes: { 'data-testid': 'save-label' } }],
-      [3, { rect: { x: 0, y: 100, width: 60, height: 60 }, cursor: 'pointer', attributes: { 'data-testid': 'widget-gis', title: 'ГИС' } }],
+      [3, { rect: { x: 0, y: 100, width: 60, height: 60 }, cursor: 'pointer', attributes: { 'data-testid': 'widget-chart', title: 'Chart' } }],
     ])
-    expect(extractControls(nodes, snap, ATTRS).map(c => `${c.role} ${c.name}`)).toEqual(['button Сохранить', 'item ГИС'])
+    expect(extractControls(nodes, snap, ATTRS).map(c => `${c.role} ${c.name}`)).toEqual(['button Сохранить', 'item Chart'])
   })
 })
 

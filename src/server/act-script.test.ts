@@ -70,15 +70,15 @@ describe('scriptStore', () => {
 
 describe('markParams', () => {
   const script = {
-    until: { selector: '[data-testid="row-library/Насосы/Насос"][aria-selected]' },
+    until: { selector: '[data-testid="row-files/Docs/Readme"][aria-selected]' },
     steps: [
-      { op: 'click' as const, target: { testid: 'row-library/Насосы/Насос', role: 'button', name: 'Насос' }, isPassword: false },
-      { op: 'type' as const, target: { role: 'textbox', name: 'Имя' }, value: 'Насос', isPassword: false },
+      { op: 'click' as const, target: { testid: 'row-files/Docs/Readme', role: 'button', name: 'Readme' }, isPassword: false },
+      { op: 'type' as const, target: { role: 'textbox', name: 'Name' }, value: 'Readme', isPassword: false },
     ],
   }
 
   it('turns every occurrence of a value, in steps and the until, into ${NAME}, longest value first', () => {
-    const marked = markParams(script, ['NAME=Насос', 'ROW=library/Насосы/Насос'])
+    const marked = markParams(script, ['NAME=Readme', 'ROW=files/Docs/Readme'])
 
     expect(marked).toMatchObject({
       until: { selector: '[data-testid="row-${ROW}"][aria-selected]' },
@@ -94,6 +94,6 @@ describe('markParams', () => {
   })
 
   it('refuses a value that occurs nowhere, so a typo does not save a fixed script', () => {
-    expect(markParams(script, ['ROW=library/Нет'])).toEqual({ error: '--param ROW: "library/Нет" is in no step and not in the until' })
+    expect(markParams(script, ['ROW=files/None'])).toEqual({ error: '--param ROW: "files/None" is in no step and not in the until' })
   })
 })
