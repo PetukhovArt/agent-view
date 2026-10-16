@@ -45,7 +45,7 @@ An Eval Expression sampled at a fixed interval, with the differences between sna
 _Avoid_: Subscription, Poll, Observer
 
 **Ref**
-An opaque integer handle for a node (`[ref=N]`), issued for the life of the session and valid until the next accessibility-tree mutation. The input to click, fill, drag and screenshot cropping.
+An opaque integer handle for a node (`[ref=N]`), issued for the life of the session and valid until the next accessibility-tree mutation. The input to click, hover, fill, drag and screenshot cropping.
 _Avoid_: Handle, NodeId, Selector
 
 **Test Id**

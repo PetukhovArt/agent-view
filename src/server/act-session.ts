@@ -1,6 +1,6 @@
 import { isDeadSocket } from '../cdp/transport.js'
 import { parseKeys } from '../cdp/keys.js'
-import type { Modifier } from '../cdp/types.js'
+import { DEFAULT_HOVER_HOLD_MS, type Modifier } from '../cdp/types.js'
 import type { ServerResponse } from '../types.js'
 import {
   PASSWORD_MASK,
@@ -13,7 +13,7 @@ import {
   type Control,
 } from '../inspectors/controls/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
-import { clickSceneObject, describePlace, moveSceneCamera, parseScenePlace, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
+import { clickSceneObject, describePlace, hoverSceneObject, moveSceneCamera, parseScenePlace, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
 import {
   CLICKS,
   EDGES,
@@ -26,6 +26,7 @@ import {
   dragNode,
   elementLocator,
   exprCondition,
+  hoverNode,
   isClickOp,
   isEdge,
   isScriptName,
@@ -46,7 +47,7 @@ import {
   type RowTarget,
   type UntilArgs,
 } from './act-script.js'
-import { cwdOf, isOneUntil, modifiersOf, refuseStepSave, str, strs, untilArgsOf } from './act-store.js'
+import { cwdOf, holdMsOf, isOneUntil, modifiersOf, refuseStepSave, str, strs, untilArgsOf } from './act-store.js'
 import { ALLOW_EVAL_HINT, STEP_TIMEOUT_MS, replay, replayTimeMs, untilAnswered, waitFor, type ActDeps } from './act-replay.js'
 
 const DEFAULT_MAX_STEPS = 30
@@ -171,6 +172,7 @@ export async function runAct(
   if (op === 'scroll') return scrollStep(run, str(args, 'direction'), str(args, 'target'))
   if (op === 'key') return keyStep(run, str(args, 'keys'), str(args, 'target'))
   if (op === 'goto') return gotoStep(run, str(args, 'place'), str(args, 'height'))
+  if (op === 'hover') return hoverStep(run, str(args, 'target'), holdMsOf(args))
   if (op === 'drag') return dragStep(run, { from: str(args, 'target') ?? '', to: str(args, 'to'), edge: str(args, 'edge'), isHtml5: args.html5 === true })
   if (isClickOp(op) && str(args, 'target') !== undefined) {
     const target = parseTarget(str(args, 'target')!)
@@ -330,7 +332,7 @@ type Picked = { nodeId: number; target: NodeTarget; label: string; before: strin
 
 /** Row n of the last table (stale guard, hit check), or any visible element by test id / CSS — a canvas is no row. */
 async function pick(run: Run, target: CliTarget): Promise<Picked | ServerResponse> {
-  if ('scene' in target) return { ok: false, error: 'scene=<object> is a click target only' }
+  if ('scene' in target) return { ok: false, error: 'scene=<object> is a click or hover target only' }
   if ('n' in target) {
     const located = await locate(run, target.n)
     if (!('target' in located)) return located
@@ -368,6 +370,28 @@ async function sceneClickStep(run: Run, op: ClickOp, query: string, modifiers: M
   deps.invalidateAxCache()
   session.steps.push({ op, target: { scene: query }, modifiers })
   return finishStep(run, { before, done: `${describeOp(op, modifiers)} scene=${query} at (${found.x}, ${found.y})` })
+}
+
+async function hoverStep(run: Run, raw: string | undefined, holdMs: number | { error: string }): Promise<ServerResponse> {
+  const target = raw === undefined ? undefined : parseTarget(raw)
+  if (!target) return { ok: false, error: 'act hover <n | testid=<id> | css=<selector>>[@x,y] | scene=<object> [--hold-ms <ms>]' }
+  if (typeof holdMs !== 'number') return { ok: false, error: holdMs.error }
+  const recordedHold = holdMs === DEFAULT_HOVER_HOLD_MS ? {} : { holdMs }
+  const { session, deps } = run
+  if ('scene' in target) {
+    const before = tableKey(await snapshot(run))
+    const found = await untilAnswered(deps, c => hoverSceneObject(c, deps.engine, target.scene, holdMs))
+    if ('error' in found) return notRecorded(`hover scene=${target.scene}`, found)
+    deps.invalidateAxCache()
+    session.steps.push({ op: 'hover', target: { scene: target.scene }, ...recordedHold })
+    return finishStep(run, { before, done: `hover scene=${target.scene} at (${found.x}, ${found.y})` })
+  }
+  const picked = await pick(run, target)
+  if (!('nodeId' in picked)) return picked
+  await hoverNode(deps.conn, picked.nodeId, { at: target.at, holdMs })
+  deps.invalidateAxCache()
+  session.steps.push({ op: 'hover', target: picked.target, at: target.at, ...recordedHold })
+  return finishStep(run, { before: picked.before, done: `hover ${picked.label}${describeAt(target.at)}` })
 }
 
 /** The camera over a place: recorded, so a replay sees the scene the clicks after it were decided on. */

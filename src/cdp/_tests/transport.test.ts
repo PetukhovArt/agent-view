@@ -264,14 +264,16 @@ describe('clickByNodeId', () => {
     expect(pressIdx).toBeLessThan(releaseIdx)
   })
 
-  it('dispatches both mousePressed and mouseReleased events', async () => {
+  it('moves the pointer onto the point before pressing, so a handler reading the last move sees the click point', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42)
 
-    const mouseCalls = mockDispatchMouse.mock.calls.map((c) => c[0].type)
-    expect(mouseCalls).toContain('mousePressed')
-    expect(mouseCalls).toContain('mouseReleased')
-    expect(mockDispatchMouse).toHaveBeenCalledTimes(2)
+    const mouseCalls = mockDispatchMouse.mock.calls.map((c) => ({ type: c[0].type, x: c[0].x, y: c[0].y }))
+    expect(mouseCalls).toEqual([
+      { type: 'mouseMoved', x: 20, y: 30 },
+      { type: 'mousePressed', x: 20, y: 30 },
+      { type: 'mouseReleased', x: 20, y: 30 },
+    ])
   })
 
   it('calculates center coordinates from box model content array', async () => {
@@ -331,6 +333,7 @@ describe('clickByNodeId', () => {
 
     const mouseEvents = mockDispatchMouse.mock.calls.map((c) => ({ type: c[0].type, clickCount: c[0].clickCount }))
     expect(mouseEvents).toEqual([
+      { type: 'mouseMoved', clickCount: undefined },
       { type: 'mousePressed', clickCount: 1 },
       { type: 'mouseReleased', clickCount: 1 },
       { type: 'mousePressed', clickCount: 2 },
@@ -342,20 +345,53 @@ describe('clickByNodeId', () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickByNodeId(42, { modifiers: ['ctrl', 'shift'] })
 
-    const mouseEvents = mockDispatchMouse.mock.calls.map((c) => ({ type: c[0].type, modifiers: c[0].modifiers }))
+    const mouseEvents = mockDispatchMouse.mock.calls
+      .filter((c) => c[0].type !== 'mouseMoved')
+      .map((c) => ({ type: c[0].type, modifiers: c[0].modifiers }))
     expect(mouseEvents).toEqual([
       { type: 'mousePressed', modifiers: 10 },
       { type: 'mouseReleased', modifiers: 10 },
     ])
   })
 
-  it('clickAtPosition with clicks: 2 also produces 4 events', async () => {
+  it('clickAtPosition with clicks: 2 moves once, then presses twice, all at the point', async () => {
     const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
     await conn.clickAtPosition(50, 60, { clicks: 2 })
 
-    expect(mockDispatchMouse).toHaveBeenCalledTimes(4)
+    expect(mockDispatchMouse).toHaveBeenCalledTimes(5)
     const allAtSamePos = mockDispatchMouse.mock.calls.every((c) => c[0].x === 50 && c[0].y === 60)
     expect(allAtSamePos).toBe(true)
+  })
+})
+
+describe('hoverAtPosition', () => {
+  beforeEach(() => {
+    mockDispatchMouse.mockClear()
+  })
+
+  const moves = () => mockDispatchMouse.mock.calls.map((c) => ({ type: c[0].type, x: c[0].x, y: c[0].y }))
+
+  it('comes in through a series of moves from off the point, also when the pointer already rests on it (else no mouseenter)', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    for (let pass = 0; pass < 2; pass++) {
+      mockDispatchMouse.mockClear()
+      await conn.hoverAtPosition(100, 100, 0)
+
+      const sent = moves()
+      expect(sent.every((m) => m.type === 'mouseMoved')).toBe(true)
+      expect(sent.length).toBeGreaterThan(5)
+      expect(sent[0]).not.toEqual(sent[sent.length - 1])
+      expect(sent[sent.length - 1]).toEqual({ type: 'mouseMoved', x: 100, y: 100 })
+    }
+  })
+
+  it('starts from where the last click left the pointer', async () => {
+    const conn = await connectToPage(9222, pageTarget, new AxTreeCache())
+    await conn.clickAtPosition(10, 20)
+    mockDispatchMouse.mockClear()
+    await conn.hoverAtPosition(100, 100, 0)
+
+    expect(moves()[0]).toEqual({ type: 'mouseMoved', x: 10, y: 20 })
   })
 })
 

@@ -51,11 +51,15 @@ export type RecordedStep =
   | { op: 'goto'; place: SceneGoto; height?: string }
   /** `keys` as typed (`ctrl+z`, `ArrowDown Enter`); `target`: the node they are aimed at (`at` a point of it), else whatever has focus. */
   | { op: 'key'; keys: string; target?: NodeTarget; at?: Point }
+  /** `holdMs` absent: DEFAULT_HOVER_HOLD_MS. */
+  | HoverStep
+
+export type HoverStep = { op: 'hover'; target: Target; at?: Point; holdMs?: number }
 
 export type SceneClickStep = { op: ClickOp; target: SceneTarget; modifiers?: Modifier[] }
 
 export const isSceneClick = (step: RecordedStep): step is SceneClickStep =>
-  'target' in step && step.target !== undefined && 'scene' in step.target
+  isClickOp(step.op) && 'target' in step && step.target !== undefined && 'scene' in step.target
 
 /** Exactly one is set; `expr` is a JS expression in the page. */
 export type UntilArgs = { testid?: string; selector?: string; expr?: string }
@@ -422,6 +426,12 @@ export async function clickNode(
   if (!at) return conn.clickByNodeId(nodeId, opts)
   const { x, y } = pointIn(await conn.getBoxRect(nodeId), at)
   await conn.clickAtPosition(x, y, opts)
+}
+
+export async function hoverNode(conn: PageSession, nodeId: number, { at, holdMs }: { at?: Point; holdMs: number }): Promise<void> {
+  if (!at) return conn.hoverByNodeId(nodeId, holdMs)
+  const { x, y } = pointIn(await conn.getBoxRect(nodeId), at)
+  await conn.hoverAtPosition(x, y, holdMs)
 }
 
 /**

@@ -148,7 +148,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 |---------------|-----------------------------------------------------------------------------------------|
 | `dom`         | Accessibility tree with `[ref=N]` handles and the project's test ids (`[testid=…]`). Flags: `--filter`, `--compact`, `--count`, `--max-lines`, `--diff`. |
 | `screenshot`  | PNG, scaled with `--scale`, or `--crop <element>` for one element only. Cuts vision tokens. |
-| `click` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native; `drag` does HTML5 DnD through `Input.dragIntercepted` and pointer DnD through mouse events. `click` / `fill` / `wait` / `screenshot` also address elements by `--testid` or `--selector`. |
+| `click` / `hover` / `fill` / `drag` | Real CDP input events. Works with Vue/React/native; `drag` does HTML5 DnD through `Input.dragIntercepted` and pointer DnD through mouse events; `hover` brings the pointer in and rests it (tooltips, hover previews). `click` / `hover` / `fill` / `wait` / `screenshot` also address elements by `--testid` or `--selector`. |
 | `eval`        | Run JS in the page's main world. Read store/state directly instead of scraping DOM.     |
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
@@ -389,6 +389,18 @@ agent-view click 5                  # By ref from dom output
 agent-view click --pos 100,200      # By coordinates (for canvas)
 agent-view click 5 --double         # Double-click (fires dblclick handlers)
 agent-view click 5 --right          # Right-click (fires contextmenu)
+```
+
+The pointer moves onto the point before the press, as a user's does, so a handler that reads the last pointer move (a map's draw tool) sees the click's point.
+
+### `hover`
+
+Moves the pointer onto an element or a scene object as a user does, in a series of `mouseMoved` from where it last was, then rests it there: `mouseenter` / `mouseover` / `pointermove` fire, and a tooltip or a hover preview opening after a delay has time to show. Takes the same targets as `click`.
+
+```bash
+agent-view hover --testid save-btn                 # rests 1 s (default)
+agent-view hover --scene "Tower 3" --hold-ms 1500  # a scene object, where it is drawn now
+agent-view hover --pos 5,5 --hold-ms 0             # move the pointer away
 ```
 
 ### `fill`

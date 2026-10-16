@@ -86,19 +86,34 @@ export const describePlace = (place: SceneGoto): string => {
   return place.height === undefined ? place.scene : `${place.scene} --height ${place.height}`
 }
 
-/** Clicks the scene object whose id, name or label is `query` at its page point now, if it takes a click there. */
+/** The page point now of the scene object whose id, name or label is `query`, if a pointer there reaches it. */
+async function locateSceneObject(conn: PageSession, engine: WebGLEngine | undefined, query: string): Promise<Point | SceneMiss> {
+  const adapter = placeAdapter(engine)
+  if ('error' in adapter) return adapter
+  const found = await conn.evaluate(adapter.locateScript(query), { awaitPromise: true })
+  if (isSceneMiss(found)) return found
+  return isPoint(found) ? found : unexpected(found)
+}
+
 export async function clickSceneObject(
   conn: PageSession,
   engine: WebGLEngine | undefined,
   query: string,
   opts?: ClickOpts,
 ): Promise<Point | SceneMiss> {
-  const adapter = placeAdapter(engine)
-  if ('error' in adapter) return adapter
-  const found = await conn.evaluate(adapter.locateScript(query), { awaitPromise: true })
-  if (isSceneMiss(found)) return found
-  if (!isPoint(found)) return unexpected(found)
-  await conn.clickAtPosition(found.x, found.y, opts)
+  const found = await locateSceneObject(conn, engine, query)
+  if (!('error' in found)) await conn.clickAtPosition(found.x, found.y, opts)
+  return found
+}
+
+export async function hoverSceneObject(
+  conn: PageSession,
+  engine: WebGLEngine | undefined,
+  query: string,
+  holdMs: number,
+): Promise<Point | SceneMiss> {
+  const found = await locateSceneObject(conn, engine, query)
+  if (!('error' in found)) await conn.hoverAtPosition(found.x, found.y, holdMs)
   return found
 }
 

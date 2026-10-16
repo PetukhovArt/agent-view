@@ -11,7 +11,7 @@ listing call — always expand from the most recent one.
 
 - [Discovery & launch](#discovery--launch) — `launch`, `discover`, `stop`
 - [DOM inspection](#dom-inspection) — `dom`
-- [Interaction](#interaction) — `click`, `fill`, `key`, `drag`
+- [Interaction](#interaction) — `click`, `hover`, `fill`, `key`, `drag`
 - [Modals & file pickers](#modals--file-pickers-dialog-upload) — `dialog`, `upload`
 - [Waiting](#waiting-wait) — `wait`
 - [Step protocol](#step-protocol-act) — `act`
@@ -73,7 +73,10 @@ agent-view click <ref> --right          # Right-click (fires contextmenu); works
 agent-view click <ref> --modifiers ctrl # Keys held through the click: alt|ctrl|meta|shift, comma-separated (ctrl = multi-select)
 agent-view click --testid save-btn      # By test id (see "Test ids" above)
 agent-view click --selector "tr:nth-child(3) button"  # By CSS selector
-agent-view click --scene "Tower 3"      # cesiumjs: a scene object by id, name or label, where it is drawn now; --right / --double too
+agent-view click --scene "Tower 3"      # cesiumjs, app-hook: a scene object by id, name or label, where it is drawn now; --right / --double too
+agent-view hover --testid save-btn      # Pointer onto it as a user's, rested 1 s: tooltips, hover previews, highlights
+agent-view hover --scene "Tower 3" --hold-ms 1500   # Same targets as click (ref, --filter, --selector, --pos, --scene); --hold-ms 0..10000
+agent-view hover --pos 5,5 --hold-ms 0  # Move the pointer off whatever it rests on (a tooltip closes)
 agent-view fill <ref> "text"            # Type into input field
 agent-view fill --testid email "a@b.c"  # A test id on a wrapper resolves to the input/textarea inside
 agent-view key ctrl+z                   # Press keys on the focused element: hotkeys, Escape, Enter, arrows
@@ -116,6 +119,16 @@ editor's built-in copy.
 With `--modifiers` the output ends in `holding ctrl+shift` (`Clicked ref 3 holding ctrl`); an unknown
 key exits 1 with `--modifiers x — comma-separated alt|ctrl|meta|shift`.
 
+The pointer moves onto the point before every press of `click` and the act click ops, as a user's does,
+so a handler that reads the last move (a map's draw tool) sees the click's point. `hover` brings the
+pointer in as a hand does: ten moves a frame apart from where the last `click`, `hover`, `drag` or aimed
+`key` left it — from 40 px up-left of the point when unknown (a new server) or already on it, so
+`mouseenter` fires again — then rests it `--hold-ms` (default 1000) before answering: `Hovered testid
+"save-btn", held 1000ms`, `Hovered scene "Tower 3" at (640, 410), held 1500ms`. The pointer stays there
+after the command; the next `hover` elsewhere (or `hover --pos` on an empty spot) moves it off, and a
+tooltip opened by the last one may cover what you read next. A bad hold exits 1 with `--hold-ms x —
+whole milliseconds, 0 to 10000`; the target errors are those of `click`.
+
 Every read of an element's box (a click or drag on an element, not `--pos`; a `screenshot` crop; the
 `act` cover check) waits until two reads two animation frames apart agree, so a toast sliding in is
 hit where it comes to rest, not missed on its first frame. An element still moving after 1 s (a looping
@@ -129,7 +142,7 @@ testid "x" is visible` when every match is hidden. Pass exactly one of `<ref>`, 
 `--testid`, `--selector`, `--pos`, `--scene`. `fill` exits 1 with `No input or textarea at or inside the
 element` when the element holds no field.
 
-`--scene <object>` (engine `cesiumjs`) matches the entity id, name or label text exactly, and clicks
+`--scene <object>` (engines `cesiumjs`, `app-hook`; `hover --scene` too) matches the entity id, name or label text exactly, and clicks
 its point on the canvas at the time of the call, so a pan, zoom or resize in between does not
 matter: `Clicked scene "Tower 3" at (640, 410)`. Exit 1 with ``No scene object "x". Run
 `agent-view scene` ``, `2 scene objects "x": <id>, <id> — address one by id; …` (an id `scene` shows
@@ -255,6 +268,8 @@ agent-view act rightclick 3@10,5        # a row, at a point of it; without @ —
 agent-view act click "scene=Tower 3"    # cesiumjs: a scene object by id, name or label, as click --scene; the step and replay wait for it up to 10 s (a camera still flying)
 agent-view act goto "Tower 3" --height 2000   # cesiumjs: a step moving the camera, as scene --goto (lon,lat[,height] too: act goto -70.5,-33.25); --param HEIGHT=2000 saves the height as ${HEIGHT}
 agent-view act click 4 --modifiers ctrl # keys held: alt|ctrl|meta|shift, comma-separated; recorded and replayed (ctrl = add to a selection)
+agent-view act hover 3                  # pointer onto row 3 and rested 1 s, as `hover` (a tooltip); targets of act click: testid=, css=, @x,y, scene=
+agent-view act hover "scene=Tower 3" --hold-ms 1500   # a hover preview opening after a delay; a hold other than 1000 is saved with the step
 agent-view act type 1 "admin"           # fill; a native slider row takes a number: act type 53 0.5
 agent-view act select 4 "Monthly"       # native <select> only
 agent-view act scroll down              # wheel ~0.8 viewport at its centre; also `up`
@@ -385,6 +400,7 @@ First line of an op's output:
 | `✓ drag css=#cv @10,10 → css=#cv @200,150 · 200ms` | point to point |
 | `✓ scroll down testid=properties-panel · 120ms` | wheel over that element |
 | `✓ key ctrl+d → testid=editor-stage · 210ms` | keys pressed; `→` names where they were aimed |
+| `✓ hover testid=gis-btn · 450ms` | pointer brought in and rested its hold; the time is the settle after it (`hover scene=x at (640, 410)` for a scene object) |
 | `✓ wait expression "window.app.store.loaded" · 400ms` | `act wait --expr` held; recorded as a step |
 | `DONE: until testid "workspace-root" · 3 steps · 4.1s` | until condition visible; nothing follows |
 | `BLOCKED: [3] button "Sign in" is gone` | row no longer on screen, no unique match; fresh table follows, nothing was done |
@@ -396,7 +412,7 @@ First line of an op's output:
 - `` run `agent-view act start` first ``, `act start --until-testid <id> | --until-selector <css> | --until-expr <js> — exactly one`
 - `wait expression "…" not true after 10s — not recorded` (`act wait --expr`; also `still pending`, `threw <error>`)
 - `click scene=Tower 3 — Scene object "Tower 3" is covered or off screen after 10s — not recorded` (a scene
-  object missing or covered for 10 s; also `goto Tower 3 --height 2000 — …`); with no engine or an adapter that
+  object missing or covered for 10 s; also `hover scene=…`, `goto Tower 3 --height 2000 — …`); with no engine or an adapter that
   cannot locate, the error alone, at once
 - `--height <metres>: "x" is not a number`, `height given twice: in 10.5,45.25,5000 and as --height 2000` (`act goto`)
 - `` this act run is DONE — `agent-view act start` for a new one `` (any step after DONE; `table` / `wait` still work)
@@ -411,7 +427,8 @@ First line of an op's output:
   a bad chord's own line, as for `key`),
   `act scroll <up|down> [n | testid=<id> | css=<selector>]`,
   `` act drag <n | testid=<id> | css=<selector>>[@x,y] [to[@x,y]] [edge] [--html5] — edge is one of left|right|top|bottom|center ``,
-  `act click <n | testid=<id> | css=<selector>>[@x,y]`, `--modifiers x — comma-separated alt|ctrl|meta|shift`
+  `act click <n | testid=<id> | css=<selector>>[@x,y]`, `--modifiers x — comma-separated alt|ctrl|meta|shift`,
+  `act hover <n | testid=<id> | css=<selector>>[@x,y] | scene=<object> [--hold-ms <ms>]`, `--hold-ms x — whole milliseconds, 0 to 10000`
 - `No element matches testid "x"` / `None of 3 element(s) matching selector "…" is visible` (a `testid=` / `css=` target)
 - `act save <name> --in <section>: the area of its done condition …` (no or bad `--in`; `act start --save` checks it
   up front), `"x" already lies in tree — save it into --in tree, or move or delete <path>`,
@@ -425,6 +442,9 @@ screen, enabled and uncovered, then acts (a `testid=` / `css=` target: on screen
 `@x,y` point, on screen only); a control found but not yet drawn (a virtual-list row, a list
 re-rendered under it) is found again and acted on within the same 10 s; a window reload mid-run is
 ridden over. A `key` step aimed at a target waits for it the same way; one without presses at once.
+A `hover` step waits as a click does, on screen and uncovered, except that a disabled control is
+hovered too (its tooltip says why it is disabled); a `scene=` hover waits as a scene click, then rests
+the step's hold.
 A `wait --expr` step gets 10 s. The until then gets
 15 s, or the script's `--timeout`. The `after` chain runs first, checked nearest-first (once, no wait):
 the nearest prerequisite whose own until already holds is skipped together with every one before it,

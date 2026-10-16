@@ -1,22 +1,26 @@
 import { sendCommand } from '../client.js'
 import type { AgentViewConfig } from '../../config/types.js'
 
-type ClickOptions = {
+export type TargetOptions = {
   pos?: string
   filter?: string
   testid?: string
   selector?: string
   window?: string
-  double?: boolean
-  right?: boolean
-  modifiers?: string
   scene?: string
 }
 
-export async function runClick(config: AgentViewConfig, refArg: string | undefined, options: ClickOptions): Promise<void> {
+type ClickOptions = TargetOptions & {
+  double?: boolean
+  right?: boolean
+  modifiers?: string
+}
+
+/** The request args of the one target `command` was given; exits on none, several or a malformed one. */
+export function targetArgs(command: string, config: AgentViewConfig, refArg: string | undefined, options: TargetOptions): Record<string, unknown> {
   const ways = [refArg, options.pos, options.filter, options.testid, options.selector, options.scene].filter(f => f !== undefined)
   if (ways.length !== 1) {
-    console.error('Usage: agent-view click <ref> | --filter <text> | --testid <id> | --selector <css> | --pos <x,y> | --scene <object> — exactly one')
+    console.error(`Usage: agent-view ${command} <ref> | --filter <text> | --testid <id> | --selector <css> | --pos <x,y> | --scene <object> — exactly one`)
     process.exit(1)
   }
 
@@ -46,12 +50,12 @@ export async function runClick(config: AgentViewConfig, refArg: string | undefin
   }
 
   if (options.window) args.window = options.window
-  if (options.double) args.double = true
-  if (options.right) args.right = true
-  if (options.modifiers) args.modifiers = options.modifiers
+  return args
+}
 
+export async function sendPointer(config: AgentViewConfig, command: string, args: Record<string, unknown>): Promise<void> {
   const response = await sendCommand({
-    command: 'click',
+    command,
     port: config.port,
     runtime: config.runtime,
     engine: config.webgl?.engine,
@@ -64,4 +68,12 @@ export async function runClick(config: AgentViewConfig, refArg: string | undefin
     console.error(response.error)
     process.exit(1)
   }
+}
+
+export async function runClick(config: AgentViewConfig, refArg: string | undefined, options: ClickOptions): Promise<void> {
+  const args = targetArgs('click', config, refArg, options)
+  if (options.double) args.double = true
+  if (options.right) args.right = true
+  if (options.modifiers) args.modifiers = options.modifiers
+  await sendPointer(config, 'click', args)
 }

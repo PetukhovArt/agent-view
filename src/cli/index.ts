@@ -16,6 +16,8 @@ import { runDiscover } from './commands/discover.js'
 import { runLaunch } from './commands/launch.js'
 import { runDom } from './commands/dom.js'
 import { runClick } from './commands/click.js'
+import { runHover } from './commands/hover.js'
+import { DEFAULT_HOVER_HOLD_MS, MAX_HOVER_HOLD_MS } from '../cdp/types.js'
 import { runDrag } from './commands/drag.js'
 import { runFill } from './commands/fill.js'
 import { runKey } from './commands/key.js'
@@ -102,6 +104,23 @@ program
   .action(async (ref, options) => {
     const config = requireConfig()
     await runClick(config, ref, options)
+  })
+
+const HOLD_MS_FLAG = '--hold-ms <ms>'
+const HOLD_MS_HELP = `How long the pointer rests on the target, for a tooltip or preview opening after a delay: 0 to ${MAX_HOVER_HOLD_MS} (default ${DEFAULT_HOVER_HOLD_MS})`
+
+program
+  .command('hover [ref]')
+  .description('Move the pointer onto a DOM element or a scene object as a user does (a series of moves), then rest it there: tooltips, hover previews, highlights')
+  .option('-f, --filter <text>', 'Find element by text and hover it')
+  .option('--testid <id>', 'Find element by test id (see testIdAttribute)')
+  .option('--selector <css>', 'Find element by CSS selector')
+  .option('-p, --pos <x,y>', 'Hover at coordinates (for canvas)')
+  .option('--scene <object>', 'Hover a scene object by id, name or label, where it is drawn now (cesiumjs, app-hook engines)')
+  .option(HOLD_MS_FLAG, HOLD_MS_HELP)
+  .option('-w, --window <id>', 'Target window ID or name')
+  .action(async (ref, options) => {
+    await runHover(requireConfig(), ref, options)
   })
 
 program
@@ -483,6 +502,10 @@ act.command('dblclick <target>').description(`Double-click (fires dblclick) ${TA
 act.command('rightclick <target>').description(`Right-click (fires contextmenu) ${TARGET_HELP}`)
   .option(MODIFIERS_FLAG, `${MODIFIERS_HELP}; recorded and replayed`)
   .action(async (target: string, opts: { modifiers?: string }) => { await runAct(requireConfig(), { op: 'rightclick', target, modifiers: opts.modifiers }) })
+
+act.command('hover <target>').description(`Move the pointer onto ${TARGET_HELP}, then rest it there (a tooltip, a hover preview); recorded and replayed`)
+  .option(HOLD_MS_FLAG, HOLD_MS_HELP)
+  .action(async (target: string, opts: { holdMs?: string }) => { await runAct(requireConfig(), { op: 'hover', target, holdMs: opts.holdMs }) })
 
 act.command('type <n> <text>').description('Fill row n with text')
   .action(async (n: string, text: string) => { await runAct(requireConfig(), { op: 'type', n: Number(n), text }) })

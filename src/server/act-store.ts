@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { MODIFIERS, type Modifier } from '../cdp/types.js'
+import { DEFAULT_HOVER_HOLD_MS, MAX_HOVER_HOLD_MS, MODIFIERS, type Modifier } from '../cdp/types.js'
 import type { ServerResponse } from '../types.js'
 import {
   USE_CASE_SUFFIX,
@@ -51,7 +51,14 @@ export function modifiersOf(args: Record<string, unknown>): Modifier[] | { error
     : { error: `--modifiers ${raw} — comma-separated ${MODIFIERS.join('|')}` }
 }
 
-const SECTION_HINT = '--in <section>: the area of its done condition, the screen it sits on (auth, libraries, editor/canvas)'
+export function holdMsOf(args: Record<string, unknown>): number | { error: string } {
+  const raw = str(args, 'holdMs')
+  if (raw === undefined) return DEFAULT_HOVER_HOLD_MS
+  const ms = Number(raw)
+  return /^\d+$/.test(raw.trim()) && ms <= MAX_HOVER_HOLD_MS ? ms : { error: `--hold-ms ${raw} — whole milliseconds, 0 to ${MAX_HOVER_HOLD_MS}` }
+}
+
+const SECTION_HINT ='--in <section>: the area of its done condition, the screen it sits on (auth, libraries, editor/canvas)'
 
 /** `act list [section]`: a section lists the ones below it too (`editor` → `editor/canvas`). */
 export async function listSaved(args: Record<string, unknown>): Promise<ServerResponse> {

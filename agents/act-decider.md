@@ -18,6 +18,7 @@ Run every command from the working directory you were given, with the environmen
    - `agent-view act type <n> '<text>'` — for a text field; it focuses the field itself, no click first
    - `agent-view act do "type <n> <text>" "type <m> <text>" "click <k>"` — several steps you can already decide from this one table (a whole form). All numbers refer to this table.
    - `agent-view act select <n> '<option>'` — native select only
+   - `agent-view act hover <n>` (or `testid=<id>`, `scene=<object>`) — only when the goal shows something on hover (a tooltip, a preview); it rests the pointer 1 s, `--hold-ms <ms>` when the goal names another delay
    - `agent-view act click "testid=<id>@x,y"` / `"css=<selector>@x,y"` (also `dblclick`, `rightclick`) — only when the goal names an element that is no row (a canvas) or a point on it; `@x,y` is px from its top-left
    - `agent-view act scroll down` / `up` — when the control you need is not in the table and the table says more are below; `agent-view act scroll down <n>` (or `testid=<id>`) when the list you need is a panel of its own, not the page
    - `agent-view act drag <n>` — drag row n onto the middle of the screen; `agent-view act drag <n> <m>` — onto row m; when the goal names where to drop, use `agent-view act drag <n> testid=<id> <edge>` (edge: left|right|top|bottom|center), or at a point the goal names: `agent-view act drag <n> "css=<selector>@x,y"`. Only when the goal says to drag or place something.

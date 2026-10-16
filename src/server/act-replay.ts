@@ -1,9 +1,9 @@
-import type { PageSession, Point } from '../cdp/types.js'
+import { DEFAULT_HOVER_HOLD_MS, type PageSession, type Point } from '../cdp/types.js'
 import { isDeadSocket, isNotDrawn } from '../cdp/transport.js'
 import { parseKeys } from '../cdp/keys.js'
 import type { ServerResponse, WebGLEngine } from '../types.js'
 import { NOTICE_ROLES, describeControl, extractControls, type Control } from '../inspectors/controls/index.js'
-import { clickSceneObject, describePlace, moveSceneCamera, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
+import { clickSceneObject, describePlace, hoverSceneObject, moveSceneCamera, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
 import { findByLocator, testIdAttributes } from './locator.js'
 import {
   CLICKS,
@@ -18,6 +18,7 @@ import {
   exprCondition,
   fillParams,
   findScript,
+  hoverNode,
   isClickOp,
   isRowTarget,
   isSceneClick,
@@ -183,7 +184,8 @@ async function planRun(store: string, name: string, params: Record<string, strin
 export async function replayTimeMs(store: string, name: string, params: Record<string, string> = {}): Promise<number> {
   const plan = await planRun(store, name, params)
   if ('ok' in plan) return 0
-  return [...plan.chain, plan.main].reduce((sum, link) => sum + link.script.steps.length * STEP_TIMEOUT_MS + link.untilMs, 0)
+  const holdMs = (steps: RecordedStep[]) => steps.reduce((sum, s) => sum + (s.op === 'hover' ? s.holdMs ?? DEFAULT_HOVER_HOLD_MS : 0), 0)
+  return [...plan.chain, plan.main].reduce((sum, link) => sum + link.script.steps.length * STEP_TIMEOUT_MS + holdMs(link.script.steps) + link.untilMs, 0)
 }
 
 /**
@@ -313,7 +315,7 @@ export async function replay(
     }
   }
 
-  type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' | 'key' } | SceneClickStep>
+  type ActionStep = Exclude<RecordedStep, { op: 'scroll' | 'wait' | 'goto' | 'key' | 'hover' } | SceneClickStep>
   /** Acts on the found node: a verdict when the app cannot take the step, else undefined. */
   const actOn = async (step: ActionStep, nodeId: number, at: string, msLeft: number): Promise<ServerResponse | undefined> => {
     try {
@@ -381,6 +383,23 @@ export async function replay(
           if (failed) return failed
         } else {
           await press()
+        }
+        deps.invalidateAxCache()
+        continue
+      }
+      if (step.op === 'hover') {
+        const { target, at: point } = step
+        const holdMs = step.holdMs ?? DEFAULT_HOVER_HOLD_MS
+        const what = `${at} hover ${describeTarget(target)}${describeAt(point)}`
+        if ('scene' in target) {
+          const hovered = await untilAnswered(deps, c => hoverSceneObject(c, deps.engine, target.scene, holdMs))
+          if ('error' in hovered) return missed(what, hovered)
+        } else {
+          const failed = await onNode(target, { isEnabledRequired: false, isCoverChecked: !point, what }, async (nodeId) => {
+            await hoverNode(deps.conn, nodeId, { at: point, holdMs })
+            return undefined
+          })
+          if (failed) return failed
         }
         deps.invalidateAxCache()
         continue

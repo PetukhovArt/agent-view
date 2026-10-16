@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { isAppTarget } from '../adapters/target-filter.js'
 import { formatAccessibilityTree, countAccessibilityNodes, diffDomText } from '../inspectors/dom/index.js'
-import { getSceneGraph, getRawScene, diffScenes, clickSceneObject, moveSceneCamera, parseScenePlace, withHeight, type SceneNode } from '../inspectors/scene/index.js'
+import { getSceneGraph, getRawScene, diffScenes, clickSceneObject, hoverSceneObject, moveSceneCamera, parseScenePlace, withHeight, type SceneMiss, type SceneNode } from '../inspectors/scene/index.js'
 import { RefStore } from './ref-store.js'
 import { launch, isRunning, installCDPErrorGuard, PortConflictError } from './launcher.js'
 import { readConfig } from '../config/manager.js'
@@ -46,7 +46,7 @@ import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
 import { VERSION } from '../version.js'
 import { actTimeMs, runAct, type ActSession } from './act-session.js'
-import { deleteScript, listSaved, modifiersOf, saveUseCase } from './act-store.js'
+import { deleteScript, holdMsOf, listSaved, modifiersOf, saveUseCase } from './act-store.js'
 import {
   DEFAULT_TAIL_LINES,
   LogRecorder,
@@ -126,6 +126,15 @@ function argStrArray(args: Record<string, unknown>, key: string): string[] | und
   const v = args[key]
   if (!Array.isArray(v)) return undefined
   return v.filter((x): x is string => typeof x === 'string')
+}
+
+type PointerAction = {
+  command: 'click' | 'hover'
+  verb: string
+  suffix: string
+  atPosition: (conn: PageSession, x: number, y: number) => Promise<void>
+  onNode: (conn: PageSession, backendDOMNodeId: number) => Promise<void>
+  onScene: (conn: PageSession, query: string) => Promise<Point | SceneMiss>
 }
 
 const ARIA_ROLES = new Set([
@@ -248,6 +257,7 @@ export class AgentViewServer {
     launch: (req: ServerRequest) => this.handleLaunch(req),
     dom: (req: ServerRequest) => this.handleDom(req),
     click: (req: ServerRequest) => this.handleClick(req),
+    hover: (req: ServerRequest) => this.handleHover(req),
     drag: (req: ServerRequest) => this.handleDrag(req),
     fill: (req: ServerRequest) => this.handleFill(req),
     key: (req: ServerRequest) => this.handleKey(req),
@@ -743,10 +753,6 @@ export class AgentViewServer {
   }
 
   private async handleClick(req: ServerRequest): Promise<ServerResponse> {
-    const { targetId } = await this.resolveWindow(req)
-    const conn = await this.getPageSession(req, targetId)
-    const cacheKey = `${req.port}:${targetId}`
-
     const clicks = argBool(req.args, 'double') ? 2 : 1
     const right = argBool(req.args, 'right')
     const modifiers = modifiersOf(req.args)
@@ -757,58 +763,84 @@ export class AgentViewServer {
         : undefined
     const verb = right ? 'Right-clicked' : clicks > 1 ? 'Double-clicked' : 'Clicked'
     const held = modifiers ? ` holding ${modifiers.join('+')}` : ''
+    return this.handlePointer(req, {
+      command: 'click',
+      verb,
+      suffix: held,
+      atPosition: (conn, x, y) => conn.clickAtPosition(x, y, clickOpts),
+      onNode: (conn, nodeId) => conn.clickByNodeId(nodeId, clickOpts),
+      onScene: (conn, query) => clickSceneObject(conn, req.engine, query, clickOpts),
+    })
+  }
+
+  private async handleHover(req: ServerRequest): Promise<ServerResponse> {
+    const holdMs = holdMsOf(req.args)
+    if (typeof holdMs !== 'number') return { ok: false, error: holdMs.error }
+    return this.handlePointer(req, {
+      command: 'hover',
+      verb: 'Hovered',
+      suffix: `, held ${holdMs}ms`,
+      atPosition: (conn, x, y) => conn.hoverAtPosition(x, y, holdMs),
+      onNode: (conn, nodeId) => conn.hoverByNodeId(nodeId, holdMs),
+      onScene: (conn, query) => hoverSceneObject(conn, req.engine, query, holdMs),
+    })
+  }
+
+  private async handlePointer(req: ServerRequest, action: PointerAction): Promise<ServerResponse> {
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const cacheKey = `${req.port}:${targetId}`
+    const { verb, suffix } = action
+    const done = (what: string): ServerResponse => {
+      this.axTreeCache.invalidate(cacheKey)
+      return { ok: true, data: `${verb} ${what}${suffix}` }
+    }
 
     if (req.args.pos && typeof req.args.pos === 'object') {
       const pos = req.args.pos as Record<string, unknown>
       const x = typeof pos.x === 'number' ? pos.x : 0
       const y = typeof pos.y === 'number' ? pos.y : 0
-      await conn.clickAtPosition(x, y, clickOpts)
-      this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} at (${x}, ${y})${held}` }
+      await action.atPosition(conn, x, y)
+      return done(`at (${x}, ${y})`)
     }
 
     const sceneQuery = argStr(req.args, 'scene')
     if (sceneQuery !== undefined) {
-      const found = await clickSceneObject(conn, req.engine, sceneQuery, clickOpts)
+      const found = await action.onScene(conn, sceneQuery)
       if ('error' in found) return { ok: false, error: found.error }
-      this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} scene "${sceneQuery}" at (${found.x}, ${found.y})${held}` }
+      return done(`scene "${sceneQuery}" at (${found.x}, ${found.y})`)
     }
 
     const locator = locatorFromArgs(req.args)
     if (locator) {
       const found = await findByLocator(conn, locator)
       if ('error' in found) return { ok: false, error: found.error }
-      await conn.clickByNodeId(found.backendDOMNodeId, clickOpts)
-      this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} ${found.label}${held}` }
+      await action.onNode(conn, found.backendDOMNodeId)
+      return done(found.label)
     }
 
-    const clickFilter = argStr(req.args, 'filter')
-    if (clickFilter) {
-      const filter = clickFilter
+    const filter = argStr(req.args, 'filter')
+    if (filter) {
       const CLICK_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio'])
       const found = await this.findByFilter(conn, filter, req, targetId, CLICK_ROLES)
       if (!found) {
         return { ok: false, error: `No element found matching "${filter}"` }
       }
-      await conn.clickByNodeId(found.backendDOMNodeId, clickOpts)
-      this.axTreeCache.invalidate(cacheKey)
-      return { ok: true, data: `${verb} "${found.name}"${held}` }
+      await action.onNode(conn, found.backendDOMNodeId)
+      return done(`"${found.name}"`)
     }
 
     const ref = argNum(req.args, 'ref')
     if (ref === undefined) {
-      return { ok: false, error: 'click requires --ref, --filter, --testid, --selector, --pos, or --scene' }
+      return { ok: false, error: `${action.command} requires --ref, --filter, --testid, --selector, --pos, or --scene` }
     }
     const entry = this.refStore.get(ref)
     if (!entry) {
       return { ok: false, error: `Invalid ref: ${ref}. Run \`agent-view dom\` to get fresh refs.` }
     }
 
-    await conn.clickByNodeId(entry.backendDOMNodeId, clickOpts)
-    this.axTreeCache.invalidate(cacheKey)
-    return { ok: true, data: `${verb} ref ${ref}${held}` }
+    await action.onNode(conn, entry.backendDOMNodeId)
+    return done(`ref ${ref}`)
   }
 
   private async handleKey(req: ServerRequest): Promise<ServerResponse> {

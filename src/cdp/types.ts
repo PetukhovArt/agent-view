@@ -79,6 +79,9 @@ export type DragOpts = {
 
 export type DragMode = 'auto' | 'html5' | 'pointer'
 
+export const DEFAULT_HOVER_HOLD_MS = 1_000
+export const MAX_HOVER_HOLD_MS = 10_000
+
 /** CDP `Input.DragData`, as delivered by `Input.dragIntercepted`. */
 export type DragData = {
   items: Array<{ mimeType: string; data: string }>
@@ -301,6 +304,12 @@ export type PageSession = RuntimeSession & {
   captureScreenshot: (opts?: ScreenshotOpts) => Promise<ScreenshotResult>
   clickByNodeId: (backendDOMNodeId: number, opts?: ClickOpts) => Promise<void>
   clickAtPosition: (x: number, y: number, opts?: ClickOpts) => Promise<void>
+  /**
+   * The pointer brought onto the node's centre, or a point, as a user's: a series of `mouseMoved` from where it
+   * last was (from just off the point when that is unknown or the point itself), then held still `holdMs`.
+   */
+  hoverByNodeId: (backendDOMNodeId: number, holdMs: number) => Promise<void>
+  hoverAtPosition: (x: number, y: number, holdMs: number) => Promise<void>
   fillByNodeId: (backendDOMNodeId: number, value: string) => Promise<void>
   /** Resolve box-model center for an element. `scrollIntoView` defaults to true. */
   getBoxCenter: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean }) => Promise<Point>

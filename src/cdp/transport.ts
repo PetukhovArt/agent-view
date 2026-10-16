@@ -992,6 +992,10 @@ type DebuggerDomain = {
 const SCROLL_VIEWPORT_FRACTION = 0.8
 /** How long a wheel or a pointer move waits for its ack, which a window drawing no frames sends late or never. */
 const INPUT_ACK_MS = 1_000
+const HOVER_MOVES = 10
+/** A frame apart: Blink delivers mouse moves once per frame, so moves sent closer merge into one. */
+const HOVER_MOVE_GAP_MS = 16
+const HOVER_APPROACH_PX = 40
 
 /** Bounds the wait for the `scriptParsed` replay when an id is still missing. */
 const SCRIPT_PARSED_DEADLINE_MS = 1_000
@@ -1256,10 +1260,41 @@ export async function connectToPage(
     } catch { /* ignore refresh errors — next queryAXTree call will fall back */ }
   })
 
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+  let pointer: Point | undefined
+
+  /**
+   * A window drawing no frames (covered, minimised) acks a move only after ~5 s, yet the page gets it
+   * before the input sent after it: wait for the ack only briefly.
+   */
+  function movePointer(to: Point): Promise<void> {
+    pointer = to
+    const moved = Input.dispatchMouseEvent({ type: 'mouseMoved', x: to.x, y: to.y })
+    return withTimeout(moved, INPUT_ACK_MS, 'mouseMoved').then(() => undefined, (err: unknown) => {
+      if (!(err instanceof CDPTimeoutError)) throw err
+    })
+  }
+
+  async function dispatchHover(to: Point, holdMs: number): Promise<void> {
+    const isAway = pointer !== undefined && (pointer.x !== to.x || pointer.y !== to.y)
+    const from = isAway ? pointer! : { x: Math.max(0, to.x - HOVER_APPROACH_PX), y: Math.max(0, to.y - HOVER_APPROACH_PX) }
+    for (let i = 0; i < HOVER_MOVES; i++) {
+      const t = i / HOVER_MOVES
+      // Chromium delivers unawaited moves in order; a dead socket shows on the awaited last one.
+      movePointer({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }).catch(() => undefined)
+      await sleep(HOVER_MOVE_GAP_MS)
+    }
+    await movePointer(to)
+    await sleep(holdMs)
+  }
+
   async function dispatchClick(x: number, y: number, opts?: ClickOpts): Promise<void> {
     const clicks = Math.max(1, opts?.clicks ?? 1)
     const button = opts?.button ?? MouseButton.Left
     const modifiers = (opts?.modifiers ?? []).reduce((mask, key) => mask | MODIFIER_BITS[key], 0)
+    // Chromium delivers the press after the unawaited move.
+    movePointer({ x, y }).catch(() => undefined)
     if (clicks === 1) {
       const pressed = Input.dispatchMouseEvent({ type: 'mousePressed', x, y, button, clickCount: 1, modifiers })
       const released = Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: 1, modifiers })
@@ -1271,8 +1306,6 @@ export async function connectToPage(
       await Input.dispatchMouseEvent({ type: 'mouseReleased', x, y, button, clickCount: i, modifiers })
     }
   }
-
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
   async function dispatchDrag(from: Point, to: Point, opts: DragOpts | undefined): Promise<DragResult> {
     const steps = Math.max(0, opts?.steps ?? 10)
@@ -1325,6 +1358,7 @@ export async function connectToPage(
       if (mode === 'html5') throw new Error(DRAG_NOT_INTERCEPTED)
       return { path: 'pointer', warning: unsub ? DRAG_NOT_INTERCEPTED : undefined }
     } finally {
+      pointer = to
       unsub?.()
       if (unsub) await Input.setInterceptDrags({ enabled: false })
     }
@@ -1559,6 +1593,14 @@ export async function connectToPage(
       await dispatchClick(x, y, opts)
     },
 
+    async hoverByNodeId(backendNodeId: number, holdMs: number): Promise<void> {
+      await dispatchHover(await resolveBoxCenter(backendNodeId, true), holdMs)
+    },
+
+    async hoverAtPosition(x: number, y: number, holdMs: number): Promise<void> {
+      await dispatchHover({ x, y }, holdMs)
+    },
+
     async getBoxCenter(backendNodeId: number, opts?: { scrollIntoView?: boolean }): Promise<Point> {
       return resolveBoxCenter(backendNodeId, opts?.scrollIntoView ?? true)
     },
@@ -1725,11 +1767,7 @@ export async function connectToPage(
         const { at } = opts
         const box = at && await resolveBoxRect(opts.nodeId, true)
         const { x, y } = box ? { x: box.x + at.x, y: box.y + at.y } : await resolveBoxCenter(opts.nodeId, true)
-        // A window drawing no frames (covered, minimised) acks a move only after ~5 s, yet the page
-        // gets it before the keys sent after it: wait for the ack only briefly.
-        await withTimeout(Input.dispatchMouseEvent({ type: 'mouseMoved', x, y }), INPUT_ACK_MS, 'mouseMoved').catch((err: unknown) => {
-          if (!(err instanceof CDPTimeoutError)) throw err
-        })
+        await movePointer({ x, y })
         await withHandles(client, async (objectGroup) => {
           const { object } = await DOM.resolveNode({ backendNodeId: opts.nodeId, objectGroup })
           // What a mousedown focuses: the node or its nearest focusable ancestor; on none, focus leaves for the body.

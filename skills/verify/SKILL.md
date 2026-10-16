@@ -22,7 +22,7 @@ read it before your first call in a session.
 |--------------------------------------|----------------------------------------------------------------|
 | `launch` `discover` `stop` `targets` | start the app; list windows and worker targets                 |
 | `dom`                                | accessibility tree — filter, count, diff, depth cap            |
-| `click` `fill` `drag` `key`          | interaction by ref, text or coordinate; `click` `fill` also by test id or selector; `key` presses keys on the focused element, or one aimed at by test id or selector |
+| `click` `hover` `fill` `drag` `key`  | interaction by ref, text or coordinate; `click` `hover` `fill` also by test id or selector, `click` `hover` by scene object; `hover` rests the pointer for tooltips and hover previews; `key` presses keys on the focused element, or one aimed at by test id or selector |
 | `wait`                               | block until text, a test id or a selector appears; non-zero on timeout |
 | `act`                                | step protocol for a cheap driver: numbered control table, done check, replay |
 | `dialog` `upload`                    | JS modals and native file pickers                              |
