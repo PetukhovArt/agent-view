@@ -100,12 +100,12 @@ jobs:
         shell: bash
         run: |
           awk -v v="$VERSION" '
-            index($0, "## [" v "]") == 1 { f = 1; next }
-            f && index($0, "## [") == 1 { exit }
+            index($0, "## " v " ") == 1 { f = 1; next }
+            f && index($0, "## ") == 1 { exit }
             f
           ' CHANGELOG.md > RELEASE_NOTES.md
-          [ -s RELEASE_NOTES.md ] ||
-            { echo "::error::CHANGELOG.md has no '## [$VERSION]' section"; exit 1; }
+          grep -q '[^[:space:]]' RELEASE_NOTES.md ||
+            { echo "::error::CHANGELOG.md has no '## $VERSION (YYYY-MM-DD)' section"; exit 1; }
 
       - run: npm publish --access public
         env:

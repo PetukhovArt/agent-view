@@ -1,42 +1,34 @@
 # Changelog
 
-## [Unreleased]
+## Unreleased
 
-### Added
-- `"webgl": { "engine": "app-hook" }`: `scene`, `snap`, `click --scene`, `scene --goto` and the act `scene=` / `goto` steps on any engine (MapLibre, three.js, a 2D canvas) through a Scene Hook the app sets, `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)`. The contract is in the verify skill's command reference, Scene section. With no hook on the page `scene` prints `No scene: window.__AGENT_VIEW_SCENE__ is not on the page, …` and a scene step waits for it. See ADR 0009.
-- `key <keys>` and `act key <keys> [target]`: real key presses over CDP, any hotkey — chords of `alt|ctrl|meta|shift` and any DOM key name or one character (`ctrl+z`, `ctrl+shift+z`, `Escape`, `F5`, `MediaPlayPause`, `"ArrowDown ArrowDown Enter"`). The page gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own, and a printable key types into a focused field. With `--testid` / `--selector` (or an `act` target) the keys are aimed first: the pointer moves onto the element and focus goes to it, so a hotkey scoped to a panel reaches it; an `act` target takes `@x,y`, a point of it (an empty spot of a canvas). `act key` is recorded and replayed; replay waits for its target as for a click.
-- `hover` and `act hover <target>`: the pointer comes onto an element or a scene object as a user's does, in a series of `mouseMoved` from where it last was, then rests on it `--hold-ms` (default 1000, at most 10000), so `mouseenter` / `mouseover` / `pointermove` fire and a tooltip, a hover preview or a highlight opening after a delay shows. `hover` takes the targets of `click` (ref, `--filter`, `--testid`, `--selector`, `--pos`, `--scene`); `act hover` the targets of `act click` (row, `testid=`, `css=`, `@x,y`, `scene=`). `act hover` is recorded and replayed; replay waits for its target as for a click, but a disabled control is hovered too (its tooltip says why).
-- `act type <n> <number>` sets a native slider row (`input type=range`), recorded and replayed like a field. It used to refuse the row as `not a text field`.
+- Added `"webgl": { "engine": "app-hook" }`: `scene`, `snap`, `click --scene`, `scene --goto` and the act `scene=` / `goto` steps on any engine (MapLibre, three.js, a 2D canvas) through a Scene Hook the app sets, `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)`. The contract is in the verify skill's command reference, Scene section. With no hook on the page `scene` prints `No scene: window.__AGENT_VIEW_SCENE__ is not on the page, …` and a scene step waits for it. See ADR 0009.
+- Added `key <keys>` and `act key <keys> [target]`: real key presses over CDP, any hotkey — chords of `alt|ctrl|meta|shift` and any DOM key name or one character (`ctrl+z`, `ctrl+shift+z`, `Escape`, `F5`, `MediaPlayPause`, `"ArrowDown ArrowDown Enter"`). The page gets `key`, `code` and `keyCode` as a US keyboard sends them, the modifiers pressed as keys of their own, and a printable key types into a focused field. With `--testid` / `--selector` (or an `act` target) the keys are aimed first: the pointer moves onto the element and focus goes to it, so a hotkey scoped to a panel reaches it; an `act` target takes `@x,y`, a point of it (an empty spot of a canvas). `act key` is recorded and replayed; replay waits for its target as for a click.
+- Added `hover` and `act hover <target>`: the pointer comes onto an element or a scene object as a user's does, in a series of `mouseMoved` from where it last was, then rests on it `--hold-ms` (default 1000, at most 10000), so `mouseenter` / `mouseover` / `pointermove` fire and a tooltip, a hover preview or a highlight opening after a delay shows. `hover` takes the targets of `click` (ref, `--filter`, `--testid`, `--selector`, `--pos`, `--scene`); `act hover` the targets of `act click` (row, `testid=`, `css=`, `@x,y`, `scene=`). `act hover` is recorded and replayed; replay waits for its target as for a click, but a disabled control is hovered too (its tooltip says why).
+- Added `act type <n> <number>`, which sets a native slider row (`input type=range`), recorded and replayed like a field. It used to refuse the row as `not a text field`.
+- Added dedicated workers (`new Worker`): they show up in `targets` and answer `eval --target` and `heap take --target`: they are reached through their page. Electron leaves them out of the DevTools target list, so they were missing. A worker the list does carry is reached through its page too, not over a connection of its own, which timed out in one app (`CDP session setup for worker timed out`). `console`, `logs` and `network` still do not see them.
+- Changed a replay `FAIL` or `STALE` to be followed by `on screen: …` with the notices the page shows (`alert` / `status` roles: a snackbar, an error banner), so a refusal the app reported is read instead of waited out in silence.
+- Changed a command without `-w` to stay in the window the previous command on that CDP port used, while it is open. A popup the app opened used to take every later command.
+- Changed `eval` of an expression that returns a Promise, without `--await`, to exit 1 with `The result is a Promise, still running in the page. Add --await to get its value.` It used to print `{}`, as if the call had done nothing.
+- Changed an `eval --await` that hits the 45 s deadline to say the Promise still runs in the page and that what it patched stays patched until it settles. A probe re-run after the timeout used to wrap its own still-installed patch.
+- Changed the verify skill's memory-leak method to repeat the action with `click` / `key` / `fill` / `drag` or `act replay`, as the user would. It used to list `eval` among the ways to drive it; `eval` now only reads state between repetitions.
+- Changed where a step or use case is saved: into the section of its done condition's area, the screen it sits on, not the component (`billing__invoices__…` → `billing`, a widget on the workspace → `workspace`), and not the areas it passes through. `act-decider` derives the section from the done condition and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
+- Fixed `click`, the act click ops and their replay pressing without moving the pointer first: they now move the pointer onto the point before pressing, as a user's hand does. The press used to arrive with no move before it, so a handler that reads the last pointer move (a map's draw tool placing a point) did not see the click at its point; a 2 px `drag` stood in for it.
+- Fixed `act replay` timing out midway on a use case whose scripts wait longer than the 45 s request deadline in total no longer times out midway: the server's deadline grows by each replayed script's step and `until` timeouts, and the CLI waits for the server to answer.
+- Windows: Fixed `launch` with an npm / pnpm / yarn command (`"launch": "npm run dev:cdp"`) failing with `spawn EINVAL`: Node refuses to spawn a `.cmd` directly since its CVE-2024-27980 fix, and launch failed with `spawn EINVAL`. A `.cmd` / `.bat` now runs through cmd.exe, each argument quoted.
+- Fixed `act replay` clicking through a dialog left open over a `testid=` / `css=` target: it waits for the target to be uncovered, as for a table row, and ends `FAIL: … still covered by <what>`. It used to click the dialog and report a misleading `STALE` on the next step. A step at a `@x,y` point is not hit-tested, nor a drag's drop target: the panel a drag starts from often lies over it and closes once the drag starts.
+- Fixed `click`, `wait`, `fill`, `upload`, `listeners`, `screenshot` crops and the `act` steps keeping the element they found alive: each releases its DevTools handles when it ends. A heap diff after closing a widget used to show it as leaked (`DevTools console` among its retainers), WebGL context and all.
+- Fixed the CLI running its commands on a leftover server of another agent-view version, which served them with its own code (an older one dropped `--until-expr` and failed every check). The server refuses a request from another version; the CLI stops it, starts its own and resends, printing `agent-view: server <old> replaced by <new>`. A server from 0.26 or older does not check: run `agent-view stop` once after upgrading.
+- Fixed `click`/`wait`/`fill --filter` hanging on a minimised or covered window or a background tab until the 45 s deadline: they search the full accessibility tree, which needs no frame. `screenshot` fails at once with `Window is hidden …` and the launch flags that keep the window drawn (README, "Commands"); agent-view never brings the window to the front.
+- Fixed `heap take` on large heaps: it reads the snapshot chunk by chunk as DevTools sends it, instead of joining it into one string first: a heap of ~700 MB and up failed with `Invalid string length`. The renderer's own memory while V8 writes the snapshot is unchanged.
 
-### Fixed
-- `click`, the act click ops and their replay move the pointer onto the point before pressing, as a user's hand does. The press used to arrive with no move before it, so a handler that reads the last pointer move (a map's draw tool placing a point) did not see the click at its point; a 2 px `drag` stood in for it.
-- `act replay` of a use case whose scripts wait longer than the 45 s request deadline in total no longer times out midway: the server's deadline grows by each replayed script's step and `until` timeouts, and the CLI waits for the server to answer.
-- `launch` with an npm / pnpm / yarn command (`"launch": "npm run dev:cdp"`) works on Windows again: Node refuses to spawn a `.cmd` directly since its CVE-2024-27980 fix, and launch failed with `spawn EINVAL`. A `.cmd` / `.bat` now runs through cmd.exe, each argument quoted.
-- `act replay` no longer clicks through a dialog left open over a `testid=` / `css=` target: it waits for the target to be uncovered, as for a table row, and ends `FAIL: … still covered by <what>`. It used to click the dialog and report a misleading `STALE` on the next step. A step at a `@x,y` point is not hit-tested, nor a drag's drop target: the panel a drag starts from often lies over it and closes once the drag starts.
-- A replay `FAIL` or `STALE` is followed by `on screen: …` with the notices the page shows (`alert` / `status` roles: a snackbar, an error banner), so a refusal the app reported is read instead of waited out in silence.
-- `click`, `wait`, `fill`, `upload`, `listeners`, `screenshot` crops and the `act` steps no longer keep the element they found alive: each releases its DevTools handles when it ends. A heap diff after closing a widget used to show it as leaked (`DevTools console` among its retainers), WebGL context and all.
-- The CLI no longer runs its commands on a leftover server of another agent-view version, which served them with its own code (an older one dropped `--until-expr` and failed every check). The server refuses a request from another version; the CLI stops it, starts its own and resends, printing `agent-view: server <old> replaced by <new>`. A server from 0.26 or older does not check: run `agent-view stop` once after upgrading.
-- On a minimised or covered window or a background tab, `click`/`wait`/`fill --filter` no longer hang until the 45 s deadline: they search the full accessibility tree, which needs no frame. `screenshot` fails at once with `Window is hidden …` and the launch flags that keep the window drawn (README, "Commands"); agent-view never brings the window to the front.
-- A command without `-w` stays in the window the previous command on that CDP port used, while it is open. A popup the app opened used to take every later command.
-- `eval` of an expression that returns a Promise, without `--await`, exits 1 with `The result is a Promise, still running in the page. Add --await to get its value.` It used to print `{}`, as if the call had done nothing.
-- An `eval --await` that hits the 45 s deadline says the Promise still runs in the page and that what it patched stays patched until it settles. A probe re-run after the timeout used to wrap its own still-installed patch.
-- `heap take` reads the snapshot chunk by chunk as DevTools sends it, instead of joining it into one string first: a heap of ~700 MB and up failed with `Invalid string length`. The renderer's own memory while V8 writes the snapshot is unchanged.
-- Dedicated workers (`new Worker`) show up in `targets` and answer `eval --target` and `heap take --target`: they are reached through their page. Electron leaves them out of the DevTools target list, so they were missing. A worker the list does carry is reached through its page too, not over a connection of its own, which timed out in one app (`CDP session setup for worker timed out`). `console`, `logs` and `network` still do not see them.
+## 0.26.0 (2026-10-06)
 
-### Changed
-- The verify skill's memory-leak method repeats the action with `click` / `key` / `fill` / `drag` or `act replay`, as the user would. It used to list `eval` among the ways to drive it; `eval` now only reads state between repetitions.
-- A step or use case is saved into the section of its done condition's area: the screen it sits on, not the component (`billing__invoices__…` → `billing`, a widget on the workspace → `workspace`), and not the areas it passes through. `act-decider` derives the section from the done condition and no longer takes one from its caller; `integration/` is gone, a use case crossing areas lies where its done condition is. Move an existing `integration/` by hand: scripts are found by name in any section.
+- Added `--height <metres>` on `scene --goto` and `act goto`: the camera height over an object or coordinates, so the camera can come down low over an object instead of keeping the current height. Coordinates that already carry a height plus `--height` are refused (`height given twice`). `act goto` saves it as typed, so `--param` can mark it; replay refuses a `${HEIGHT}` filled with no number before any step (exit 2). Goto steps saved by 0.25.0 replay as before.
+- Fixed a live `act click scene=<object>` (and `act dblclick` / `rightclick`) and a live `act goto` wait up to 10 s for the object, as replay does, instead of failing at once with `Scene object "x" is covered or off screen` right after a camera flight starts. After 10 s the step fails unrecorded: `click scene=x — <why> after 10s — not recorded`. `click --scene` still answers at once.
+- Fixed a scene step with no engine configured, or with an adapter that cannot locate objects, fails at once instead of after 10 s; in replay it exits 2 (could not run) instead of 3 (STALE).
 
-## [0.26.0] - 2026-10-06
-
-### Added
-- `--height <metres>` on `scene --goto` and `act goto`: the camera height over an object or coordinates, so the camera can come down low over an object instead of keeping the current height. Coordinates that already carry a height plus `--height` are refused (`height given twice`). `act goto` saves it as typed, so `--param` can mark it; replay refuses a `${HEIGHT}` filled with no number before any step (exit 2). Goto steps saved by 0.25.0 replay as before.
-
-### Fixed
-- A live `act click scene=<object>` (and `act dblclick` / `rightclick`) and a live `act goto` wait up to 10 s for the object, as replay does, instead of failing at once with `Scene object "x" is covered or off screen` right after a camera flight starts. After 10 s the step fails unrecorded: `click scene=x — <why> after 10s — not recorded`. `click --scene` still answers at once.
-- A scene step with no engine configured, or with an adapter that cannot locate objects, fails at once instead of after 10 s; in replay it exits 2 (could not run) instead of 3 (STALE).
-
-## [0.25.0] - 2026-10-06
+## 0.25.0 (2026-10-06)
 
 ### Added
 - `scene` reads CesiumJS maps (`"webgl": { "engine": "cesiumjs" }`): every entity of `viewer.entities` and of each data source, with its id, name (the label text when it has none), graphics kinds and its point on the page — none when it has no position, is off the canvas or behind the globe. The viewer is found with no app code on a vue-cesium page (its `$VueCesium` registry) and on a page loading `Cesium.js` as a global script; an ESM build sets `window.__CESIUM_VIEWER__ = { viewer, Cesium }`. Every viewer found is kept in `window.__agentView.cesium` for `eval`.
@@ -44,7 +36,7 @@
 - `scene --goto <lon,lat[,height]>` or `scene --goto <object>`: moves the camera straight down over a place or a scene object, with no animation; with no height it keeps the current one.
 - `act click scene=<object>` and `act goto <place>`: steps on scene objects, saved and replayed. Replay finds the object again for up to 10 s: STALE when it is gone, FAIL when it stays covered. See ADR 0007.
 
-## [0.24.0] - 2026-10-01
+## 0.24.0 (2026-10-01)
 
 ### Added
 - `act start --until-expr <js>` (and on `act save-use-case`): done when a JS expression in the page is truthy, or, when it returns a promise, once the promise resolves — for a state no element shows (data loaded, an animation over). `act wait --expr <js>` waits up to 10 s for one and records it as a step that `act replay` waits on. Both run page JS, so recording and replaying them need `"allowEval": true`; save checks them like any other string (a uuid refuses, `--param` marks them).
@@ -52,7 +44,7 @@
 ### Fixed
 - `act replay` no longer ends STALE when a step's control is found before it is drawn — a row a virtual list draws a frame after opening, a list re-rendered by a data refresh (`Could not compute box model`). It finds the control again and acts within the step's 10 s, also for a `scroll` over an element; STALE only if it is still not drawn then. Any other failure still ends STALE at once, so input already sent (a drag) is never repeated.
 
-## [0.23.0] - 2026-10-01
+## 0.23.0 (2026-10-01)
 
 ### Added
 - `act delete <name>`: removes a saved script and regenerates the indexes. Refused while a use case lists it as a step or a step names it as `after`; the refusal lists every one.
@@ -60,7 +52,7 @@
 ### Fixed
 - Every read of an element's box waits until it stops moving (two reads two animation frames apart agree, up to 1 s), so an element sliding in — a toast — is hit where it comes to rest instead of missed on its first frame. Covers `click`, `drag`, `screenshot` crops, `act` steps and `act replay`; a static element costs two frames.
 
-## [0.22.0] - 2026-10-01
+## 0.22.0 (2026-10-01)
 
 ### Changed
 - The script store `index.md` (and `act list`) prints one short line per script: `- [<name>](<name>.json) — <note> · params … · after <step> · requires <fixture>`. The until, the step count, a use case's step chain, the start route and the timeout are left to the JSON — a section index no longer has to be read whole to pick one script.
@@ -69,12 +61,12 @@
 ### Added
 - `--param-note NAME=<text>` on `act start`, `act save` and `act save-use-case`: what a `${NAME}` parameter stands for, kept in the script JSON (`paramNotes`) instead of in the note.
 
-## [0.21.3] - 2026-10-01
+## 0.21.3 (2026-10-01)
 
 ### Added
 - `--modifiers ctrl,shift` on `click` and on `act click` / `dblclick` / `rightclick`: keys held through the click (`alt|ctrl|meta|shift`), so the page sees `ctrlKey` and the like — a ctrl-click adds a tree row to the selection. `act` records the keys with the step and `act replay` holds them again.
 
-## [0.21.2] - 2026-09-30
+## 0.21.2 (2026-09-30)
 
 ### Changed
 - `screenshot` (and the one in `snap`) comes out in CSS pixels at any OS display scale, so a point read off it is a `click --pos` / `drag --*-pos` coordinate. At 125% it was in device pixels, and a click on a spot read off it landed 1.25× further right and down: on a window's close button. On a HiDPI screen the image is smaller than before (cheaper in tokens); `--scale` now scales the CSS-pixel image. Saved `act` scripts are unaffected: their `@x,y` were always CSS pixels.
@@ -82,7 +74,7 @@
 ### Fixed
 - A shared worker no longer stays paused after a window reload. While agent-view held a session on it, Chromium started the worker the reloaded page re-created paused on `waitForDebugger` (its `onconnect` never set, its module never run) until the session resumed it; agent-view now does, and resumes one it finds paused when it attaches.
 
-## [0.21.1] - 2026-09-30
+## 0.21.1 (2026-09-30)
 
 ### Added
 - `act drag … --html5`: a native HTML5 drag-and-drop (a `draggable` tree row onto a canvas point or another row) instead of pointer events; recorded and replayed as such.
@@ -90,7 +82,7 @@
 ### Changed
 - A use case skips only its leading steps whose until already holds. It skipped the nearest reached step with every one before it, as an `after` chain does, so a step whose until holds from the start — «close the dialog», «activate the Демо tab» — skipped all the steps before it and could only stand first.
 
-## [0.21.0] - 2026-09-30
+## 0.21.0 (2026-09-30)
 
 ### Added
 - Sections in the script store ([ADR 0005](./docs/adr/0005-script-store-sections-and-use-cases.md)). `act save` and `act start --save` take `--in <section>` (required): the product area the script drives (`auth`, `tree`, `editor/canvas`), a subdirectory of `.agent-view/scripts/`. Names stay unique across the whole store, so `replay`, `--after` and use cases name a script alone and moving it between sections breaks nothing; a name that lies in another section is refused. Every save writes an `index.md` per section and a root one listing the sections. `act list` prints the sections, `act list <section>` one of them and the sections below it (`editor` → `editor/canvas`); an emptied section loses its `index.md`. Scripts in the store root still replay and are listed as "In no section yet".
@@ -108,12 +100,12 @@
 - `act replay` finds a control laid out just outside the viewport (a field below the fold of a scrollable panel) and scrolls it into view instead of reporting STALE "not on screen".
 - After `act replay`, the next `dom` reads the page as the replay left it; it could get the accessibility tree from before the last replayed action for up to 300 ms.
 
-## [0.20.1] - 2026-09-29
+## 0.20.1 (2026-09-29)
 
 ### Fixed
 - Windows: every `act` call flashed a console window. The server runs without a console, so the `git rev-parse` that finds the script store (and the `powershell.exe` port-owner lookup) opened one of their own; both now start hidden.
 
-## [0.20.0] - 2026-09-29
+## 0.20.0 (2026-09-29)
 
 ### Added
 - Parameters in saved `act` scripts. `act save <name> --param NAME=value` (also on `act start … --save`, repeatable) saves every occurrence of the value in test ids, names, typed text and the until as `${NAME}`. `act replay` fills `${NAME}` from the env var `NAME` in every script of the `after` chain, and refuses the run before any step when one is unset (`"x" needs ROW — set as env vars`, exit 2). `act list` and `INDEX.md` show `params ROW …`. A step whose target varies (a tree row, a project) no longer has to be a shell script. Scripts without placeholders replay as before.
@@ -121,17 +113,17 @@
 ### Fixed
 - `act replay` checks the `after` chain from the nearest prerequisite back. A prerequisite already reached is skipped together with the ones before it. Before, each was checked on its own from the first, so one whose state the next step had used up (a context menu closed by its item) ran again and failed with its until never shown.
 
-## [0.19.0] - 2026-09-29
+## 0.19.0 (2026-09-29)
 
 ### Added
 - `act dblclick <n>` and `act rightclick <n>` double-click and right-click a row of the control table, so a step that opens a context menu or fires a `dblclick` handler can be recorded and replayed instead of scripted in shell. `act do` takes them too. Saved scripts store them as ops of their own; scripts recorded before replay unchanged.
 
-## [0.18.1] - 2026-09-28
+## 0.18.1 (2026-09-28)
 
 ### Changed
 - The `verify` skill names `act start --until-selector <css>` next to `--until-testid` for recording a path, and says the control table comes from the accessibility tree. Agents read the old line as "no test id, no `act`" and drove flows one click at a time instead.
 
-## [0.18.0] - 2026-09-25
+## 0.18.0 (2026-09-25)
 
 ### Added
 - `act` scripts are stored per project ([ADR 0004](./docs/adr/0004-act-scripts-live-in-the-main-checkout.md)). `act save` and `start --save` write to `.agent-view/scripts/` next to `agent-view.config.json` in the main checkout, and every git worktree of the project uses that same folder. `act replay` falls back to the old `~/.agent-view/scratch/`.
@@ -140,12 +132,12 @@
 - `eval --file <path>` reads the code from a file. On Windows the npm `.cmd` shim cuts an argument at its first newline, so multi-line code passed as an argument never reached agent-view.
 - The plugin's `act-decider` saves every run, names it `<section>-<target>` when no name was given, and adds a note. The `verify` skill makes agents check `act list` and replay a script before they explore the UI.
 
-## [0.17.1] - 2026-09-23
+## 0.17.1 (2026-09-23)
 
 ### Added
 - The plugin ships the `act-decider` agent: a Sonnet subagent at low effort that drives one scenario through `act` from a goal and a done condition, and saves it for `act replay`. Before, it lived only in a local `~/.claude/agents`.
 
-## [0.17.0] - 2026-09-23
+## 0.17.0 (2026-09-23)
 
 ### Added
 - Test ids. `dom` prints `[testid=…]` next to the ref of every accessibility-tree node that carries one. Unnamed wrappers with a test id are now printed too, because component libraries put the id on the wrapper. Test ids are often set through props, so the live DOM is the only place to read them. `click`, `fill`, `wait` and `screenshot` take `--testid <id>`. A test id survives HMR, navigation and copy changes; a ref and a text filter do not. The new config field `testIdAttribute` names the attribute. Without it, `data-testid`, `data-test-id`, `data-test`, `data-qa` and `data-cy` are all read.
@@ -157,7 +149,7 @@
 ### Fixed
 - `fill` on a `<textarea>` threw `Illegal invocation`, because it called the `<input>` value setter. `fill` on a wrapper element now fills the `input` or `textarea` inside it, so `--testid` works on components. An element with no field exits 1; before, `fill` set a stray `value` on it and reported success.
 
-## [0.16.1] - 2026-09-23
+## 0.16.1 (2026-09-23)
 
 ### Fixed
 - `screenshot --scale` / `--crop` (and `snap --scale`) no longer shrink the app. They passed a `clip` to `Page.captureScreenshot`, and Chromium resizes the render view to the clip for the capture, restoring it only when the capture completes. On a hidden, minimised or covered window it never completes, so after a timeout or a server restart the app stayed drawn at the clip size (640×360, halving on every retry) inside a full-size window. The capture is now always a plain full-viewport PNG; crop and scale run in-process.
@@ -165,14 +157,14 @@
 ### Changed
 - Scaled screenshots are PNG, not WebP/JPEG. Vision tokens depend on pixel size, not file size.
 
-## [0.16.0] - 2026-09-17
+## 0.16.0 (2026-09-17)
 
 ### Changed
 - `agent-view drag` now performs real HTML5 drag-and-drop. Mouse events alone never start one in Chromium — `dragstart` does not fire and `drop` never arrives — so the README's "HTML5/pointer DnD" claim was false and verifiers were passing on synthetic DOM events. `drag` enables `Input.setInterceptDrags`, presses and moves, and when `Input.dragIntercepted` arrives it finishes with `Input.dispatchDragEvent` (`dragEnter` → `dragOver` × N → `drop`) carrying the app's real `dataTransfer`. No event within 1 s → the pointer drag completes as before, with a warning. Output names the path and, for HTML5, each intercepted MIME type with its data, so a verifier can see the drag carried the app's payload.
 - New flags: `--cancel` (end with `dragCancel`), `--html5` (fail instead of falling back), `--pointer` (never intercept), `--mask <n>` (override `dragOperationsMask`, for `effectAllowed`/`dropEffect` diagnostics).
 - `drag` now hovers the source before pressing, on both paths.
 
-## [0.15.0] - 2026-09-09
+## 0.15.0 (2026-09-09)
 
 Memory. Every command so far reads what the app is or what it ran; none reads what it keeps.
 "Does opening this dialog ten times leak?" had no answer short of the DevTools Memory panel by
@@ -189,7 +181,7 @@ hand, and the `.heapsnapshot` behind it is far too large to ever put in front of
 - Snapshots live in the lazy server and go away when it idles out. The three-snapshot method fits comfortably inside that window; there is no on-disk store.
 - The snapshot is parsed from one joined string, so heaps above roughly 500 MB (V8's string ceiling) are out of reach. Duplicate-string scans and the DevTools "retained by event handlers / console / context" filters are not offered; `--detached` is the one categorised filter.
 
-## [0.14.0] - 2026-09-08
+## 0.14.0 (2026-09-08)
 
 Reachability. A review could not tell "no user action reaches this code" apart from "I did not
 check": every existing command reads what the app *is*, none reads what it *ran*. So a verifier
@@ -221,7 +213,7 @@ starting the app by hand.
 - scriptId → URL comes from a momentary `Debugger.enable` → replayed `scriptParsed` → `Debugger.disable` scan, gated on the scriptIds actually asked for (not a fixed pause) and skipped entirely when they are already known. `Profiler.getBestEffortCoverage()` was tried first and rejected: once precise coverage is running it returns an empty script list. The `Debugger` domain is never left enabled — that would keep V8 deoptimized for every other command on the session.
 - New `bench/smoke-reach.ts` proves both commands end-to-end over real CDP, including that a later `dom` still works after a scan.
 
-## [0.13.1] - 2026-08-18
+## 0.13.1 (2026-08-18)
 
 Parallel checkouts. One daemon serves every checkout on the machine, and `console`, `network`
 and `logs` kept their state globally — so two worktree slots running at once read and wrote
@@ -231,7 +223,7 @@ each other's.
 - **`logs`, `console` and `network` are now scoped to the CDP port.** Previously a `logs` call from one worktree answered with whatever recording already existed: it wrote and truncated the *other* worktree's `.agent-view/console.log` and its tail mixed in messages from the other slot's port. Buffers, `--req` handles, the recorder and the feed path now live in a per-port bucket, so parallel slots (`agent-view` from N worktrees on N CDP ports) no longer see each other. Single-checkout behaviour is unchanged.
 - `logs start` refuses a feed file another port is already recording into, instead of interleaving two apps' records in one file. Use a per-slot path (`--file`, or the default relative `.agent-view/console.log` inside each worktree).
 
-## [0.13.0] - 2026-08-16
+## 0.13.0 (2026-08-16)
 
 Modal handling. A modal agent-view could not answer used to end a run: the window looked
 frozen, every later command timed out, and nothing explained why.
@@ -252,12 +244,12 @@ frozen, every later command timed out, and nothing explained why.
 - Arm before the click, and click through `agent-view click`: Chromium refuses to open a file picker without user activation, so an `eval`-driven `el.click()` is silently dropped and never intercepted.
 - Out of scope: `showOpenFilePicker()` exposes no input to fill and can only be cancelled; Electron does not implement `window.prompt`; native dialogs opened from an Electron **main** process stay unreachable until `eval --main` ships.
 
-## [0.12.0] - 2026-07-25
+## 0.12.0 (2026-07-25)
 
 ### Removed
 - `verify-recipe` skill, and the recipe format it authored, along with the `verify` skill's Recipe Execution Mode. Unused in practice; the rigor it carried (invariants first, failed expectation is FAIL, reload checkpoint, defensive `eval` reads) stays in `verify`'s Execution discipline, which now applies to ad-hoc and plan-driven runs alike. The plugin ships one skill.
 
-## [0.11.0] - 2026-07-25
+## 0.11.0 (2026-07-25)
 
 ### Fixed
 - `--target` / `--window` accept the 8-char id prefix `targets` prints (case-insensitive, ≥4 chars, ambiguous prefix reported). Worker handles were unusable before.
@@ -274,17 +266,17 @@ frozen, every later command timed out, and nothing explained why.
 - `logs start --probe <file.js>[@target]` injects JS that reports through `console.log`, re-injected after page reloads and worker restarts. Requires `allowEval`.
 - `screenshot --crop-up <n>` climbs `n` element ancestors before cropping (title → its card). Text-sized crops warn on stderr.
 
-## [0.10.2] - 2026-07-22
+## 0.10.2 (2026-07-22)
 
 ### Fixed
 - `agent-view --version` now reports the real version. It was a hardcoded literal that drifted from `package.json` on every release (reported `0.10.0` after `0.10.1` shipped). The version is now read from `package.json` at runtime, resolving to the same path in dev (`src/cli`) and build (`dist/cli`).
 
-## [0.10.1] - 2026-07-22
+## 0.10.1 (2026-07-22)
 
 ### Fixed
 - Default window selection no longer picks the DevTools frontend. Opening DevTools on a Chromium app registers a first-in-list `devtools://` **page** target; commands without an explicit `--target`/`--window` selected it instead of the app window, so DOM/screenshot/eval ran against the DevTools UI. The Electron and Browser adapters now filter targets through the shared `isAppTarget` (already used by Tauri), and the server's default target resolution skips `devtools://` / `about:blank` / `chrome-extension://` pages.
 
-## [0.10.0] - 2026-06-15
+## 0.10.0 (2026-06-15)
 
 `agent-view network` — CDP `Network` domain capture. Closes the largest remaining verify-flow blind spot: the silent failures that never reach the DOM, the console, or the store — a 404 that doesn't throw, a CORS block, a missing `Authorization` header, a realtime socket that never receives its message.
 
@@ -300,7 +292,7 @@ frozen, every later command timed out, and nothing explained why.
 - `NetworkStream` (per-target ring, `drain(filter)`, `subscribe`) modeled on `ConsoleStream`; `attach` registers the subscription before `Network.enable` so no events are lost. Pure network formatter under `inspectors/network/`. ADR 0001 (native capture over `chrome-devtools-mcp`), ADR 0002 (eager lifecycle). New `bench/smoke-network.ts` proves end-to-end capture over real CDP.
 - CLI `--version` corrected to track `package.json` (was stale at `0.9.0`).
 
-## [0.9.2] - 2026-05-14
+## 0.9.2 (2026-05-14)
 
 Follow-up to 0.9.1. Documentation-only.
 
@@ -308,7 +300,7 @@ Follow-up to 0.9.1. Documentation-only.
 - Config table: corrected `launch` to required (the type and validator both require it) and documented the range/valid-value constraints for `port`, `consoleBufferSize`, and `consoleTargets` (the latter accepts any subset of `page` / `iframe` / `shared_worker` / `service_worker` / `worker`).
 - README header badges: switched the three npm-page links from `npmjs.com` to `www.npmjs.com` (canonical host; some Markdown renderers don't follow the 308 redirect for scoped packages).
 
-## [0.9.1] - 2026-05-14
+## 0.9.1 (2026-05-14)
 
 Documentation-only release. Major README restructure. No code or CLI changes.
 
@@ -321,7 +313,7 @@ Documentation-only release. Major README restructure. No code or CLI changes.
 - Removed the duplicate "Not just a CDP wrapper" subsection (its content is now covered by "Why agent-view").
 - CHANGELOG: replaced two stale references to the removed `CONTEXT.md` with the current `GLOSSARY.md` path.
 
-## [0.9.0] - 2026-05-14
+## 0.9.0 (2026-05-14)
 
 Double-click support and main-world `eval` semantics documented to close a recurring false-negative "API not exposed" pattern.
 
@@ -332,7 +324,7 @@ Double-click support and main-world `eval` semantics documented to close a recur
 - `verify` skill: hard rule (Execution discipline #7) — agents MUST run `agent-view eval "typeof window.X"` before claiming a `window.*` API is missing. Companion bullet in the `eval` section explaining main-world / `contextBridge` semantics, plus a row in the "Picking the right tool" table.
 - README: new note in the `eval` section spelling out that `Runtime.evaluate` runs in the page's main world and showing the three ways to expose an API (vanilla `window.x = ...`, Electron `contextBridge.exposeInMainWorld`, Tauri/WebView2 bootstrap). Closes a class of false-negative "API not exposed" reports.
 
-## [0.8.2] - 2026-05-12
+## 0.8.2 (2026-05-12)
 
 Tauri launch resilience, structured port-conflict detection, and verify-skill rigor edition.
 
@@ -353,7 +345,7 @@ Tauri launch resilience, structured port-conflict detection, and verify-skill ri
 - Poll interval raised from 1s to 2s.
 - `verify` skill: added explicit Tauri note in Discovery & Launch and Resilience sections.
 
-## [0.8.1] - 2026-04-27
+## 0.8.1 (2026-04-27)
 
 Architectural rollback (plugin/docs only — no CLI changes). Removes the `verify-runner` and `design-conformance-runner` Haiku subagents introduced in 0.6.0 and the Bringup DSL added in 0.8.0. Recipe execution returns to inline (main-agent driven) with the original `Repro Steps` / `Evidence Commands` / `Regression Checks` structure. The `verify-recipe` skill is decoupled from `verify`: it authors recipe files only — no dry-run, no integration with execution. Design conformance is preserved as a recipe section and an inline workflow in the `verify` skill.
 
@@ -376,7 +368,7 @@ Each release between 0.6.0 and 0.8.0 fenced in problems introduced by the previo
 ### Migration
 0.6.0–0.8.0 recipes containing `## Bringup` / `## Manual Preconditions` / `## Machine Preconditions` remain valid markdown but are not interpreted specially anymore. The `verify` skill reads them as documentation describing the expected state and performs the actions inline. Re-author via `verify-recipe` to align with the simplified format. Recipes from 0.5.0 work as-is.
 
-## [0.8.0] - 2026-04-27
+## 0.8.0 (2026-04-27)
 
 Adds idempotent bringup so recipes can drive the app from any starting state — auth screen, fresh shell, mid-state, already-ready — without manual setup. Cuts Manual Preconditions to ~zero for most features and makes recipes safe to re-run.
 
@@ -424,7 +416,7 @@ The runner always evaluates the IF first. If the system is already in the target
 
 0.7.0 recipes still execute. The runner detects missing `## Bringup` and proceeds to Machine Preconditions. To benefit from idempotent bringup, regenerate the recipe via `verify-recipe` — the skill will interview for the bringup-relevant info you didn't provide before.
 
-## [0.7.0] - 2026-04-27
+## 0.7.0 (2026-04-27)
 
 Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a recipe step's command didn't match the expected output — burning tool calls to find missing UI elements. This release introduces hard budgets, a separation between manual and machine preconditions, and a dry-run mode so authoring can validate a recipe before a full run.
 
@@ -452,7 +444,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - **Better failure handling**: `precondition_failed` reports are relayed verbatim with the Manual Preconditions block; `cascading_failures` / `budget_exhausted` are flagged as "recipe likely stale, update before retrying".
 - Older 0.6.x recipes without a `## Machine Preconditions` section still run, but failures are flagged with a recipe-format caveat in the summary.
 
-## [0.6.0] - 2026-04-27
+## 0.6.0 (2026-04-27)
 
 ### Added — bundled subagents
 
@@ -478,7 +470,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 
 - Plugin manifest now ships `agents/` alongside `skills/`. Updated `package.json` `files` array accordingly.
 
-## [0.5.0] - 2026-04-27
+## 0.5.0 (2026-04-27)
 
 ### Added — token-savers
 
@@ -514,7 +506,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - `findByFilter` reused by `screenshot --crop`.
 - 211 unit tests passing.
 
-## [0.4.0] - 2026-04-27
+## 0.4.0 (2026-04-27)
 
 ### Added
 
@@ -534,7 +526,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - `bench/app` — drag/drop section (handle + drop-zone in fixed-size absolute stage) for
   end-to-end exercise of the new `drag` command
 
-## [0.3.0] - 2026-04-26
+## 0.3.0 (2026-04-26)
 
 ### Added
 
@@ -569,7 +561,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - `consoleTargets: TargetType[]` — auto-attached target types for `console`
   (default: `["page", "shared_worker", "service_worker"]`)
 
-## [0.2.0] - 2026-04-20
+## 0.2.0 (2026-04-20)
 
 ### Performance
 
@@ -601,7 +593,7 @@ Hardens the recipe execution loop. The 0.6.0 subagents could "flail" when a reci
 - `findByFilter` uses `queryAXTree` for simple filters; returns "not found" immediately
   on empty queryAXTree result (no double-cost fallback)
 
-## [0.1.0] - 2026-04-06
+## 0.1.0 (2026-04-06)
 
 ### Added
 - CLI commands: `init`, `discover`, `dom`, `click`, `fill`, `screenshot`, `scene`, `snap`, `launch`, `wait`, `stop`
