@@ -44,6 +44,7 @@ import {
 import type { AxTreeCache } from './ax-cache.js'
 import { LOCATION_NUMPAD, MODIFIER_KEYS, type KeyChord, type KeyDef } from './keys.js'
 import { cropScalePng } from './png.js'
+import { attachFrames, type FrameDocument, type FramesDomains } from './frames.js'
 
 // CDP hosts to try: IPv4 first, then IPv6 (WebView2/Tauri often listens on ::1)
 const CDP_HOSTS = ['127.0.0.1', '::1'] as const
@@ -979,6 +980,7 @@ type DOMSnapshotDomain = {
       layout: { nodeIndex: number[]; bounds: number[][]; styles?: number[][] }
       scrollOffsetX?: number
       scrollOffsetY?: number
+      frameId?: number
     }>
     strings: string[]
   }>
@@ -987,6 +989,19 @@ type DOMSnapshotDomain = {
 type DebuggerDomain = {
   enable: () => Promise<unknown>
   disable: () => Promise<unknown>
+}
+
+type SelectPick = 'first' | 'firstVisible'
+
+const COUNT_MATCHES = 'function(selector) { return this.querySelectorAll(selector).length }'
+
+const PICK_MATCH: Record<SelectPick, string> = {
+  first: 'function(selector) { return this.querySelector(selector) }',
+  firstVisible: `function(selector) {
+    return [...this.querySelectorAll(selector)].find(el => el.checkVisibility
+      ? el.checkVisibility({ visibilityProperty: true })
+      : el.getClientRects().length > 0) ?? null
+  }`,
 }
 
 const SCROLL_VIEWPORT_FRACTION = 0.8
@@ -1200,12 +1215,13 @@ export async function connectToPage(
     console.error(`[av-debug] connectToPage ${target.type}:${target.id.slice(0, 8)}`)
   }
   const client = await openClient(port, target)
-  const { Runtime, Accessibility, Page, DOM, Input } = client as RawCDPClient & {
-    Accessibility: { enable: () => Promise<unknown>; getFullAXTree: () => Promise<{ nodes: AXNode[] }>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
-    Page: PageDialogDomain & PageFileChooserDomain & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
-    DOM: { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; getBoxModel: (p: Record<string, unknown>) => Promise<{ model: { content: number[] } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; describeNode: (p: Record<string, unknown>) => Promise<{ node: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown>; getNodeForLocation: (p: Record<string, unknown>) => Promise<{ backendNodeId: number }> }
+  const { Runtime, Accessibility, Page, DOM, Input, Target } = client as RawCDPClient & {
+    Accessibility: FramesDomains['Accessibility'] & { enable: () => Promise<unknown>; queryAXTree: (p: Record<string, unknown>) => Promise<{ nodes: AXNode[] }> }
+    Page: PageDialogDomain & PageFileChooserDomain & FramesDomains['Page'] & { enable: () => Promise<unknown>; captureScreenshot: (p?: Record<string, unknown>) => Promise<{ data: string }>; getLayoutMetrics: () => Promise<{ layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number; clientHeight: number } }>; frameNavigated: (cb: () => void) => unknown }
+    DOM: FramesDomains['DOM'] & { enable: () => Promise<unknown>; resolveNode: (p: Record<string, unknown>) => Promise<{ object: { objectId: string } }>; focus: (p: Record<string, unknown>) => Promise<unknown>; getDocument: (p: Record<string, unknown>) => Promise<{ root: { backendNodeId: number } }>; setFileInputFiles: (p: Record<string, unknown>) => Promise<unknown>; getNodeForLocation: (p: Record<string, unknown>) => Promise<{ backendNodeId: number }> }
     Input: InputDomain
     DOMDebugger: DOMDebuggerDomain
+    Target: FramesDomains['Target']
   }
   const DOMDebugger = (client as RawCDPClient & { DOMDebugger: DOMDebuggerDomain }).DOMDebugger
   const DOMSnapshot = (client as RawCDPClient & { DOMSnapshot: DOMSnapshotDomain }).DOMSnapshot
@@ -1241,6 +1257,28 @@ export async function connectToPage(
     const { root } = await DOM.getDocument({ depth: 0 })
     documentBackendNodeId = root.backendNodeId
   })
+
+  const frames = attachFrames({ Page, DOM, Accessibility, Target }, () => documentBackendNodeId)
+
+  async function selectInFrames(selector: string, objectGroup: string, pick?: SelectPick): Promise<{ objectId: string | null; count: number }> {
+    let count = 0
+    let objectId: string | null = null
+    for (const doc of await frames.sameProcessDocuments()) {
+      const documentObjectId = doc.ownerBackendNodeId === undefined
+        ? (await Runtime.evaluate({ expression: 'document', objectGroup })).result.objectId
+        : (await DOM.resolveNode({ backendNodeId: doc.documentBackendNodeId, objectGroup }).catch(() => undefined))?.object.objectId
+      if (!documentObjectId) continue
+      const call = (functionDeclaration: string, returnByValue: boolean) => Runtime.callFunctionOn({
+        objectId: documentObjectId, functionDeclaration, arguments: [{ value: selector }], returnByValue, objectGroup,
+      }) as Promise<EvaluateResponse>
+      const counted = await call(COUNT_MATCHES, true)
+      if (counted.exceptionDetails) throw new EvaluationError(`Invalid selector ${JSON.stringify(selector)}`)
+      const inDocument = Number(counted.result.value)
+      count += inDocument
+      if (pick && objectId === null && inDocument > 0) objectId = (await call(PICK_MATCH[pick], false)).result.objectId ?? null
+    }
+    return { objectId, count }
+  }
 
   // null = not yet tested; true = available; false = unavailable (API not supported)
   let queryAXTreeAvailable: boolean | null = null
@@ -1467,50 +1505,25 @@ export async function connectToPage(
     }),
 
     getEventListenersBySelector: (selector, depth = 0) => withHandles(client, async (objectGroup) => {
-      // objectId, not nodeId: `DOM.querySelector` needs a document nodeId, which is
-      // renumbered on every navigation. Same reasoning as `uploadBySelector`.
-      const { result, exceptionDetails } = await Runtime.evaluate({
-        expression: `document.querySelector(${JSON.stringify(selector)})`,
-        returnByValue: false,
-        objectGroup,
+      const { objectId } = await selectInFrames(selector, objectGroup, 'first').catch((err: unknown) => {
+        if (err instanceof EvaluationError) return { objectId: null }
+        throw err
       })
-      // A malformed selector throws a DOMException that arrives as a valid RemoteObject.
-      if (exceptionDetails) return null
-      if (!result.objectId || result.subtype === 'null') return null
-      return listenersOn(result.objectId, depth)
+      return objectId === null ? null : listenersOn(objectId, depth)
     }),
 
-    async queryVisible(selector) {
-      const all = `document.querySelectorAll(${JSON.stringify(selector)})`
-      const counted = await Runtime.evaluate({ expression: `${all}.length`, returnByValue: true })
-      if (counted.exceptionDetails) throw new EvaluationError(`Invalid selector ${JSON.stringify(selector)}`)
-      const count = Number(counted.result.value)
-      if (count === 0) return { backendDOMNodeId: null, count }
-
-      // objectId, not nodeId — same reasoning as `uploadBySelector`. `checkVisibility` is
-      // Chromium 105+; the fallback still rules out `display:none`.
-      return withHandles(client, async (objectGroup) => {
-        const { result } = await Runtime.evaluate({
-          expression: `[...${all}].find(el => el.checkVisibility
-            ? el.checkVisibility({ visibilityProperty: true })
-            : el.getClientRects().length > 0) ?? null`,
-          returnByValue: false,
-          objectGroup,
-        })
-        if (!result.objectId) return { backendDOMNodeId: null, count }
-        const { node } = await DOM.describeNode({ objectId: result.objectId })
-        return { backendDOMNodeId: node.backendNodeId, count }
-      })
-    },
+    queryVisible: (selector) => withHandles(client, async (objectGroup) => {
+      const { objectId, count } = await selectInFrames(selector, objectGroup, 'firstVisible')
+      if (objectId === null) return { backendDOMNodeId: null, count }
+      const { node } = await DOM.describeNode({ objectId })
+      return { backendDOMNodeId: node.backendNodeId, count }
+    }),
 
     async getTestIds(attributes) {
       const ids = new Map<number, string>()
       // Skips the whole-document snapshot on the many pages that carry no test ids.
-      const probe = await Runtime.evaluate({
-        expression: `document.querySelector(${JSON.stringify(attributes.map(a => `[${a}]`).join(','))}) !== null`,
-        returnByValue: true,
-      })
-      if (probe.result.value !== true) return ids
+      const probe = await withHandles(client, (objectGroup) => selectInFrames(attributes.map(a => `[${a}]`).join(','), objectGroup))
+      if (probe.count === 0) return ids
 
       const { documents, strings } = await DOMSnapshot.captureSnapshot({ computedStyles: [] })
       for (const { nodes } of documents) {
@@ -1536,7 +1549,7 @@ export async function connectToPage(
     async getAccessibilityTree(): Promise<AXNode[]> {
       const cached = cache.get(cacheKey)
       if (cached) return cached
-      const { nodes } = await Accessibility.getFullAXTree()
+      const nodes = await frames.mergedAXTree()
       cache.set(cacheKey, nodes)
       return nodes
     },
@@ -1546,22 +1559,23 @@ export async function connectToPage(
       if (meta.found) {
         return { nodes: meta.nodes, fromCache: true }
       }
-      const { nodes } = await Accessibility.getFullAXTree()
+      const nodes = await frames.mergedAXTree()
       cache.set(cacheKey, nodes)
       return { nodes, fromCache: false }
     },
 
+    outOfProcessFrames: () => frames.outOfProcessFrameUrls(),
+
     async queryAXTree({ accessibleName, role }: { accessibleName?: string; role?: string }): Promise<AXNode[] | null> {
       // queryAXTree waits for a frame; null sends the caller to the full tree, which does not.
       if (queryAXTreeAvailable === false || await isHidden()) return null
+      const [main, ...children] = await frames.sameProcessDocuments()
+      const query = (doc: FrameDocument) => Accessibility.queryAXTree({ backendNodeId: doc.documentBackendNodeId, accessibleName, role })
       try {
-        const { nodes } = await Accessibility.queryAXTree({
-          backendNodeId: documentBackendNodeId,
-          accessibleName,
-          role,
-        })
+        const { nodes } = await query(main)
         queryAXTreeAvailable = true
-        return nodes
+        const inChildren = await Promise.all(children.map(doc => query(doc).then(found => found.nodes, () => [])))
+        return [...nodes, ...inChildren.flat()]
       } catch {
         queryAXTreeAvailable = false
         return null
@@ -1620,22 +1634,9 @@ export async function connectToPage(
     },
 
     uploadBySelector: (selector: string, files: string[]): Promise<boolean> => withHandles(client, async (objectGroup) => {
-      // Addressed by objectId rather than nodeId: `DOM.querySelector` needs a
-      // document nodeId, and the document node is re-numbered on every
-      // navigation. A RemoteObject from the page skips that bookkeeping.
-      const { result, exceptionDetails } = await Runtime.evaluate({
-        expression: `document.querySelector(${JSON.stringify(selector)})`,
-        returnByValue: false,
-        objectGroup,
-      })
-      // A malformed selector throws, and the thrown DOMException comes back as
-      // a perfectly good RemoteObject — without this check it would be passed
-      // to setFileInputFiles as if it were the matched node.
-      if (exceptionDetails) {
-        throw new EvaluationError(`Invalid selector ${JSON.stringify(selector)}`)
-      }
-      if (!result.objectId || result.subtype === 'null') return false
-      await DOM.setFileInputFiles({ objectId: result.objectId, files })
+      const { objectId } = await selectInFrames(selector, objectGroup, 'first')
+      if (objectId === null) return false
+      await DOM.setFileInputFiles({ objectId, files })
       return true
     }),
 
@@ -1672,7 +1673,12 @@ export async function connectToPage(
       const dpr = devicePixelRatio(metrics)
       const { cssLayoutViewport } = metrics
       const nodes = new Map<number, LayoutNode>()
-      for (const doc of documents) {
+      const [main, ...children] = documents
+      const frameIdOf = (doc: typeof main) => strings[doc.frameId ?? -1] ?? ''
+      const origins = await frames.childFrameOrigins(children.map(frameIdOf))
+      const placed = [{ doc: main, origin: { x: 0, y: 0 } }, ...children.map(doc => ({ doc, origin: origins.get(frameIdOf(doc)) }))]
+      for (const { doc, origin } of placed) {
+        if (!doc || !origin) continue
         const backendIds = doc.nodes.backendNodeId ?? []
         doc.layout.nodeIndex.forEach((n, i) => {
           const [x, y, width, height] = doc.layout.bounds[i]
@@ -1680,8 +1686,8 @@ export async function connectToPage(
           nodes.set(backendIds[n], {
             // Bounds are document-relative; the table wants what is on screen now.
             rect: {
-              x: (x - (doc.scrollOffsetX ?? 0)) / dpr,
-              y: (y - (doc.scrollOffsetY ?? 0)) / dpr,
+              x: origin.x + (x - (doc.scrollOffsetX ?? 0)) / dpr,
+              y: origin.y + (y - (doc.scrollOffsetY ?? 0)) / dpr,
               width: width / dpr,
               height: height / dpr,
             },
@@ -1708,19 +1714,24 @@ export async function connectToPage(
           DOM.resolveNode({ backendNodeId, objectGroup }),
           DOM.resolveNode({ backendNodeId: hit.backendNodeId, objectGroup }),
         ])
-        const verdict = await Runtime.callFunctionOn({
-          objectId: target.object.objectId,
-          functionDeclaration: `function(hit, attrs) {
-            const el = hit.nodeType === Node.TEXT_NODE ? hit.parentElement : hit;
-            if (this.contains(el) || el.contains(this)) return null;
+        const describeCover = (objectId: string, args: Array<{ objectId?: string; value?: unknown }>) => Runtime.callFunctionOn({
+          objectId,
+          functionDeclaration: `function(attrs, target) {
+            const el = this.nodeType === Node.TEXT_NODE ? this.parentElement : this;
+            if (target && (target.contains(el) || el.contains(target))) return null;
             const id = el.id ? '#' + el.id : '';
             const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).join('.') : '';
             const attr = attrs.find(a => el.hasAttribute(a));
             return el.tagName.toLowerCase() + id + cls + (attr ? ' testid=' + el.getAttribute(attr) : '');
           }`,
-          arguments: [{ objectId: other.object.objectId }, { value: testIdAttributes }],
+          arguments: [{ value: testIdAttributes }, ...args],
           returnByValue: true,
-        }) as { result?: { value?: unknown } }
+        }) as Promise<{ result?: { value?: unknown } }>
+        const inOneFrame = await describeCover(other.object.objectId, [{ objectId: target.object.objectId }]).catch((err: unknown) => {
+          if (isDeadSocket(err)) throw err
+          return undefined
+        })
+        const verdict = inOneFrame ?? await describeCover(other.object.objectId, [])
         return typeof verdict.result?.value === 'string' ? verdict.result.value : null
       })
     },

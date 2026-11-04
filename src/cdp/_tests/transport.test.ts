@@ -90,6 +90,7 @@ const { callOrder, mockDomResolve, mockDomBoxModel, mockCallFunctionOn, mockRele
           return () => {}
         }),
         setInterceptFileChooserDialog: mockSetIntercept,
+        getFrameTree: vi.fn().mockResolvedValue({ frameTree: { frame: { id: 'main', url: 'http://x' } } }),
       },
       DOM: {
         enable: vi.fn().mockResolvedValue({}),
@@ -895,7 +896,8 @@ describe('uploadBySelector', () => {
   it('sets files on the node the selector resolves to', async () => {
     const session = await connectToPage(9222, pageTarget, new AxTreeCache())
     const client = await mockCDP.mock.results[0].value
-    client.Runtime.evaluate.mockResolvedValueOnce({ result: { objectId: 'obj-7', type: 'object' } })
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { objectId: 'doc-1', type: 'object' } })
+    mockCallFunctionOn.mockResolvedValueOnce({ result: { value: 1 } }).mockResolvedValueOnce({ result: { objectId: 'obj-7', type: 'object' } })
 
     await expect(session.uploadBySelector('#file', ['/tmp/a.png'])).resolves.toBe(true)
 
@@ -905,7 +907,8 @@ describe('uploadBySelector', () => {
   it('reports no match instead of throwing when the selector finds nothing', async () => {
     const session = await connectToPage(9222, pageTarget, new AxTreeCache())
     const client = await mockCDP.mock.results[0].value
-    client.Runtime.evaluate.mockResolvedValueOnce({ result: { type: 'object', subtype: 'null' } })
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { objectId: 'doc-1', type: 'object' } })
+    mockCallFunctionOn.mockResolvedValueOnce({ result: { value: 0 } })
 
     await expect(session.uploadBySelector('#missing', ['/tmp/a.png'])).resolves.toBe(false)
     expect(mockSetFileInputFiles).not.toHaveBeenCalled()
@@ -1000,7 +1003,8 @@ describe('modal answers stay consistent under failure and re-entry', () => {
   it('reports a malformed selector instead of treating the thrown error as the node', async () => {
     const session = await connectToPage(9222, pageTarget, new AxTreeCache())
     const client = await mockCDP.mock.results[0].value
-    client.Runtime.evaluate.mockResolvedValueOnce({
+    client.Runtime.evaluate.mockResolvedValueOnce({ result: { objectId: 'doc-1', type: 'object' } })
+    mockCallFunctionOn.mockResolvedValueOnce({
       result: { objectId: 'err-1', type: 'object', subtype: 'error' },
       exceptionDetails: { text: 'Uncaught' },
     })

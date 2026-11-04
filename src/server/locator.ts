@@ -34,7 +34,12 @@ export async function findByLocator(
   locator: Locator,
 ): Promise<{ backendDOMNodeId: number; label: string } | { error: string }> {
   const { backendDOMNodeId, count } = await conn.queryVisible(locator.css)
-  if (count === 0) return { error: `No element matches ${locator.label}` }
+  if (count === 0) return { error: await withFramesOutOfReach(conn, `No element matches ${locator.label}`) }
   if (backendDOMNodeId === null) return { error: `None of ${count} element(s) matching ${locator.label} is visible` }
   return { backendDOMNodeId, label: count > 1 ? `${locator.label} (first visible of ${count})` : locator.label }
+}
+
+export async function withFramesOutOfReach(conn: PageSession, text: string): Promise<string> {
+  const urls = await conn.outOfProcessFrames()
+  return urls.length === 0 ? text : `${text}\nNot searched: cross-origin frame in another process, out of agent-view's reach: ${urls.join(', ')}`
 }

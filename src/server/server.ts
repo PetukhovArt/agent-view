@@ -42,7 +42,7 @@ import { parseKeys } from '../cdp/keys.js'
 import { WatchSession } from './watch-session.js'
 import { StopReason, WATCH_MIN_INTERVAL_MS, type WatchFrame } from '../inspectors/watch/index.js'
 import { buildMatcher } from './pattern.js'
-import { findByLocator, locatorFromArgs, testIdAttributes } from './locator.js'
+import { findByLocator, locatorFromArgs, testIdAttributes, withFramesOutOfReach } from './locator.js'
 import { SERVER_PORT, AGENT_VIEW_DIR, TOKEN_PATH } from './port.js'
 import { VERSION } from '../version.js'
 import { actTimeMs, runAct, type ActSession } from './act-session.js'
@@ -647,7 +647,7 @@ export class AgentViewServer {
       return { ok: true, data: await textContentFallback(conn, filter) }
     }
 
-    const data = fromCache ? `[cache]\n${text}` : text
+    const data = await withFramesOutOfReach(conn, fromCache ? `[cache]\n${text}` : text)
     return { ok: true, data }
   }
 
@@ -824,7 +824,7 @@ export class AgentViewServer {
       const CLICK_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio'])
       const found = await this.findByFilter(conn, filter, req, targetId, CLICK_ROLES)
       if (!found) {
-        return { ok: false, error: `No element found matching "${filter}"` }
+        return { ok: false, error: await withFramesOutOfReach(conn, `No element found matching "${filter}"`) }
       }
       await action.onNode(conn, found.backendDOMNodeId)
       return done(`"${found.name}"`)
@@ -958,7 +958,7 @@ export class AgentViewServer {
       const FILL_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'textarea'])
       const found = await this.findByFilter(conn, filter, req, targetId, FILL_ROLES)
       if (!found) {
-        return { ok: false, error: `No element found matching "${filter}"` }
+        return { ok: false, error: await withFramesOutOfReach(conn, `No element found matching "${filter}"`) }
       }
       await conn.fillByNodeId(found.backendDOMNodeId, value)
       this.axTreeCache.invalidate(cacheKey)
@@ -1006,7 +1006,7 @@ export class AgentViewServer {
     const selector = argStr(req.args, 'selector')
     if (selector) {
       const found = await conn.uploadBySelector(selector, files)
-      if (!found) return { ok: false, error: `No element matches selector "${selector}"` }
+      if (!found) return { ok: false, error: await withFramesOutOfReach(conn, `No element matches selector "${selector}"`) }
       this.axTreeCache.invalidate(cacheKey)
       return { ok: true, data: `Set ${files.length} file(s) on "${selector}": ${label}` }
     }
@@ -1266,14 +1266,14 @@ export class AgentViewServer {
     const selector = argStr(req.args, 'selector')
     if (selector) {
       const listeners = await conn.getEventListenersBySelector(selector, depth)
-      if (listeners === null) return { ok: false, error: `No element matches selector "${selector}"` }
+      if (listeners === null) return { ok: false, error: await withFramesOutOfReach(conn, `No element matches selector "${selector}"`) }
       return { ok: true, data: formatListeners(`"${selector}"`, listeners) }
     }
 
     const filter = argStr(req.args, 'filter')
     if (filter) {
       const found = await this.findByFilter(conn, filter, req, targetId)
-      if (!found) return { ok: false, error: `No element found matching "${filter}"` }
+      if (!found) return { ok: false, error: await withFramesOutOfReach(conn, `No element found matching "${filter}"`) }
       const listeners = await conn.getEventListeners(found.backendDOMNodeId, depth)
       return { ok: true, data: formatListeners(`"${found.name}"`, listeners) }
     }
@@ -1330,7 +1330,7 @@ export class AgentViewServer {
       await new Promise(resolve => setTimeout(resolve, interval))
     }
 
-    return { ok: false, error: `Timeout: "${filter}" not found after ${timeout}s` }
+    return { ok: false, error: await withFramesOutOfReach(conn, `Timeout: "${filter}" not found after ${timeout}s`) }
   }
 
   private async captureScreenshotToFile(

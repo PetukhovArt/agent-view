@@ -17,6 +17,7 @@ describe('runAct', () => {
         nodes: new Map([[NODE_ID, { rect: { x: 10, y: 10, width: 100, height: 20 }, tag: 'button', attributes: {}, cursor: 'pointer' }]]),
       }),
       hitTest: async () => null,
+      outOfProcessFrames: async () => [],
       // The until shows once the row was clicked.
       queryVisible: async () => (conn.clickByNodeId.mock.calls.length ? { backendDOMNodeId: 1, count: 1 } : { backendDOMNodeId: null, count: 0 }),
       clickByNodeId: vi.fn(async () => {}),

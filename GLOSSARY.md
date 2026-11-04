@@ -16,6 +16,10 @@ _Avoid_: Frame, Document
 A Target of type `worker`, `shared_worker` or `service_worker`: a JS context, a console and a log, with no DOM and no image.
 _Avoid_: Worker Target, Headless Target
 
+**Out-of-Process Frame**
+An iframe of a Window that another renderer process draws, as site isolation does with a cross-site iframe. CDP lists it as an `iframe` Target of its own, its DOM is not in the Window's Page Session, and element commands name it instead of searching it. Every other iframe is searched as part of its Window.
+_Avoid_: OOPIF, Remote Frame
+
 **Unsupported Target**
 A target type refused at the server boundary before any attach: `browser`, `worklet`, `auction_worklet`.
 

@@ -299,6 +299,7 @@ export type PageSession = RuntimeSession & {
   getAccessibilityTree: () => Promise<AXNode[]>
   /** Same as getAccessibilityTree but also signals whether nodes came from the AX tree cache. */
   getAccessibilityTreeMeta: () => Promise<{ nodes: AXNode[]; fromCache: boolean }>
+  outOfProcessFrames: () => Promise<string[]>
   /** Returns matching nodes by accessible name/role. null = API unavailable; [] = no match. */
   queryAXTree: (params: { accessibleName?: string; role?: string }) => Promise<AXNode[] | null>
   captureScreenshot: (opts?: ScreenshotOpts) => Promise<ScreenshotResult>

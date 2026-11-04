@@ -63,6 +63,15 @@ component libraries put the id on the wrapper. The attribute is `testIdAttribute
 from the AX tree prints no line. An inline `<span data-testid>` holding only text prints as its
 `StaticText`, without the id. `--testid` still finds it.
 
+**Iframes.** An iframe the window's own process renders (same-origin, as an embedded SPA usually is)
+is part of the window: `dom` prints its tree under its `Iframe` node, and refs, `--filter`, `--testid`,
+`--selector`, `wait`, `upload` and the `act` table and steps reach elements in it and in iframes nested
+in it, clicked at their point on the page. Matches across frames count together (`first visible of 2`),
+the main document's first. An iframe another process renders (a cross-site one) has its own `iframe`
+target in `targets`, and agent-view does not search it: `dom`, the `act` table and every
+not-found error end with `Not searched: cross-origin frame in another process, out of agent-view's
+reach: <url>`. Reach it only by a point, `--pos x,y` or `act click css=iframe@x,y`, read off a screenshot.
+
 ### Interaction
 ```bash
 agent-view click <ref>                  # Click element by ref from dom output

@@ -16,6 +16,7 @@ const fakeConn = (attributes: Record<string, string> = {}) => ({
     nodes: new Map([[NODE_ID, { rect: { x: 10, y: 10, width: 100, height: 20 }, tag: 'button', attributes, cursor: 'pointer' }]]),
   }),
   hitTest: async () => null,
+  outOfProcessFrames: async () => [],
   queryVisible: async (_css: string): Promise<{ backendDOMNodeId: number | null; count: number }> => ({ backendDOMNodeId: 1, count: 1 }),
   clickByNodeId: vi.fn(async () => {}),
 })

@@ -12,7 +12,7 @@ import {
   resolveRow,
   type Control,
 } from '../inspectors/controls/index.js'
-import { findByLocator, testIdAttributes } from './locator.js'
+import { findByLocator, testIdAttributes, withFramesOutOfReach } from './locator.js'
 import { clickSceneObject, describePlace, hoverSceneObject, moveSceneCamera, parseScenePlace, withHeight, type SceneMiss } from '../inspectors/scene/index.js'
 import {
   CLICKS,
@@ -249,7 +249,8 @@ async function snapshot({ session, deps }: Run): Promise<Control[]> {
 async function printTable(run: Run, controls?: Control[]): Promise<string> {
   const { session } = run
   session.rows = controls ?? await snapshot(run)
-  return formatControlTable(session.rows, { step: session.steps.length, maxSteps: session.maxSteps, untilLabel: session.until.label })
+  const table = formatControlTable(session.rows, { step: session.steps.length, maxSteps: session.maxSteps, untilLabel: session.until.label })
+  return withFramesOutOfReach(run.deps.conn, table)
 }
 
 async function rowStep(run: Run, { op, n, text, modifiers }: RowStepArgs): Promise<ServerResponse> {
