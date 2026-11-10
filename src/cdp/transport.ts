@@ -62,6 +62,7 @@ const KNOWN_TARGET_TYPES: ReadonlySet<string> = new Set(Object.values(TargetType
  */
 const probeTimeoutMs = (): number => envMs('AGENT_VIEW_CDP_PROBE_TIMEOUT_MS', 5_000)
 const connectTimeoutMs = (): number => envMs('AGENT_VIEW_CDP_CONNECT_TIMEOUT_MS', 10_000)
+const RESUME_ON_CLOSE_MS = 500
 
 function envMs(name: string, fallback: number): number {
   const raw = Number(process.env[name])
@@ -676,6 +677,7 @@ function attachNetworkSubscription(network: RawCDPNetwork): NetworkSubscription 
       kind: NetworkEventKind.ResponseReceived,
       requestId: str(p['requestId']),
       ts: Date.now(),
+      url: str(response['url']),
       status: num(response['status']),
       statusText: str(response['statusText']),
       headers: toStringRecord(response['headers']),
@@ -1157,9 +1159,17 @@ async function runtimeSessionOn(client: RawCDPClient, target: TargetInfo): Promi
   const coverage = attachCoverage(client)
   // While a client stays attached, Chromium keeps a shared worker's DevTools host and starts the
   // worker re-created behind it (a page reload) paused until that client resumes it, as DevTools does.
+  // Until then a command to the ended worker is held, and a client that closes leaves it paused for good:
+  // https://source.chromium.org/chromium/chromium/src/+/main:content/browser/devtools/shared_worker_devtools_manager.cc
+  let isWorkerEnded = false
+  client.on('Inspector.targetCrashed', () => { isWorkerEnded = true })
   client.on('Inspector.targetReloadedAfterCrash', () => {
+    isWorkerEnded = false
     client.Runtime.runIfWaitingForDebugger().catch(() => { /* worker gone again */ })
   })
+  const unlessWorkerEnded = <T>(command: () => Promise<T>): Promise<T> => isWorkerEnded
+    ? Promise.reject(new Error(`${target.type}:${target.id.slice(0, 8)} is gone: its worker ended`))
+    : command()
   await bringUpSession(client, target, async () => {
     await client.Runtime.enable()
     await client.Log.enable()
@@ -1173,15 +1183,18 @@ async function runtimeSessionOn(client: RawCDPClient, target: TargetInfo): Promi
     onDisconnect,
     onConsole: (handler) => consoleSub.add(handler),
     onNetwork: (handler) => networkSub.add(handler),
-    enableNetwork: () => networkSub.enable(),
-    getResponseBody: (requestId) => networkSub.getResponseBody(requestId),
+    enableNetwork: () => unlessWorkerEnded(() => networkSub.enable()),
+    getResponseBody: (requestId) => unlessWorkerEnded(() => withTimeout(networkSub.getResponseBody(requestId), connectTimeoutMs(), 'Network.getResponseBody')),
     startCoverage: () => coverage.start(),
     takeCoverage: () => coverage.take(),
     takeHeapSnapshot: (onChunk) => takeHeapSnapshotImpl(client, onChunk),
-    async close() {
-      await client.close()
-    },
+    close: () => resumeWorkerThenClose(client),
   }
+}
+
+async function resumeWorkerThenClose(client: RawCDPClient): Promise<void> {
+  await withTimeout(client.Runtime.runIfWaitingForDebugger(), RESUME_ON_CLOSE_MS, 'resume before close').catch(() => {})
+  await client.close()
 }
 
 /**

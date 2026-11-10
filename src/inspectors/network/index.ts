@@ -1,5 +1,7 @@
 import type { StampedNetworkEntry } from '../../cdp/network-stream.js'
-import { NetworkEntryState, NetworkResourceType, WebSocketOpcode, WebSocketDirection } from '../../cdp/types.js'
+import { NetworkEntryState, NetworkResourceType, WebSocketOpcode, WebSocketDirection, TargetType } from '../../cdp/types.js'
+
+const PAGE_TARGET_TYPES: ReadonlySet<TargetType> = new Set([TargetType.Page, TargetType.Iframe])
 
 const SENSITIVE_HEADERS = new Set([
   'authorization',
@@ -82,6 +84,7 @@ export function formatNetworkList(
     const timing = entryTiming(entry)
     const parts = [`[req=${ref}]`, method, status, type, entry.url]
     if (timing) parts.push(timing)
+    if (!PAGE_TARGET_TYPES.has(entry.targetType)) parts.push(`[${entry.targetType}:${entry.targetId.slice(0, 8)}]`)
     return parts.join(' ')
   })
 
@@ -193,6 +196,8 @@ export function formatNetworkDetail(
     } else {
       lines.push(entry.responseBody.text)
     }
+  } else if (entry.responseBodyUnavailable !== undefined) {
+    lines.push(`response body: unavailable: ${entry.responseBodyUnavailable}`)
   }
 
   return lines.join('\n')

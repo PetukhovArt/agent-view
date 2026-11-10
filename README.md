@@ -153,7 +153,7 @@ The daemon is why `dom → click → dom` runs in ~17ms total: one persistent CD
 | `watch`       | Stream JSON-patch diffs of any expression. Answers "what changed between click and final state?". |
 | `console`     | `console.log` + `Log.entryAdded` per page **and per worker**, with `--follow --until <pattern>`. |
 | `logs`        | Durable file feed of page + worker console, surviving reloads and worker restarts. `tail --grep/--since/--level`, `clear`, plus re-injecting `--probe` scripts. |
-| `network`     | Request/response timeline, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`. Captures page-load traffic. |
+| `network`     | Request/response timeline of pages and shared workers, headers, timing, bodies, and WebSocket/SSE frames. Filters: `--url`, `--method`, `--status`, `--type`, `--target`. Captures page-load traffic. |
 | `coverage`    | Which functions ran since the last `--clear`. Turns "does any action reach this code?" into a positive answer. Filters: `--filter`, `--file`, `--count`. |
 | `listeners`   | Event handlers bound to a node, each with the `file:line` it was declared at.            |
 | `heap`        | Named heap snapshots diffed by class: what grew after repeating an action, how many are detached DOM nodes, and what retains them. |

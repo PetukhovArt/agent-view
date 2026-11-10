@@ -26,7 +26,7 @@ import {
   type ClickOpts,
   type FileChooserArm,
 } from '../cdp/types.js'
-import { listSupportedTargets, listDedicatedWorkers, connectToRuntime, connectToWorker } from '../cdp/transport.js'
+import { listSupportedTargets, listDedicatedWorkers, connectToRuntime, connectToWorker, withTimeout } from '../cdp/transport.js'
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
 import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
@@ -77,7 +77,10 @@ const EVAL_OUTPUT_CAP = 64 * 1024
 const DEFAULT_CONSOLE_TARGETS: ReadonlyArray<TargetType> = [TargetType.Page, TargetType.SharedWorker, TargetType.ServiceWorker]
 const DEFAULT_NETWORK_BUFFER = 200
 const DEFAULT_NETWORK_MAX_LINES = 50
-const NETWORK_PAGE_TARGETS = new Set<TargetType>([TargetType.Page, TargetType.Iframe])
+const NETWORK_TARGETS = new Set<TargetType>([TargetType.Page, TargetType.Iframe, TargetType.SharedWorker])
+const NETWORK_RESCAN_MS = envMs('AGENT_VIEW_NETWORK_RESCAN_MS', 1_500)
+const NETWORK_GONE_AFTER_MISSES = 2
+const NETWORK_ENABLE_TIMEOUT_MS = 10_000
 /** Below this, a crop rect is a line of text rather than a container worth screenshotting. */
 const TEXT_LINE_HEIGHT_PX = 32
 
@@ -221,6 +224,8 @@ type CachedSession =
   | { kind: 'page'; session: PageSession }
   | { kind: 'runtime'; session: RuntimeSession }
 
+type AppPort = Pick<ServerRequest, 'port' | 'runtime'>
+
 /**
  * Console/network/log state, partitioned by **CDP port**. One daemon serves every checkout on
  * the machine, so parallel worktree slots share it - keeping this state global made slot 9's
@@ -230,6 +235,8 @@ type CachedSession =
 type PortState = {
   consoleStream: ConsoleStream
   networkStream: NetworkStream
+  networkRescan: ReturnType<typeof setTimeout> | null
+  networkMisses: Map<string, number>
   networkRefs: Map<number, { targetId: string; requestId: string }>
   networkNextRef: number
   logRecorder: LogRecorder | null
@@ -241,6 +248,7 @@ type PortState = {
 export class AgentViewServer {
   private server: Server | null = null
   private connections = new Map<string, CachedSession>()
+  private connecting = new Map<string, Promise<CachedSession>>()
   private refStore = new RefStore()
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private sceneCache = new Map<string, SceneNode>()
@@ -308,6 +316,8 @@ export class AgentViewServer {
       state = {
         consoleStream: new ConsoleStream(),
         networkStream: new NetworkStream(),
+        networkRescan: null,
+        networkMisses: new Map(),
         networkRefs: new Map(),
         networkNextRef: 1,
         logRecorder: null,
@@ -499,21 +509,16 @@ export class AgentViewServer {
     return { targetId, windows }
   }
 
-  private async getPageSession(req: ServerRequest, targetId: string): Promise<PageSession> {
-    const connKey = `${req.port}:${targetId}`
-    const cached = this.connections.get(connKey)
-    if (cached) {
-      if (cached.kind === 'page') return cached.session
-      throw new Error(`Cached session for ${targetId} is runtime-only — cannot use page operations.`)
-    }
-    const adapter = getAdapter(req.runtime)
-    const session = await adapter.connect(req.port, targetId, this.axTreeCache)
-    this.connections.set(connKey, { kind: 'page', session })
-    session.onDisconnect(() => this.evictSession(connKey))
-    return session
+  private async getPageSession(req: AppPort, targetId: string): Promise<PageSession> {
+    const cached = await this.cachedSession(`${req.port}:${targetId}`, async () => ({
+      kind: 'page',
+      session: await getAdapter(req.runtime).connect(req.port, targetId, this.axTreeCache),
+    }))
+    if (cached.kind === 'page') return cached.session
+    throw new Error(`Cached session for ${targetId} is runtime-only — cannot use page operations.`)
   }
 
-  private async getRuntimeSession(req: ServerRequest, target: TargetInfo): Promise<RuntimeSession> {
+  private async getRuntimeSession(req: AppPort, target: TargetInfo): Promise<RuntimeSession> {
     const connKey = `${req.port}:${target.id}`
     const cached = this.connections.get(connKey)
     if (cached) return cached.session
@@ -524,12 +529,29 @@ export class AgentViewServer {
     if (!RUNTIME_ONLY_TARGETS.has(target.type)) {
       throw new Error(`Target type "${target.type}" does not support eval/console.`)
     }
-    const session = target.type === TargetType.Worker
-      ? await connectToWorker(req.port, target.id)
-      : await connectToRuntime(req.port, target)
-    this.connections.set(connKey, { kind: 'runtime', session })
-    session.onDisconnect(() => this.evictSession(connKey))
-    return session
+    const opened = await this.cachedSession(connKey, async () => ({
+      kind: 'runtime',
+      session: target.type === TargetType.Worker
+        ? await connectToWorker(req.port, target.id)
+        : await connectToRuntime(req.port, target),
+    }))
+    return opened.session
+  }
+
+  private cachedSession(connKey: string, open: () => Promise<CachedSession>): Promise<CachedSession> {
+    const cached = this.connections.get(connKey)
+    if (cached) return Promise.resolve(cached)
+    const pending = this.connecting.get(connKey)
+    if (pending) return pending
+    const opening = open()
+      .then((opened) => {
+        this.connections.set(connKey, opened)
+        opened.session.onDisconnect(() => this.evictSession(connKey))
+        return opened
+      })
+      .finally(() => this.connecting.delete(connKey))
+    this.connecting.set(connKey, opening)
+    return opening
   }
 
   private async handleDiscover(req: ServerRequest): Promise<ServerResponse> {
@@ -576,27 +598,67 @@ export class AgentViewServer {
     return { ok: true, data: 'Application launched and ready' }
   }
 
-  /**
-   * Connect+attach NetworkStream to every page/iframe target. Idempotent per target.
-   * Recreates the stream with config-tuned capacity/captureBody while it is still empty,
-   * mirroring the consoleStream pattern.
-   */
-  private async ensureNetworkAttached(req: ServerRequest, config: { networkBufferSize?: number; captureBody?: boolean } | null): Promise<void> {
+  private async ensureNetworkAttached(req: AppPort, config: { networkBufferSize?: number; captureBody?: boolean } | null): Promise<void> {
     const state = this.stateFor(req.port)
-    if (state.networkStream.attachedCount === 0) {
+    if (state.networkStream.isEmpty) {
       state.networkStream = new NetworkStream({
         capacity: config?.networkBufferSize ?? DEFAULT_NETWORK_BUFFER,
         captureBody: config?.captureBody ?? false,
       })
     }
-    const all = await listSupportedTargets(req.port)
-    for (const t of all) {
-      if (!NETWORK_PAGE_TARGETS.has(t.type)) continue
+    await this.attachNetworkTargets(req, await listSupportedTargets(req.port))
+    this.scheduleNetworkRescan(req)
+  }
+
+  private async attachNetworkTargets(req: AppPort, listed: TargetInfo[]): Promise<void> {
+    const stream = this.stateFor(req.port).networkStream
+    for (const t of listed) {
+      if (!NETWORK_TARGETS.has(t.type)) continue
       try {
-        const session = await this.getPageSession(req, t.id)
-        await state.networkStream.attach(session)
+        const session = t.type === TargetType.SharedWorker
+          ? await this.getRuntimeSession(req, t)
+          : await this.getPageSession(req, t.id)
+        await withTimeout(stream.attach(session), NETWORK_ENABLE_TIMEOUT_MS, `Network.enable on ${t.type}:${t.id.slice(0, 8)}`)
+          .catch((err: unknown) => { stream.detach(t.id); throw err })
       } catch { /* a single unreachable target shouldn't abort capture */ }
     }
+  }
+
+  private scheduleNetworkRescan(req: AppPort): void {
+    const state = this.stateFor(req.port)
+    if (state.networkRescan) return
+    const app: AppPort = { port: req.port, runtime: req.runtime }
+    const next = (): void => {
+      state.networkRescan = setTimeout(() => {
+        void this.rescanNetwork(app).catch(() => {}).finally(() => {
+          if (this.portStates.get(app.port) === state) next()
+        })
+      }, NETWORK_RESCAN_MS)
+      state.networkRescan.unref?.()
+    }
+    next()
+  }
+
+  private async rescanNetwork(app: AppPort): Promise<void> {
+    const state = this.stateFor(app.port)
+    const listed = await listSupportedTargets(app.port)
+    const listedIds = new Set(listed.map(t => t.id))
+    for (const targetId of state.networkStream.attachedTargetIds()) {
+      if (listedIds.has(targetId)) {
+        state.networkMisses.delete(targetId)
+        continue
+      }
+      const misses = (state.networkMisses.get(targetId) ?? 0) + 1
+      if (misses < NETWORK_GONE_AFTER_MISSES) {
+        state.networkMisses.set(targetId, misses)
+        continue
+      }
+      state.networkMisses.delete(targetId)
+      const connKey = `${app.port}:${targetId}`
+      if (this.connections.has(connKey)) this.evictSession(connKey)
+      else state.networkStream.detach(targetId)
+    }
+    await this.attachNetworkTargets(app, listed)
   }
 
   private async handleDom(req: ServerRequest): Promise<ServerResponse> {
@@ -1801,8 +1863,8 @@ export class AgentViewServer {
     let resolvedTargetId: string | undefined
     const targetQuery = argStr(req.args, 'target') ?? argStr(req.args, 'window')
     if (targetQuery) {
-      const all = await listSupportedTargets(req.port)
-      const match = matchTarget(all, targetQuery)
+      const live = matchTarget(await listSupportedTargets(req.port), targetQuery)
+      const match = live.kind === 'none' ? matchTarget(state.networkStream.capturedTargets(), targetQuery) : live
       if (match.kind !== 'found') {
         return { ok: false, error: describeTargetMatchFailure(targetQuery, match) }
       }
@@ -1815,7 +1877,8 @@ export class AgentViewServer {
       if (!ref) {
         return { ok: false, error: `Invalid req: ${reqN}. Run \`agent-view network\` to get fresh handles.` }
       }
-      const entry = state.networkStream.getEntry(ref.targetId, ref.requestId)
+      const isTargetListed = async (): Promise<boolean> => (await listSupportedTargets(req.port)).some(t => t.id === ref.targetId)
+      const entry = await state.networkStream.getEntry(ref.targetId, ref.requestId, isTargetListed)
       if (!entry) {
         return { ok: false, error: `Request ${reqN} is no longer buffered (evicted or app restarted).` }
       }
@@ -2078,6 +2141,7 @@ export class AgentViewServer {
     await unlink(TOKEN_PATH).catch(() => {})
 
     for (const state of this.portStates.values()) {
+      if (state.networkRescan) clearTimeout(state.networkRescan)
       state.consoleStream.detach()
       state.networkStream.detach()
     }

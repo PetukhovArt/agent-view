@@ -455,6 +455,7 @@ export type NetworkEntry = {
   requestBody?: string
   /** Response body. Captured only when `captureBody`. */
   responseBody?: NetworkBody
+  responseBodyUnavailable?: string
   errorText?: string
   canceled?: boolean
   isWebSocket?: boolean
@@ -480,7 +481,7 @@ export enum NetworkEventKind {
 /** Normalized CDP `Network.*` event emitted by the transport subscription. */
 export type NetworkEvent =
   | { kind: NetworkEventKind.RequestWillBeSent; requestId: string; ts: number; url: string; method: string; resourceType: NetworkResourceType; headers: Record<string, string>; postData?: string }
-  | { kind: NetworkEventKind.ResponseReceived; requestId: string; ts: number; status: number; statusText: string; headers: Record<string, string>; mimeType: string; resourceType: NetworkResourceType }
+  | { kind: NetworkEventKind.ResponseReceived; requestId: string; ts: number; url?: string; status: number; statusText: string; headers: Record<string, string>; mimeType: string; resourceType: NetworkResourceType }
   | { kind: NetworkEventKind.LoadingFinished; requestId: string; ts: number; encodedDataLength: number }
   | { kind: NetworkEventKind.LoadingFailed; requestId: string; ts: number; errorText: string; canceled: boolean; resourceType: NetworkResourceType }
   | { kind: NetworkEventKind.WebSocketCreated; requestId: string; ts: number; url: string }

@@ -73,7 +73,8 @@ they always go through the server so the CDP WebSocket and AX tree cache are reu
       is lost.
     - **`NetworkStream`** (`src/cdp/network-stream.ts`) — the deliberate opposite: **eager**, attached in
       `handleLaunch`, not on the first `network` call, so page-load traffic isn't missed.
-      See [ADR 0002](./docs/adr/0002-eager-network-capture-lifecycle.md).
+      See [ADR 0002](./docs/adr/0002-eager-network-capture-lifecycle.md). Shared workers too, kept current by a
+      rescan, their response bodies fetched on `--req` only: [ADR 0010](./docs/adr/0010-network-capture-of-shared-workers.md).
     - **`AxTreeCache`** — short-TTL cache, invalidated on `Page.frameNavigated` and after `click`/`fill`.
     - **`WatchSession`** (`server/watch-session.ts`) — `watch <expr>` polls a JS expression and emits RFC-6902
       JSON-patch diffs; pairs with `inspectors/watch/`.

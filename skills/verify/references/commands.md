@@ -646,6 +646,8 @@ agent-view network --clear                       # baseline before an interactio
 
 `[req=N]` handles are reallocated on every list call (like `dom` refs) — expand from the most recent list. Sensitive headers are redacted by default (`--raw-headers` reveals them). Response/request **bodies** require `"captureBody": true` in config; WebSocket frame payloads are visible by default.
 
+**Shared workers are captured too**, their lines ending `[shared_worker:<id8>]`; `--target <name>` (the worker's name, its title in `targets`) shows only theirs. A worker that a reload re-creates stays in capture, and one that appears later joins on its own within ~2 s. When a worker or window is gone, its requests stay in the list, and `--target` still finds them. A shared worker's response body is fetched only by `--req`, not at load: a body asked of a worker that has just ended kills the app, so after its end `--req` prints `response body: unavailable: <why>`. Dedicated and service workers are not captured.
+
 Standard pattern for "did the save call fire and succeed?":
 ```bash
 agent-view network --clear

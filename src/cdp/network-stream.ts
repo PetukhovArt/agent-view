@@ -1,5 +1,6 @@
-import type { RuntimeSession, TargetType } from './types.js'
+import type { RuntimeSession, TargetInfo } from './types.js'
 import {
+  TargetType,
   NetworkEventKind,
   NetworkEntryState,
   NetworkResourceType,
@@ -16,14 +17,19 @@ const DEFAULT_CAPACITY = 200
 const FRAME_RING = 100
 const PAYLOAD_CAP = 2048
 const BODY_CAP = 16 * 1024
+const MAX_GONE_TARGETS = 8
 
 export type StampedNetworkEntry = NetworkEntry & { targetId: string; targetType: TargetType }
 
-type AttachedTarget = {
-  session: RuntimeSession
+type CapturedTarget = {
+  target: TargetInfo
+  liveSession: RuntimeSession | null
   entries: Map<string, NetworkEntry>
   dispose: () => void
 }
+
+const isSameSharedWorker = (a: TargetInfo, b: TargetInfo): boolean =>
+  a.type === TargetType.SharedWorker && b.type === TargetType.SharedWorker && a.url === b.url && a.title === b.title
 
 function globToRegex(pattern: string): RegExp {
   const segments = pattern.split('*')
@@ -35,10 +41,23 @@ function isBinaryMime(mime: string): boolean {
   return !mime.startsWith('text/') && !mime.includes('json') && !mime.includes('xml') && !mime.includes('javascript')
 }
 
+function toNetworkBody(body: string, base64Encoded: boolean, mime: string): NetworkBody {
+  if (base64Encoded || isBinaryMime(mime)) {
+    const decoded = base64Encoded ? Buffer.from(body, 'base64') : Buffer.from(body)
+    return { text: '', base64: base64Encoded, size: decoded.byteLength, binary: true }
+  }
+  return { text: body.slice(0, BODY_CAP), base64: false, size: Buffer.byteLength(body), binary: false }
+}
+
+const isBodyFetchedOnDemand = (target: TargetInfo): boolean => target.type === TargetType.SharedWorker
+
+const hasResponseBody = (entry: NetworkEntry): boolean =>
+  entry.state === NetworkEntryState.Complete && !entry.isWebSocket && !entry.isEventSource
+
 export class NetworkStream {
   private readonly capacity: number
   private readonly captureBody: boolean
-  private readonly targets = new Map<string, AttachedTarget>()
+  private readonly targets = new Map<string, CapturedTarget>()
   private readonly subscribers = new Set<(entry: StampedNetworkEntry) => void>()
 
   constructor(opts: { capacity?: number; captureBody?: boolean } = {}) {
@@ -47,20 +66,42 @@ export class NetworkStream {
   }
 
   get attachedCount(): number {
-    return this.targets.size
+    return this.attachedTargetIds().length
+  }
+
+  get isEmpty(): boolean {
+    return this.targets.size === 0
+  }
+
+  attachedTargetIds(): string[] {
+    return [...this.targets.values()].filter(t => t.liveSession !== null).map(t => t.target.id)
+  }
+
+  capturedTargets(): TargetInfo[] {
+    const captured: TargetInfo[] = []
+    for (const t of this.targets.values()) {
+      const sameWorker = captured.findIndex(c => isSameSharedWorker(c, t.target))
+      if (sameWorker === -1) captured.push(t.target)
+      else captured[sameWorker] = t.target
+    }
+    return captured
   }
 
   async attach(session: RuntimeSession): Promise<void> {
     const id = session.target.id
-    if (this.targets.has(id)) return
+    const known = this.targets.get(id)
+    if (known?.liveSession) return
 
-    const entries = new Map<string, NetworkEntry>()
+    const captured: CapturedTarget = { target: session.target, liveSession: session, entries: known?.entries ?? new Map(), dispose: () => {} }
+    captured.dispose = session.onNetwork((ev) => this.handleEvent(captured, ev))
+    this.targets.set(id, captured)
 
-    const dispose = session.onNetwork((ev) => this.handleEvent(id, entries, session, ev))
-
-    this.targets.set(id, { session, entries, dispose })
-
-    await session.enableNetwork()
+    try {
+      await session.enableNetwork()
+    } catch (err) {
+      this.detach(id)
+      throw err
+    }
   }
 
   detach(targetId?: string): void {
@@ -70,17 +111,30 @@ export class NetworkStream {
       return
     }
     const t = this.targets.get(targetId)
-    if (!t) return
+    if (!t?.liveSession) return
     t.dispose()
-    this.targets.delete(targetId)
+    t.liveSession = null
+    if (t.entries.size === 0) this.targets.delete(targetId)
+    this.evictOldestGone()
   }
 
   clear(targetId?: string): void {
-    if (targetId === undefined) {
-      for (const t of this.targets.values()) t.entries.clear()
-      return
+    for (const [id, t] of this.targets) {
+      if (targetId !== undefined && !this.isOfTarget(t, targetId)) continue
+      t.entries.clear()
+      if (t.liveSession === null) this.targets.delete(id)
     }
-    this.targets.get(targetId)?.entries.clear()
+  }
+
+  private evictOldestGone(): void {
+    const gone = [...this.targets.values()].filter(t => t.liveSession === null)
+    for (const t of gone.slice(0, Math.max(0, gone.length - MAX_GONE_TARGETS))) this.targets.delete(t.target.id)
+  }
+
+  private isOfTarget(t: CapturedTarget, targetId: string): boolean {
+    if (t.target.id === targetId) return true
+    const wanted = this.targets.get(targetId)?.target
+    return wanted !== undefined && isSameSharedWorker(wanted, t.target)
   }
 
   subscribe(handler: (entry: StampedNetworkEntry) => void): () => void {
@@ -98,7 +152,7 @@ export class NetworkStream {
     const result: StampedNetworkEntry[] = []
 
     for (const [id, target] of this.targets) {
-      if (filter.targetId && filter.targetId !== id) continue
+      if (filter.targetId && !this.isOfTarget(target, filter.targetId)) continue
 
       for (const entry of target.entries.values()) {
         if (filter.since !== undefined && entry.startTs < filter.since) continue
@@ -131,7 +185,7 @@ export class NetworkStream {
 
         if (filter.type && !filter.type.has(entry.resourceType)) continue
 
-        result.push({ ...entry, targetId: id, targetType: target.session.target.type })
+        result.push({ ...entry, targetId: id, targetType: target.target.type })
       }
     }
 
@@ -139,39 +193,52 @@ export class NetworkStream {
     return result
   }
 
-  getEntry(targetId: string, requestId: string): StampedNetworkEntry | undefined {
+  async getEntry(targetId: string, requestId: string, isTargetListed: () => Promise<boolean>): Promise<StampedNetworkEntry | undefined> {
     const target = this.targets.get(targetId)
     if (!target) return undefined
     const entry = target.entries.get(requestId)
     if (!entry) return undefined
-    return { ...entry, targetId, targetType: target.session.target.type }
+    if (this.captureBody && isBodyFetchedOnDemand(target.target) && hasResponseBody(entry) && entry.responseBody === undefined) {
+      await this.fetchBodyOnDemand(target, entry, isTargetListed)
+    }
+    return { ...entry, targetId, targetType: target.target.type }
   }
 
-  private notify(targetId: string, target: AttachedTarget, entry: NetworkEntry): void {
-    const stamped: StampedNetworkEntry = { ...entry, targetId, targetType: target.session.target.type }
+  private async fetchBodyOnDemand(target: CapturedTarget, entry: NetworkEntry, isTargetListed: () => Promise<boolean>): Promise<void> {
+    if (!target.liveSession || !await isTargetListed()) {
+      entry.responseBodyUnavailable = 'the worker is gone'
+      return
+    }
+    try {
+      const { body, base64Encoded } = await target.liveSession.getResponseBody(entry.requestId)
+      entry.responseBody = toNetworkBody(body, base64Encoded, entry.mimeType ?? '')
+      entry.responseBodyUnavailable = undefined
+    } catch (err) {
+      entry.responseBodyUnavailable = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  private notify(target: CapturedTarget, entry: NetworkEntry): void {
+    const stamped: StampedNetworkEntry = { ...entry, targetId: target.target.id, targetType: target.target.type }
     for (const sub of this.subscribers) {
       try { sub(stamped) } catch { /* ignore */ }
     }
   }
 
-  private upsertEntry(targetId: string, target: AttachedTarget, requestId: string, entry: NetworkEntry): void {
+  private upsertEntry(target: CapturedTarget, requestId: string, entry: NetworkEntry): void {
     const isNew = !target.entries.has(requestId)
     target.entries.set(requestId, entry)
     if (isNew && target.entries.size > this.capacity) {
       const firstKey = target.entries.keys().next().value
       if (firstKey !== undefined) target.entries.delete(firstKey)
     }
-    this.notify(targetId, target, entry)
+    this.notify(target, entry)
   }
 
-  private handleEvent(
-    targetId: string,
-    entries: Map<string, NetworkEntry>,
-    session: RuntimeSession,
-    ev: NetworkEvent,
-  ): void {
-    const target = this.targets.get(targetId)
-    if (!target) return
+  private handleEvent(target: CapturedTarget, ev: NetworkEvent): void {
+    const session = target.liveSession
+    if (!session) return
+    const { entries } = target
 
     switch (ev.kind) {
       case NetworkEventKind.RequestWillBeSent: {
@@ -185,7 +252,7 @@ export class NetworkStream {
           startTs: ev.ts,
           requestBody: this.captureBody ? ev.postData : undefined,
         }
-        this.upsertEntry(targetId, target, ev.requestId, entry)
+        this.upsertEntry(target, ev.requestId, entry)
         break
       }
 
@@ -193,7 +260,7 @@ export class NetworkStream {
         const existing = entries.get(ev.requestId)
         const entry: NetworkEntry = existing ?? {
           requestId: ev.requestId,
-          url: '',
+          url: ev.url ?? '',
           resourceType: ev.resourceType,
           state: NetworkEntryState.Pending,
           startTs: ev.ts,
@@ -203,7 +270,7 @@ export class NetworkStream {
         entry.responseHeaders = ev.headers
         entry.mimeType = ev.mimeType
         entry.ttfbMs = existing ? ev.ts - existing.startTs : 0
-        this.upsertEntry(targetId, target, ev.requestId, entry)
+        this.upsertEntry(target, ev.requestId, entry)
         break
       }
 
@@ -214,22 +281,12 @@ export class NetworkStream {
         existing.endTs = ev.ts
         existing.totalMs = ev.ts - existing.startTs
         existing.encodedDataLength = ev.encodedDataLength
-        this.notify(targetId, target, existing)
+        this.notify(target, existing)
 
-        if (this.captureBody) {
+        if (this.captureBody && !isBodyFetchedOnDemand(target.target)) {
           session.getResponseBody(ev.requestId).then(({ body, base64Encoded }) => {
-            const mime = existing.mimeType ?? ''
-            const binary = base64Encoded || isBinaryMime(mime)
-            let networkBody: NetworkBody
-            if (binary) {
-              const decoded = base64Encoded ? Buffer.from(body, 'base64') : Buffer.from(body)
-              networkBody = { text: '', base64: base64Encoded, size: decoded.byteLength, binary: true }
-            } else {
-              const size = Buffer.byteLength(body)
-              networkBody = { text: body.slice(0, BODY_CAP), base64: false, size, binary: false }
-            }
-            existing.responseBody = networkBody
-            this.notify(targetId, target, existing)
+            existing.responseBody = toNetworkBody(body, base64Encoded, existing.mimeType ?? '')
+            this.notify(target, existing)
           }).catch(() => { /* swallow */ })
         }
         break
@@ -243,7 +300,7 @@ export class NetworkStream {
         existing.totalMs = ev.ts - existing.startTs
         existing.errorText = ev.errorText
         existing.canceled = ev.canceled
-        this.notify(targetId, target, existing)
+        this.notify(target, existing)
         break
       }
 
@@ -257,7 +314,7 @@ export class NetworkStream {
           startTs: ev.ts,
           frames: [],
         }
-        this.upsertEntry(targetId, target, ev.requestId, entry)
+        this.upsertEntry(target, ev.requestId, entry)
         break
       }
 
@@ -274,7 +331,7 @@ export class NetworkStream {
             startTs: ev.ts,
             frames: [],
           }
-          this.upsertEntry(targetId, target, ev.requestId, entry)
+          this.upsertEntry(target, ev.requestId, entry)
         }
         if (!entry.frames) entry.frames = []
 
@@ -295,7 +352,7 @@ export class NetworkStream {
         entry.frames.push(frame)
         if (entry.frames.length > FRAME_RING) entry.frames.shift()
 
-        this.notify(targetId, target, entry)
+        this.notify(target, entry)
         break
       }
 
@@ -313,7 +370,7 @@ export class NetworkStream {
         }
         entry.frames.push(frame)
         if (entry.frames.length > FRAME_RING) entry.frames.shift()
-        this.notify(targetId, target, entry)
+        this.notify(target, entry)
         break
       }
 
@@ -332,7 +389,7 @@ export class NetworkStream {
         if (entry.frames.length > FRAME_RING) entry.frames.shift()
         entry.state = NetworkEntryState.Complete
         entry.endTs = ev.ts
-        this.notify(targetId, target, entry)
+        this.notify(target, entry)
         break
       }
 
@@ -348,7 +405,7 @@ export class NetworkStream {
             startTs: ev.ts,
             frames: [],
           }
-          this.upsertEntry(targetId, target, ev.requestId, entry)
+          this.upsertEntry(target, ev.requestId, entry)
         }
         if (!entry.frames) entry.frames = []
         if (!entry.isEventSource) entry.isEventSource = true
@@ -363,7 +420,7 @@ export class NetworkStream {
         }
         entry.frames.push(frame)
         if (entry.frames.length > FRAME_RING) entry.frames.shift()
-        this.notify(targetId, target, entry)
+        this.notify(target, entry)
         break
       }
     }
