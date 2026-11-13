@@ -140,7 +140,7 @@ Navigation is a recorded path, re-explored only when it broke:
 3. No script fits: record the missing steps, one small action each. A step or use case lies in the section of the area
    of its done condition: the screen it sits on, not the component (`billing__invoices__…` → `billing`; a widget
    on the workspace → `workspace`), whatever areas it passes through. Hand the goal, a done condition and a name
-   `<area>-<target>` (`settings-users-open`) to the `act-decider` agent, which derives the section from the done
+   `<area>-<target>` (`settings-users-open`) to the `act-decider` agent where the harness has it (the Claude Code plugin ships it), which derives the section from the done
    condition, or drive
    `act start … --save <name> --in <section> --note "…"` yourself. Then, when the flow is worth repeating, chain the
    steps with `act save-use-case <name>-use-case --in <section> …`. A step that act cannot record is a missing act op or a missing test id in the app, never a

@@ -66,12 +66,32 @@ chromium --remote-debugging-port=9876
 
 ## Agents
 
-| Where it runs | How to connect it |
-|---|---|
-| Claude Code | `/plugin marketplace add PetukhovArt/agent-view`, then `/plugin install agent-view@agent-view`: adds the `verify` skill and the `act-decider` agent ([workflow](docs/workflow.md)) |
-| Codex, Cursor, Grok, OpenCode | Call the CLI from the shell; copy the gist of [`skills/verify/SKILL.md`](skills/verify/SKILL.md) into the agent's instructions ([other agents](docs/workflow.md#other-agents)) |
+Any agent that runs shell commands can call the CLI. The `verify` skill teaches it the cheap-checks-first workflow ([workflow](docs/workflow.md)); install it once per agent:
 
-With the plugin, describe what must be true:
+<details open><summary><b>Claude Code</b>: the skill and the <code>act-decider</code> agent</summary>
+
+```bash
+claude plugin marketplace add PetukhovArt/agent-view
+claude plugin install agent-view@agent-view
+```
+</details>
+
+<details><summary><b>Codex</b></summary>
+
+```bash
+codex plugin marketplace add PetukhovArt/agent-view
+codex plugin add agent-view@agent-view
+```
+</details>
+
+<details><summary><b>Cursor, OpenCode, Grok and other agents</b></summary>
+
+```bash
+npx skills@latest add PetukhovArt/agent-view -a <agent>   # cursor, opencode, ...; omit -a to choose
+```
+</details>
+
+Then describe what must be true:
 
 ```text
 Verify: after clicking Save, the button stays disabled until the request completes. No console errors.

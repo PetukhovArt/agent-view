@@ -1,0 +1,3 @@
+interface:
+  display_name: "Verify"
+  short_description: "Check a running app over CDP with agent-view"
