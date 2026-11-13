@@ -21,7 +21,7 @@ Agents read your code and your tests. They can't see whether the button is disab
 - **Compact output.** `dom` prints the accessibility tree with `[ref=N]` handles and test ids; `--compact`, `--diff` and `--count` keep it 40–60% smaller, `screenshot --crop --scale` does the same for images.
 - **Workers, windows, background.** Console, network and state reach shared, service and dedicated workers; `--window` addresses settings, tray and detached windows; the app stays behind other windows and never takes focus.
 - **Answers, not screenshots.** `network` records from page load on, WebSocket and SSE frames included; `logs` keeps a console feed that survives reloads; `watch` prints JSON-patches of any expression, `coverage` tells whether an action reached a function, `heap` diffs snapshots down to the detached DOM and its retainers.
-- **WebGL scenes.** `scene` reads the scene graph of PixiJS, CesiumJS or any engine through a hook the app sets, and `click --scene` clicks an object in it.
+- **WebGL scenes.** `scene` reads the scene graph of PixiJS, CesiumJS or any engine through a hook the app sets; on CesiumJS and the hook `click --scene` clicks an object in it.
 - **Replayable and fast.** `act` saves a path through the app and replays it in seconds without a model; a lazy daemon keeps one CDP socket: `dom → click → dom` in about 17 ms.
 
 Running arbitrary JS (`allowEval`) and keeping response bodies (`captureBody`) stay off until the project turns them on.
