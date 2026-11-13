@@ -10,7 +10,6 @@ Your agent sees the DOM, state, console and network of a running app, and clicks
 [![npm](https://img.shields.io/npm/v/@petukhovart/agent-view?label=npm&color=7aa2e0)](https://www.npmjs.com/package/@petukhovart/agent-view)
 [![CI](https://github.com/PetukhovArt/agent-view/actions/workflows/ci.yml/badge.svg)](https://github.com/PetukhovArt/agent-view/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-66c29a)](LICENSE)
-[![Part of jig](https://img.shields.io/badge/part%20of-jig-e0a85c)](https://github.com/PetukhovArt/jig)
 
 </div>
 
@@ -68,8 +67,7 @@ chromium --remote-debugging-port=9876
 | Where it runs | How to connect it |
 |---|---|
 | Claude Code | `/plugin marketplace add PetukhovArt/agent-view`, then `/plugin install agent-view@agent-view`: adds the `verify` skill and the `act-decider` agent ([workflow](docs/workflow.md)) |
-| Cursor, Aider, Cline, Copilot, CI | Call the CLI from the shell; copy the gist of [`skills/verify/SKILL.md`](skills/verify/SKILL.md) into the agent's instructions ([other agents](docs/workflow.md#other-agents-cursor-aider-cline-copilot-ci)) |
-| [jig](https://github.com/PetukhovArt/jig) | Uses agent-view for UI proof before a merge request |
+| Codex, Cursor, Grok, OpenCode | Call the CLI from the shell; copy the gist of [`skills/verify/SKILL.md`](skills/verify/SKILL.md) into the agent's instructions ([other agents](docs/workflow.md#other-agents)) |
 
 With the plugin, describe what must be true:
 
@@ -99,6 +97,6 @@ Every flag: [commands](docs/commands.md).
 
 ## Docs
 
-[Commands](docs/commands.md) · [Configuration and CDP](docs/configuration.md) · [Workflow](docs/workflow.md) · [How it works](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md) · [ADRs](docs/adr/) · [Changelog](CHANGELOG.md)
+[Commands](docs/commands.md) · [Configuration and CDP](docs/configuration.md) · [Workflow](docs/workflow.md) · [How it works](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md) · [Changelog](CHANGELOG.md)
 
 MIT © Artem Petukhov

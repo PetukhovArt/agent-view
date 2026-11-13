@@ -39,7 +39,7 @@ Step 4 failed (zone filter not mutating store). Fix and re-run that step plus st
 - Pasting Figma URLs. agent-view doesn't fetch from Figma; export to PNG and pass the local path.
 - 50 assertions in one run. Split per-feature; a verification pass should finish in under 2 minutes.
 
-## Other agents (Cursor, Aider, Cline, Copilot, CI)
+## Other agents
 
 The CLI is the whole product. Any agent that can run shell commands can use it:
 
