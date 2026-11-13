@@ -1,7 +1,7 @@
 {
   "name": "@petukhovart/agent-view",
   "version": "0.27.0",
-  "description": "CLI tool for visual verification of desktop apps (Electron/Tauri) via Chrome DevTools Protocol",
+  "description": "DevTools for AI agents: see and drive a running Electron, Tauri or Chromium app over CDP",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
