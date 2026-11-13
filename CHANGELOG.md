@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.27.0 (2026-11-13)
+
 - Added install of the `verify` skill for Codex (`codex plugin marketplace add PetukhovArt/agent-view`) and for Cursor, OpenCode, Grok and other agents (`npx skills add PetukhovArt/agent-view`)
 - Added elements inside iframes to every element command: an iframe the window's process renders (an embedded same-origin SPA), and the iframes nested in it, print in `dom` under their `Iframe` node, and refs, `--filter`, `--testid`, `--selector`, `wait`, `key`, `upload`, the `act` table and steps and `act replay` find and click elements in them at their point on the page. They used to answer `No element found` and act-decider clicked such an app by pixel. An iframe another process renders (a cross-site one) is still not searched, and `dom`, the `act` table and every not-found error now end with `Not searched: cross-origin frame in another process, out of agent-view's reach: <url>` instead of a bare not-found.
 - Added `"webgl": { "engine": "app-hook" }`: `scene`, `snap`, `click --scene`, `scene --goto` and the act `scene=` / `goto` steps on any engine (MapLibre, three.js, a 2D canvas) through a Scene Hook the app sets, `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)`. The contract is in the verify skill's command reference, Scene section. With no hook on the page `scene` prints `No scene: window.__AGENT_VIEW_SCENE__ is not on the page, …` and a scene step waits for it. See ADR 0009.
