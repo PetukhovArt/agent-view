@@ -30,7 +30,8 @@ import { listSupportedTargets, listDedicatedWorkers, connectToRuntime, connectTo
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
 import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
-import { auditPage, hasErrors, AUDIT_RULES, type AuditRule, type AuditResult } from '../inspectors/audit/index.js'
+import { auditPage, hasErrors, AUDIT_RULES, SCENE_RULES, type AuditRule, type SceneRule, type AuditResult } from '../inspectors/audit/index.js'
+import { auditScene } from '../inspectors/audit/scene.js'
 import { drawOutlines } from '../cdp/png.js'
 import { formatDialogStatus, describePolicy, describeArm } from '../inspectors/dialog/index.js'
 import { formatCoverage } from '../inspectors/coverage/index.js'
@@ -1417,18 +1418,23 @@ export class AgentViewServer {
   }
 
   private async handleAudit(req: ServerRequest): Promise<ServerResponse> {
+    const scene = argBool(req.args, 'scene') ?? false
+    const known: readonly string[] = scene ? SCENE_RULES : AUDIT_RULES
     const requested = argStrArray(req.args, 'rules')
-    const unknown = requested?.filter(r => !(AUDIT_RULES as readonly string[]).includes(r)) ?? []
-    if (unknown.length > 0) return { ok: false, error: `Unknown audit rule ${unknown.join(', ')}. Rules: ${AUDIT_RULES.join(', ')}` }
+    const unknown = requested?.filter(r => !known.includes(r)) ?? []
+    if (unknown.length > 0) return { ok: false, error: `Unknown audit rule ${unknown.join(', ')}. Rules: ${known.join(', ')}` }
+    if (scene && argStr(req.args, 'root') !== undefined) return { ok: false, error: '--root does not combine with --scene: a scene is audited whole' }
     const { targetId } = await this.resolveWindow(req)
     const conn = await this.getPageSession(req, targetId)
 
-    const result = await auditPage(conn, {
-      root: argStr(req.args, 'root'),
-      rules: requested as AuditRule[] | undefined,
-      minTarget: argNum(req.args, 'minTarget'),
-      testIdAttrs: testIdAttributes(argStr(req.args, 'testIdAttribute')),
-    })
+    const result = scene
+      ? await auditScene(conn, req.engine, requested as SceneRule[] | undefined)
+      : await auditPage(conn, {
+        root: argStr(req.args, 'root'),
+        rules: requested as AuditRule[] | undefined,
+        minTarget: argNum(req.args, 'minTarget'),
+        testIdAttrs: testIdAttributes(argStr(req.args, 'testIdAttribute')),
+      })
     if ('error' in result) return { ok: false, error: result.error }
     return this.finishAudit(conn, result, argStr(req.args, 'shot'))
   }

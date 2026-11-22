@@ -1,10 +1,18 @@
 import { WebGLEngine } from '../../../../types.js'
-import type { SceneAdapter, SceneNode } from '../../types.js'
+import type { SceneAdapter, SceneBounds, SceneNode } from '../../types.js'
 import { APP_HOOK_EXTRACT_SCRIPT, HOOK, appHookGotoScript, appHookLocateScript } from './injection.js'
 
 const strings = (raw: unknown): Record<string, string> | undefined => {
   if (typeof raw !== 'object' || raw === null) return undefined
   return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, String(value)]))
+}
+
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+function parseBounds(raw: unknown): SceneBounds | undefined {
+  const b = raw as Record<string, unknown> | null
+  if (!b || !isNumber(b.x) || !isNumber(b.y) || !isNumber(b.width) || !isNumber(b.height)) return undefined
+  return { x: b.x, y: b.y, width: b.width, height: b.height }
 }
 
 function parseNode(raw: unknown): SceneNode | null {
@@ -13,11 +21,15 @@ function parseNode(raw: unknown): SceneNode | null {
   const children = Array.isArray(n.children) ? parseNodes(n.children) : undefined
   if (children === null) return null
   const hasPoint = typeof n.x === 'number' && typeof n.y === 'number'
+  const bounds = parseBounds(n.bounds)
   return {
     type: n.type,
     name: n.name,
     ...(hasPoint ? { x: n.x as number, y: n.y as number } : {}),
     visible: n.visible,
+    ...(bounds ? { bounds } : {}),
+    ...(typeof n.id === 'string' ? { id: n.id } : {}),
+    ...(typeof n.parent === 'string' ? { parent: n.parent } : {}),
     ...(children ? { children } : {}),
     ...(n.extras ? { extras: strings(n.extras) } : {}),
     ...(n.verboseExtras ? { verboseExtras: strings(n.verboseExtras) } : {}),

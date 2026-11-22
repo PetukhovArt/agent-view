@@ -12,6 +12,7 @@ type AuditOptions = {
   rules?: string
   minTarget?: number
   shot?: string
+  scene?: boolean
   maxLines?: number
   json?: boolean
 }
@@ -23,6 +24,7 @@ export async function runAudit(config: AgentViewConfig, options: AuditOptions): 
   if (options.rules !== undefined) args.rules = options.rules.split(',').map(r => r.trim()).filter(Boolean)
   if (options.minTarget !== undefined) args.minTarget = options.minTarget
   if (options.shot !== undefined) args.shot = resolve(options.shot)
+  if (options.scene) args.scene = true
 
   const response = await sendCommand({ command: 'audit', port: config.port, runtime: config.runtime, engine: config.webgl?.engine, args })
 

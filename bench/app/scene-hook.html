@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scene hook fixture</title>
+<style>
+  html, body { margin: 0; overflow: hidden; background: #fff; }
+  canvas { display: block; width: 800px; height: 600px; background: #eef; }
+</style>
+</head>
+<body>
+<canvas id="scene" width="800" height="600"></canvas>
+<script>
+  const text = (id, name, x, y, width, height, visible = true) => ({ type: 'Text', name, id, visible, bounds: { x, y, width, height } })
+  const nodes = [
+    { type: 'layer', name: 'Basemap', visible: true, bounds: { x: 0, y: 0, width: 2000, height: 2000 } },
+    {
+      type: 'panel', name: 'Legend', id: 'legend', visible: true, bounds: { x: 20, y: 20, width: 200, height: 100 },
+      children: [
+        text('ok-title', 'Title', 30, 30, 100, 20),
+        text('ok-next', 'Next', 130, 30, 60, 20),
+        text('bad-overlap-a', 'Row A', 30, 60, 100, 16),
+        text('bad-overlap-b', 'Row B', 90, 66, 100, 16),
+        text('ok-ghost', 'Ghost', 30, 60, 100, 16, false),
+        text('bad-text-out', 'Overflowing label', 150, 100, 120, 20),
+      ],
+    },
+    text('bad-edge', 'Edge', 740, 300, 120, 16),
+    text('ok-outside', 'Outside', 900, 300, 120, 16),
+  ]
+  const strip = (n) => { const { bounds, ...rest } = n; return n.children ? { ...rest, children: n.children.map(strip) } : rest }
+  const withBounds = !location.search.includes('nobounds')
+  window.__AGENT_VIEW_SCENE__ = { nodes: () => (withBounds ? nodes : nodes.map(strip)) }
+</script>
+</body>
+</html>

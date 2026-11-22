@@ -4,12 +4,12 @@ import { appHookAdapter } from './adapter.js'
 describe('appHookAdapter.normalize', () => {
   it('roots the hook nodes under one Scene node, extras as strings, a half point dropped', () => {
     const nodes = [
-      { type: 'marker', name: 'Tower 3', x: 640, y: 410, visible: true, extras: { id: 't3', size: 2 } },
-      { type: 'zone', name: '', x: 12, y: null, visible: false, children: [{ type: 'marker', name: 'Gate', visible: true }] },
+      { type: 'marker', name: 'Tower 3', x: 640, y: 410, visible: true, id: 't3', parent: 'z', bounds: { x: 1, y: 2, width: 3, height: 4 }, extras: { id: 't3', size: 2 } },
+      { type: 'zone', name: '', x: 12, y: null, visible: false, bounds: { x: 1, y: 2, width: 'wide', height: 4 }, children: [{ type: 'marker', name: 'Gate', visible: true }] },
     ]
     expect(appHookAdapter.normalize(nodes)).toEqual({
       type: 'Scene', name: '', visible: true, children: [
-        { type: 'marker', name: 'Tower 3', x: 640, y: 410, visible: true, extras: { id: 't3', size: '2' } },
+        { type: 'marker', name: 'Tower 3', x: 640, y: 410, visible: true, id: 't3', parent: 'z', bounds: { x: 1, y: 2, width: 3, height: 4 }, extras: { id: 't3', size: '2' } },
         { type: 'zone', name: '', visible: false, children: [{ type: 'marker', name: 'Gate', visible: true }] },
       ],
     })

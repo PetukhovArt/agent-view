@@ -558,6 +558,16 @@ warn  target-size button "Close" testid=bad-small-button @20,290 16x16 — 16x16
 
 Exit `0` no error finding (warnings alone exit 0), `1` at least one error finding, `2` the audit could not run (unknown `--rules` name, no element for `--root`, no window). Never flagged: `display: none`, `visibility: hidden`, opacity near 0, zero-size, sr-only, scroll containers, ellipsis and line-clamp text, closed drawers parked off-canvas, layers (dialog, popover, tooltip, `z-index`) over content, collapsed `<details>`. It audits the viewport the window has now: run `emulate` first to audit a phone, `--color-scheme dark` for the dark theme. No `allowEval` needed: the page is read by a fixed script, never by caller code.
 
+`audit --scene` audits a canvas scene instead of the DOM, through the Scene Hook (`"webgl": { "engine": "app-hook" }`) whose nodes carry `bounds` (see Scene below). Text nodes are the nodes whose `type` contains `text` or `label` (any case); invisible nodes, and nodes under an invisible one, are skipped. Same finding shape, `--json`, `--shot` and exit codes; findings are all `error`:
+
+| Rule | Finds |
+|---|---|
+| `scene-text-out` | a text node whose bounds are not inside its parent's bounds (a parent with no bounds is skipped) |
+| `scene-overlap` | two text nodes with the same parent whose bounds intersect |
+| `scene-offscreen` | a text node whose bounds cross the viewport edge; one wholly outside is fine |
+
+`--rules` then takes those names; `--root` and `--min-target` do not apply. A finding's `target` is `{ testid: <node id>, role: <type>, name, selector: "Panel \"Legend\" > Text" }`, the selector being the path through the nodes. Exit `2` with a message when it cannot run: another engine (`This engine gives no bounds: …`), no hook on the page (`No scene: …`), or a hook whose nodes carry no `bounds` (`This scene gives no bounds: expose a bounds { x, y, width, height } in page CSS px on its nodes through window.__AGENT_VIEW_SCENE__.nodes()`).
+
 ### Runtime State (`eval`)
 
 Reads runtime values DOM/screenshot can't reveal — store contents, computed flags, worker internals.
@@ -837,6 +847,9 @@ type SceneNode = {
   type: string; name: string
   x?: number; y?: number            // page CSS px of the click point; omit when off screen
   visible: boolean
+  bounds?: { x: number; y: number; width: number; height: number } // page CSS px; only `audit --scene` reads it
+  id?: string                       // names this node for a `parent` below
+  parent?: string                   // the `id` of the parent in a flat list; nesting in `children` already gives one
   children?: SceneNode[]
   extras?: Record<string, string>   // printed inline, e.g. { id }
   verboseExtras?: Record<string, string> // printed with --verbose
@@ -853,6 +866,8 @@ window.__AGENT_VIEW_SCENE__ = {
   goto(target: SceneGoto): { lonLat: [number, number, number] } | SceneMiss | Promise<…>,
 }
 ```
+
+`agent-view audit --scene` audits the same nodes (see Layout audit); it needs `bounds` and ignores the rest of the page. `bounds` is the node's box in the page's CSS px, as `getBoundingClientRect` reports it; a node without it is skipped.
 
 `scene` prints the nodes under one `Scene` root, in the order `nodes()` returns them; keep it stable, or
 `--diff` reports moves. A hook that throws ends the step with `__AGENT_VIEW_SCENE__.<method> threw: …`.

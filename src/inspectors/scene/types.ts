@@ -8,12 +8,17 @@ export type SceneNode = {
   x?: number
   y?: number
   visible: boolean
+  bounds?: SceneBounds
+  id?: string
+  parent?: string
   children?: SceneNode[]
   // Always shown inline (e.g. Pixi tint). Pre-formatted by the adapter.
   extras?: Record<string, string>
   // Shown only with --verbose (e.g. alpha, scale, rotation).
   verboseExtras?: Record<string, string>
 }
+
+export type SceneBounds = { x: number; y: number; width: number; height: number }
 
 export type SceneOptions = {
   filter?: string

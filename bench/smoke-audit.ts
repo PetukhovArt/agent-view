@@ -7,7 +7,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import CDP from 'chrome-remote-interface'
 import { AgentViewServer } from '../src/server/server.js'
 import { SERVER_PORT, TOKEN_PATH } from '../src/server/port.js'
-import { RuntimeType } from '../src/types.js'
+import { RuntimeType, WebGLEngine } from '../src/types.js'
 import type { AuditResult } from '../src/inspectors/audit/index.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -130,6 +130,33 @@ async function main(): Promise<void> {
     const shot = await run('audit', { shot: shotPath })
     const written = existsSync(shotPath) ? readFileSync(shotPath) : Buffer.alloc(0)
     check('--shot writes a PNG', shot.ok && written.subarray(1, 4).toString() === 'PNG', shotPath)
+
+    console.log('\n[smoke] audit --scene through the app scene hook')
+    const runScene = (args: Record<string, unknown> = {}) => sendCommand({ ...base, engine: WebGLEngine.AppHook, command: 'audit', args: { ...args, scene: true, cwd } })
+    const noHook = await runScene()
+    check('a page with no hook exits with a clear message', !noHook.ok && String(noHook.error).startsWith('No scene: window.__AGENT_VIEW_SCENE__'), noHook.error ?? '')
+    const noEngine = await sendCommand({ ...base, command: 'audit', args: { scene: true, cwd } })
+    check('another engine is told it gives no bounds', !noEngine.ok && String(noEngine.error).includes('gives no bounds'), noEngine.error ?? '')
+
+    await open(`${pathToFileURL(join(__dirname, 'app', 'scene-hook.html')).href}?nobounds`)
+    const noBounds = await runScene()
+    check('a hook without bounds says to expose them', !noBounds.ok && String(noBounds.error).includes('gives no bounds'), noBounds.error ?? '')
+
+    await open(pathToFileURL(join(__dirname, 'app', 'scene-hook.html')).href)
+    await run('emulate', { width: 800, height: 600, scale: 1 })
+    const scene = await runScene()
+    const sceneResult = scene.data as AuditResult
+    const sceneGot = (sceneResult?.findings ?? []).map(label).sort()
+    const sceneExpected = ['scene-offscreen error bad-edge', 'scene-overlap error bad-overlap-a', 'scene-text-out error bad-text-out']
+    check('scene findings match the planted set', JSON.stringify(sceneGot) === JSON.stringify(sceneExpected), sceneGot.join(' | ') || scene.error)
+    check('a scene error gives exit code 1', scene.exitCode === 1, String(scene.exitCode))
+    const only = await runScene({ rules: ['scene-overlap'] })
+    check('--rules narrows to one scene rule', ((only.data as AuditResult | undefined)?.findings ?? []).map(label).join() === 'scene-overlap error bad-overlap-a')
+    const wrongRule = await runScene({ rules: ['overlap'] })
+    check('a page rule is refused with --scene', !wrongRule.ok && String(wrongRule.error).includes('Unknown audit rule'), wrongRule.error ?? '')
+    const sceneShot = join(cwd, 'scene.png')
+    await runScene({ shot: sceneShot })
+    check('--shot works for a scene', existsSync(sceneShot))
   } finally {
     await run('emulate', { reset: true }).catch(() => {})
     await sendCommand({ token, command: 'stop', args: {} }).catch(() => {})

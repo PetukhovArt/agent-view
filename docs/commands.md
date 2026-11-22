@@ -238,6 +238,8 @@ A finding without a test id ends with `selector=<css>`. In `--json`, a finding i
 
 Exit codes: `0` no error finding (warnings alone still exit 0), `1` at least one error finding, `2` the audit could not run (no window, unknown `--rules` name, no element for `--root`).
 
+`audit --scene` audits a canvas scene through the app scene hook (`"engine": "app-hook"`) instead of the DOM. The hook's nodes carry an optional `bounds { x, y, width, height }` in page CSS px (and `id` / `parent`); the rules are `scene-text-out` (a text node outside its parent's bounds), `scene-overlap` (sibling text nodes that intersect) and `scene-offscreen` (a text node across the viewport edge), all errors, with the same finding shape, `--json`, `--shot` and exit codes. With another engine, no hook, or a hook without bounds, it exits 2 saying so. Contract: [`commands.md`](./skills/verify/references/commands.md), Scene section.
+
 The page is read in one pass by a fixed script the tool injects, the way `dom` reads the tree, so `audit` does not need `allowEval`; it never runs anything the caller wrote. It walks at most 6000 elements, open shadow roots included (`truncated` says when it stopped).
 
 ## `scene`

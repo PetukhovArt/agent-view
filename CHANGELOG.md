@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `audit --scene`: audits a canvas scene through the app scene hook, whose nodes may now carry `bounds` (page CSS px), `id` and `parent`; reports `scene-text-out`, `scene-overlap` and `scene-offscreen` in the same shape and exit codes as `audit`, and exits 2 saying so when the engine, the hook or the nodes give no bounds
+
 - Added `audit`: reads the window's layout and reports offscreen, clipped, text-clip, overlap, target-size and contrast findings (one line each, `--json`, `--rules`, `--root`, `--min-target`, `--shot <png>` draws the rects); exit 1 on an error finding, 2 when it cannot run; under `emulate --pointer coarse` the target-size minimum is 44 px and an error
 
 - Added `emulate`: a window's viewport (`--width`, `--height`, `--scale`), `--color-scheme light|dark`, `--pointer coarse|fine` (coarse turns touch emulation on) and `--reduced-motion`, kept until `--reset` so `screenshot`, `act` and the rest see it; no flags prints the state, `--json` prints it as JSON

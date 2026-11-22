@@ -10,6 +10,7 @@
 ## Decision
 
 - **Scene Hook:** the app sets `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)`, shaped as agent-view's `SceneNode`, `SceneMiss` and `SceneGoto`. The `app-hook` Scene Adapter only calls it. The contract is documented (`commands.md`, Scene), not exported as a package type: the app copies it, so agent-view's internal types do not become a public API.
+- **Bounds for `audit --scene`:** a node may carry `bounds { x, y, width, height }` in page CSS px, and `id` / `parent` for a flat list. `audit --scene` reads them to check text against its parent, its siblings and the viewport; no other command does, and a node without them still works everywhere else. An engine adapter reads no bounds, so `audit --scene` runs only on `app-hook`.
 - **Chosen by config:** `"webgl": { "engine": "app-hook" }`. A hook present on the page does not switch the engine by itself, so a script behaves the same on a build with the hook and one without. `init` does not detect it.
 - **New engines go through the hook.** The PixiJS and CesiumJS adapters stay, because they need no code in the app; no adapter is added for another library.
 - **No hook on the page is `missing`,** as a CesiumJS page with no viewer yet: a step waits for it while the page loads.
@@ -24,4 +25,4 @@
 ## Consequences
 
 - agent-view knows no app: what an object is, how it is named and how a click reaches it are the hook's.
-- The `app-hook` adapter has no bench smoke; it is checked against apps that implement the hook.
+- The `app-hook` adapter is checked by `bench/smoke-audit.ts` (`audit --scene` against `bench/app/scene-hook.html`) and against apps that implement the hook.
