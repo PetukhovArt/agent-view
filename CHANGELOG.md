@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `screenshot --out <path>`: writes the PNG to that path, creating its directories, instead of the temp dir
+
 ## 0.27.0 (2026-11-13)
 
 - Added install of the `verify` skill for Codex (`codex plugin marketplace add PetukhovArt/agent-view`) and for Cursor, OpenCode, Grok and other agents (`npx skills add PetukhovArt/agent-view`)

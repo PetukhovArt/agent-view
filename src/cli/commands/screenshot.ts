@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { sendCommand } from '../client.js'
 import type { AgentViewConfig } from '../../config/types.js'
 
@@ -8,6 +9,7 @@ type ScreenshotOptions = {
   testid?: string
   selector?: string
   cropUp?: number
+  out?: string
 }
 
 export async function runScreenshot(config: AgentViewConfig, options: ScreenshotOptions): Promise<void> {
@@ -23,6 +25,7 @@ export async function runScreenshot(config: AgentViewConfig, options: Screenshot
   if (options.scale !== undefined) args.scale = options.scale
   if (options.crop !== undefined) args.crop = options.crop
   if (options.cropUp !== undefined) args.cropUp = options.cropUp
+  if (options.out !== undefined) args.out = resolve(options.out)
 
   const response = await sendCommand({
     command: 'screenshot',

@@ -502,7 +502,10 @@ agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not
 agent-view screenshot --testid order-card      # Crop to the element with this test id
 agent-view screenshot --selector ".chart"      # Crop to the first visible selector match
 agent-view screenshot                          # Full-res PNG (expensive: ~19k tokens at 1920×1080)
+agent-view screenshot --out shots/home.png     # Write to this path (directories created) instead of the temp dir
 ```
+
+`--out <path>` takes a relative path against the directory you run in, prints the resolved path, and combines with `--scale` and every crop.
 
 `--crop <filter>` resolves the element with the same filter syntax as `dom --filter`, then crops the screenshot to its bounding box. Prefer `--crop` over full-window screenshots whenever you only need to inspect a specific section. Falls back to full-window with a stderr warning if the filter matches nothing. `--testid` / `--selector` crop the same way and take `--crop-up`, but a miss exits 1 instead: an exact address that misses is a wrong address, and a full-window capture would spend ~19k tokens on it. Pass at most one of `--crop`, `--testid`, `--selector`.
 

@@ -1,8 +1,8 @@
 import { createServer, type Server, type Socket } from 'node:net'
-import { writeFile, unlink } from 'node:fs/promises'
+import { writeFile, unlink, mkdir } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { getAdapter } from '../adapters/registry.js'
 import { isAppTarget } from '../adapters/target-filter.js'
@@ -1398,10 +1398,11 @@ export class AgentViewServer {
   private async captureScreenshotToFile(
     conn: PageSession,
     opts: { scale?: number; clip?: { x: number; y: number; width: number; height: number } } = {},
+    out?: string,
   ): Promise<string> {
     const { buffer, format } = await conn.captureScreenshot(opts)
-    const filename = `agent-view-screenshot-${Date.now()}.${format}`
-    const filepath = join(tmpdir(), filename)
+    const filepath = out ?? join(tmpdir(), `agent-view-screenshot-${Date.now()}.${format}`)
+    await mkdir(dirname(filepath), { recursive: true })
     await writeFile(filepath, buffer)
     return filepath
   }
@@ -1442,7 +1443,8 @@ export class AgentViewServer {
       }
     }
 
-    const filepath = await this.captureScreenshotToFile(conn, { scale, clip })
+    const out = argStr(req.args, 'out')
+    const filepath = await this.captureScreenshotToFile(conn, { scale, clip }, out === undefined ? undefined : resolve(out))
     return { ok: true, data: filepath, warning }
   }
 

@@ -180,13 +180,14 @@ program
 
 program
   .command('screenshot')
-  .description('Capture screenshot and save to temp dir')
+  .description('Capture screenshot and save to temp dir, or to --out')
   .option('-w, --window <id>', 'Target window ID or name')
   .option('-s, --scale <factor>', 'Scale factor 0..1 — reduces image size and Claude vision token cost (e.g. 0.5)', parseFloat)
   .option('--crop <filter>', 'Crop to bounding box of matched element (massive vision-token win)')
   .option('--testid <id>', 'Crop to the element with this test id')
   .option('--selector <css>', 'Crop to the element matching this CSS selector')
   .option('--crop-up <n>', 'Climb N element ancestors from the crop match before cropping (heading → its card)', parseCropUp)
+  .option('--out <path>', 'Write the PNG to this path (directories are created) instead of the temp dir')
   .action(async (options) => {
     const config = requireConfig()
     await runScreenshot(config, options)

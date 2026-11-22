@@ -151,7 +151,7 @@ Out of reach: `showOpenFilePicker()` (File System Access API) exposes no input t
 
 ## `screenshot`
 
-Captures a screenshot, saves to temp dir, prints the file path. Always PNG.
+Captures a screenshot, saves to temp dir (or to `--out <path>`), prints the file path. Always PNG.
 
 ```bash
 agent-view screenshot
@@ -160,7 +160,10 @@ agent-view screenshot --scale 0.25            # Quarter-res (~12× fewer, 1 tile
 agent-view screenshot --crop "Sidebar"        # Crop to element bounding box (~12× fewer in best case)
 agent-view screenshot --crop "Chart" --scale 0.5  # Crop + scale (stacks)
 agent-view screenshot --crop "Active bookings" --crop-up 1  # Crop the card, not its heading
+agent-view screenshot --out shots/home.png    # Write to this path, directories created
 ```
+
+`--out <path>` writes the PNG to that path instead of the temp dir (a relative path resolves against the directory you run in) and prints the resolved path. It combines with `--scale` and every crop.
 
 `--scale` accepts a factor in `(0, 1]`; recommended for agent loops where vision tokens dominate cost. Crop and scale run inside the server on a plain full-viewport capture: a CDP `clip` resizes the app's render view until the capture completes, and on a hidden or minimised window it never completes, leaving the app drawn in a corner.
 
