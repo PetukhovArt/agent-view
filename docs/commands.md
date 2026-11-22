@@ -201,6 +201,45 @@ Measured with `matchMedia` and `innerWidth` after `--width 390 --height 844 --sc
 
 Limits found: on the test PC neither Chrome nor Electron reported `(pointer: fine)` or `(hover: hover)` before emulation (`(hover: none)` already matched), so `--pointer fine` could not be shown to change a match there, and `(hover: none)` turning on with `coarse` was not isolated. `ontouchstart in window` stays false after touch emulation until the page is created again; touch events are not synthesised from `click`, which stays a mouse input.
 
+## `audit`
+
+Reads the layout of the window's DOM and reports what a user would see broken: content pushed off the viewport, cut off, overlapping, too small to hit or too faint to read. Run it under `emulate` to audit a phone or the dark theme.
+
+```bash
+agent-view audit                                      # every rule, whole page
+agent-view audit --root settings-panel                # only that test id or selector, and what it holds
+agent-view audit --rules overlap,target-size          # a subset
+agent-view audit --min-target 32                      # smallest target in px (default 24, 44 under a coarse pointer)
+agent-view audit --shot out/audit.png                 # a viewport PNG with every finding's rect drawn on it
+agent-view audit --json                               # { viewport, coarsePointer, scanned, truncated, counts, findings }
+agent-view audit --max-lines 200                      # findings printed before the rest is counted (default 50)
+```
+
+| Rule | Severity | Finds |
+|---|---|---|
+| `offscreen` | error | content that crosses the viewport edge (the right or left edge for any content, the bottom or top edge for fixed layers and dialogs); content parked wholly outside, as in a closed drawer, is fine |
+| `clipped` | error | content cut by an ancestor's `overflow: hidden` or `clip`; scroll containers, `text-overflow: ellipsis`, `line-clamp` and transformed sliders are fine |
+| `text-clip` | error | text whose box is smaller than the text (`scrollWidth` over `clientWidth`, or the height equivalent) with no ellipsis, clamp or scroll |
+| `overlap` | error | two text or control boxes that intersect and are neither nested nor in different layers (a popover, dialog, tooltip or a `z-index` layer over content is fine) |
+| `target-size` | warn, error under a coarse pointer | an enabled control smaller than 24 px (44 px under `--pointer coarse`); an inline link, a disabled control and a checkbox whose label is large enough are fine |
+| `contrast` | warn | text under 4.5:1 (3:1 for large text) against its resolved background, counting opacity; text over an image or gradient is not judged |
+
+Never flagged, whatever the rule: `display: none`, `visibility: hidden`, opacity near 0, zero-size boxes, visually hidden (sr-only) text, collapsed `<details>` and `content-visibility: hidden` content.
+
+Output is one line per finding, the summary last:
+
+```
+error offscreen paragraph "Pushed past the edge" testid=bad-offscreen @720,10 136x16 — extends past the right by 56 px of the 800 px wide viewport
+warn  target-size button "Close" testid=bad-small-button @20,290 16x16 — 16x16 px, below 24 px
+audit: 1 error, 1 warning, 800x600 viewport, 64 elements
+```
+
+A finding without a test id ends with `selector=<css>`. In `--json`, a finding is `{ rule, severity, target: { testid?, role?, name?, text?, selector }, rect: { x, y, width, height }, detail }`, the rect in CSS px of the viewport. `--shot` draws errors in red and warnings in orange and prints `shot: <path>`.
+
+Exit codes: `0` no error finding (warnings alone still exit 0), `1` at least one error finding, `2` the audit could not run (no window, unknown `--rules` name, no element for `--root`).
+
+The page is read in one pass by a fixed script the tool injects, the way `dom` reads the tree, so `audit` does not need `allowEval`; it never runs anything the caller wrote. It walks at most 6000 elements, open shadow roots included (`truncated` says when it stopped).
+
 ## `scene`
 
 Reads the WebGL scene graph for canvas-based apps: PixiJS via `window.__PIXI_DEVTOOLS__`, CesiumJS, and any other engine through `"engine": "app-hook"`, where the app sets `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)` (contract in [`commands.md`](./skills/verify/references/commands.md), Scene section).

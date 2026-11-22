@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>audit fixture</title>
+<style>
+  html, body { margin: 0; overflow: hidden; background: #fff; }
+  body { font: 14px/16px Arial, sans-serif; color: #222; width: 800px; height: 600px; position: relative; }
+  .abs { position: absolute; margin: 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  button { font: 14px Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<p class="abs" data-testid="bad-offscreen" style="left:720px;top:10px;white-space:nowrap">Pushed past the edge</p>
+<p class="abs" data-testid="ok-offcanvas" style="left:900px;top:10px;white-space:nowrap">Parked off canvas</p>
+<aside data-testid="ok-drawer" style="position:fixed;left:0;top:0;width:200px;height:100px;transform:translateX(-100%)">
+  <p data-testid="ok-drawer-text" style="margin:0">Closed drawer</p>
+</aside>
+
+<div class="abs" style="left:20px;top:60px;width:120px;height:36px;overflow:hidden">
+  <button data-testid="bad-clipped" style="width:170px;height:30px">Clipped button</button>
+</div>
+<div class="abs" style="left:220px;top:60px;width:120px;height:36px;overflow:auto">
+  <span data-testid="ok-scroll-text" style="white-space:nowrap">Long text inside a scroll container</span>
+</div>
+<div class="abs" data-testid="ok-ellipsis" style="left:420px;top:60px;width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Long text that gets truncated with dots</div>
+<div class="abs" style="left:560px;top:60px;width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+  <span data-testid="ok-ellipsis-span">Another long text truncated</span>
+</div>
+
+<div class="abs" data-testid="bad-textclip" style="left:20px;top:110px;width:80px;white-space:nowrap">Text wider than its box</div>
+<div class="abs" data-testid="bad-textclip-v" style="left:220px;top:110px;width:100px;height:20px;overflow:hidden">Wrapping text clipped by the height of its box</div>
+<div class="abs" data-testid="ok-clamp" style="left:420px;top:110px;width:120px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">Clamped text that is long enough to need three lines in this box</div>
+<div class="abs" data-testid="ok-scroll-block" style="left:560px;top:110px;width:100px;height:20px;overflow:auto">Scrollable block with more text than fits its height</div>
+
+<p class="abs" data-testid="bad-overlap-a" style="left:20px;top:170px">Overlapping text A</p>
+<p class="abs" data-testid="bad-overlap-b" style="left:60px;top:176px">Overlapping text B</p>
+<div class="abs" style="left:220px;top:170px;display:flex">
+  <span data-testid="ok-adjacent-a">First</span><span data-testid="ok-adjacent-b">Second</span>
+</div>
+<button class="abs" data-testid="ok-badge-button" style="left:420px;top:170px;width:120px;height:30px">Inbox</button>
+<span class="abs" data-testid="ok-badge-sibling" style="left:490px;top:178px;font-size:10px">7</span>
+<p class="abs" data-testid="ok-under-popover" style="left:560px;top:170px">Content under popover</p>
+<div class="abs" role="tooltip" data-testid="ok-tooltip" style="left:600px;top:176px;padding:2px 6px;background:#222;color:#fff">Tooltip text</div>
+
+<p class="abs" data-testid="ok-under-z" style="left:20px;top:232px">Underneath content</p>
+<div class="abs" data-testid="ok-zindex-popover" style="left:60px;top:228px;z-index:5;padding:2px 6px;background:#eee">Dropdown menu</div>
+
+<button class="abs" data-testid="bad-small-button" aria-label="Close" style="left:20px;top:290px;width:16px;height:16px;padding:0"></button>
+<button class="abs" data-testid="ok-big-button" style="left:220px;top:290px;width:60px;height:48px">Big</button>
+<p class="abs" style="left:420px;top:290px;width:200px">Read the <a href="#" data-testid="ok-inline-link">terms</a> first</p>
+<button class="abs" data-testid="ok-disabled-small" aria-label="Disabled" disabled style="left:20px;top:340px;width:16px;height:16px;padding:0"></button>
+<label class="abs" data-testid="ok-checkbox-label" style="left:220px;top:350px;display:block;width:140px;height:32px;line-height:32px"><input type="checkbox" data-testid="ok-checkbox">Accept</label>
+<input class="abs" type="checkbox" data-testid="ok-hidden-input" style="left:420px;top:350px;width:1px;height:1px;opacity:0">
+
+<p class="abs" data-testid="bad-contrast" style="left:20px;top:400px;color:#999">Low contrast grey text</p>
+<p class="abs" data-testid="bad-contrast-opacity" style="left:220px;top:400px;opacity:.4;color:#000">Faded black text</p>
+<p class="abs" data-testid="ok-contrast" style="left:420px;top:400px;color:#333">Readable text</p>
+<p class="abs" data-testid="ok-contrast-large" style="left:560px;top:396px;font-size:28px;line-height:32px;color:#777">Large</p>
+<p class="abs" data-testid="ok-contrast-gradient" style="left:20px;top:430px;padding:2px 6px;color:#bbb;background:linear-gradient(90deg,#eee,#ddd)">Text over a gradient</p>
+<div class="abs" style="left:220px;top:428px;padding:2px 6px;background:#222"><p data-testid="ok-contrast-dark" style="margin:0;color:#ddd">Light on dark</p></div>
+<button class="abs" data-testid="ok-contrast-disabled" disabled style="left:420px;top:424px;width:100px;height:30px;color:#aaa">Disabled</button>
+
+<p class="abs" data-testid="ok-display-none" style="left:560px;top:430px;display:none">Not displayed</p>
+<p class="abs" data-testid="ok-visibility-hidden" style="left:560px;top:430px;visibility:hidden">Not visible</p>
+<p class="abs" data-testid="ok-opacity-zero" style="left:560px;top:430px;opacity:0">Fully transparent</p>
+<div class="abs" style="left:560px;top:430px;width:0;height:0;overflow:hidden"><span data-testid="ok-zero-size">Inside a zero box</span></div>
+<span class="sr-only" data-testid="ok-sr-only">Screen reader only text</span>
+<div class="abs" style="left:560px;top:450px;height:0;overflow:hidden"><p data-testid="ok-accordion-text" style="margin:0">Collapsed accordion content</p></div>
+<div class="abs" style="left:20px;top:460px;width:120px;height:20px;overflow:hidden">
+  <div style="display:flex;transform:translateX(-60px);width:360px">
+    <span data-testid="ok-slide-1" style="width:120px;flex:none">Slide one</span><span data-testid="ok-slide-2" style="width:120px;flex:none">Slide two</span><span data-testid="ok-slide-3" style="width:120px;flex:none">Slide three</span>
+  </div>
+</div>
+
+<p class="abs" data-testid="ok-under-dialog" style="left:20px;top:500px">Text below the dialog</p>
+<div role="dialog" aria-modal="true" data-testid="ok-dialog" style="position:fixed;left:60px;top:490px;width:220px;height:50px;background:#fff;border:1px solid #444">
+  <p data-testid="ok-dialog-text" style="margin:0;padding:8px">Dialog over content</p>
+</div>
+<div role="dialog" data-testid="bad-dialog" style="position:fixed;left:420px;top:520px;width:300px;height:100px;background:#fff">
+  <p data-testid="bad-dialog-text" style="margin:0;position:absolute;top:70px;left:10px">Dialog text that crosses the bottom edge</p>
+</div>
+
+<div data-testid="ok-fixed-bar" style="position:fixed;left:0;bottom:0;width:100%;height:30px;background:#eee">
+  <span class="abs" data-testid="ok-fixed-text" style="left:20px;top:7px">Fixed bar text</span>
+</div>
+<p class="abs" data-testid="ok-under-fixed" style="left:40px;top:574px">Content under the fixed bar</p>
+
+</body>
+</html>

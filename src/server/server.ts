@@ -30,6 +30,8 @@ import { listSupportedTargets, listDedicatedWorkers, connectToRuntime, connectTo
 import { ConsoleStream, type StampedConsoleMessage } from '../cdp/_tests/console-stream.js'
 import { NetworkStream, type StampedNetworkEntry } from '../cdp/network-stream.js'
 import { formatNetworkList, formatNetworkDetail } from '../inspectors/network/index.js'
+import { auditPage, hasErrors, AUDIT_RULES, type AuditRule, type AuditResult } from '../inspectors/audit/index.js'
+import { drawOutlines } from '../cdp/png.js'
 import { formatDialogStatus, describePolicy, describeArm } from '../inspectors/dialog/index.js'
 import { formatCoverage } from '../inspectors/coverage/index.js'
 import { formatListeners } from '../inspectors/listeners/index.js'
@@ -274,6 +276,7 @@ export class AgentViewServer {
     wait: (req: ServerRequest) => this.handleWait(req),
     screenshot: (req: ServerRequest) => this.handleScreenshot(req),
     emulate: (req: ServerRequest) => this.handleEmulate(req),
+    audit: (req: ServerRequest) => this.handleAudit(req),
     scene: (req: ServerRequest) => this.handleScene(req),
     snap: (req: ServerRequest) => this.handleSnap(req),
     targets: (req: ServerRequest) => this.handleTargets(req),
@@ -1411,6 +1414,35 @@ export class AgentViewServer {
     await mkdir(dirname(filepath), { recursive: true })
     await writeFile(filepath, buffer)
     return filepath
+  }
+
+  private async handleAudit(req: ServerRequest): Promise<ServerResponse> {
+    const requested = argStrArray(req.args, 'rules')
+    const unknown = requested?.filter(r => !(AUDIT_RULES as readonly string[]).includes(r)) ?? []
+    if (unknown.length > 0) return { ok: false, error: `Unknown audit rule ${unknown.join(', ')}. Rules: ${AUDIT_RULES.join(', ')}` }
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+
+    const result = await auditPage(conn, {
+      root: argStr(req.args, 'root'),
+      rules: requested as AuditRule[] | undefined,
+      minTarget: argNum(req.args, 'minTarget'),
+      testIdAttrs: testIdAttributes(argStr(req.args, 'testIdAttribute')),
+    })
+    if ('error' in result) return { ok: false, error: result.error }
+    return this.finishAudit(conn, result, argStr(req.args, 'shot'))
+  }
+
+  private async finishAudit(conn: PageSession, result: AuditResult, shot: string | undefined): Promise<ServerResponse> {
+    let shotPath: string | undefined
+    if (shot !== undefined) {
+      const { buffer } = await conn.captureScreenshot()
+      const outlines = result.findings.map(f => ({ ...f.rect, color: f.severity === 'error' ? [255, 0, 0] as const : [255, 153, 0] as const }))
+      shotPath = resolve(shot)
+      await mkdir(dirname(shotPath), { recursive: true })
+      await writeFile(shotPath, drawOutlines(buffer, outlines))
+    }
+    return { ok: true, data: { ...result, ...(shotPath ? { shot: shotPath } : {}) }, exitCode: hasErrors(result) ? 1 : 0 }
   }
 
   private async handleEmulate(req: ServerRequest): Promise<ServerResponse> {

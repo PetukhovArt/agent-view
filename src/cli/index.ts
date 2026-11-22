@@ -23,6 +23,7 @@ import { runFill } from './commands/fill.js'
 import { runKey } from './commands/key.js'
 import { runScreenshot } from './commands/screenshot.js'
 import { runEmulate } from './commands/emulate.js'
+import { runAudit } from './commands/audit.js'
 import { runScene } from './commands/scene.js'
 import { runSnap } from './commands/snap.js'
 import { runStop } from './commands/stop.js'
@@ -208,6 +209,20 @@ program
   .option('--json', 'Print { width, height, scale, colorScheme, pointer, reducedMotion } as JSON; null is not emulated')
   .action(async (options) => {
     await runEmulate(requireConfig(), options)
+  })
+
+program
+  .command('audit')
+  .description('Audit the layout of a window: offscreen, clipped, text-clip, overlap, target-size, contrast. Exit 1 on an error finding, 2 when it cannot run')
+  .option('--root <testid|selector>', 'Audit only this element and what it holds')
+  .option('--rules <a,b>', 'Run only these rules: offscreen, clipped, text-clip, overlap, target-size, contrast')
+  .option('--min-target <px>', 'Smallest target size in px (default 24, 44 with a coarse pointer)', parseEmulatedNumber)
+  .option('--shot <png path>', 'Write a viewport PNG with every finding\'s rect drawn on it')
+  .option('--max-lines <n>', 'Findings printed before the rest is counted (default 50)', parseMaxLines)
+  .option('-w, --window <id>', 'Target window ID or name')
+  .option('--json', 'Print { viewport, coarsePointer, scanned, truncated, counts, findings } as JSON')
+  .action(async (options) => {
+    await runAudit(requireConfig(), options)
   })
 
 program

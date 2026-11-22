@@ -17,6 +17,7 @@ listing call — always expand from the most recent one.
 - [Step protocol](#step-protocol-act) — `act`
 - [Screenshots](#screenshots) — `screenshot`
 - [Viewport and media emulation](#viewport-and-media-emulation-emulate) — `emulate`
+- [Layout audit](#layout-audit-audit) — `audit`
 - [Runtime state](#runtime-state-eval) — `eval`
 - [Reactive state](#reactive-state-watch) — `watch`
 - [Console](#console-console) — `console`
@@ -534,6 +535,28 @@ agent-view emulate --reset                                               # drops
 Prints `emulation: width=390 height=844 scale=2 color-scheme=dark pointer=coarse reduced-motion`, or `emulation: none`. `--json` prints `null` for a value not emulated (`reducedMotion`: `false`). A flag changes only the value it names; `--reset` drops the others first and then applies its own flags. `--width` / `--height` are whole CSS px (1 to 10000), `--scale` a device pixel ratio (0.1 to 10), `--color-scheme` is `light` or `dark`, `--pointer` `fine` or `coarse`. `--pointer coarse` turns touch emulation on so `(pointer: coarse)` matches; `fine` only turns it off.
 
 The state is kept per window in the server until `--reset`, `stop` or the idle shutdown, and every other command (`screenshot`, `audit`, `act`, `eval`) sees it; a screenshot is in CSS px of the emulated viewport. A reload keeps it; a session the server re-creates gets it applied again. Verified on Chromium and Electron; not measured on Tauri (WebView2).
+
+### Layout audit (`audit`)
+```bash
+agent-view audit                                      # every rule, whole page
+agent-view audit --root settings-panel                # a test id or selector, and what it holds
+agent-view audit --rules overlap,target-size          # offscreen, clipped, text-clip, overlap, target-size, contrast
+agent-view audit --min-target 32                      # px; default 24, 44 under a coarse pointer
+agent-view audit --shot out/audit.png                 # viewport PNG, every finding's rect drawn on it
+agent-view audit --json                               # { viewport, coarsePointer, scanned, truncated, counts, findings }
+agent-view audit --max-lines 200                      # findings printed before the rest is counted (default 50)
+```
+
+One line per finding, then `audit: 1 error, 1 warning, 800x600 viewport, 64 elements` (`audit: no findings, …` when clean):
+
+```
+error offscreen paragraph "Pushed past the edge" testid=bad-offscreen @720,10 136x16 — extends past the right by 56 px of the 800 px wide viewport
+warn  target-size button "Close" testid=bad-small-button @20,290 16x16 — 16x16 px, below 24 px
+```
+
+`error` rules: `offscreen`, `clipped`, `text-clip`, `overlap`. `target-size` is `warn`, and `error` under a coarse pointer (`emulate --pointer coarse`); `contrast` is `warn`. A finding without a test id ends with `selector=<css>`. `--json` finding: `{ rule, severity, target: { testid?, role?, name?, text?, selector }, rect: { x, y, width, height }, detail }`, rect in viewport CSS px.
+
+Exit `0` no error finding (warnings alone exit 0), `1` at least one error finding, `2` the audit could not run (unknown `--rules` name, no element for `--root`, no window). Never flagged: `display: none`, `visibility: hidden`, opacity near 0, zero-size, sr-only, scroll containers, ellipsis and line-clamp text, closed drawers parked off-canvas, layers (dialog, popover, tooltip, `z-index`) over content, collapsed `<details>`. It audits the viewport the window has now: run `emulate` first to audit a phone, `--color-scheme dark` for the dark theme. No `allowEval` needed: the page is read by a fixed script, never by caller code.
 
 ### Runtime State (`eval`)
 

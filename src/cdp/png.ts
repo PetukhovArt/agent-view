@@ -44,6 +44,37 @@ export function cropScalePng(png: Buffer, rect: PixelRect | undefined, scale: nu
   return encode({ width, height, rgba })
 }
 
+export type Outline = PixelRect & { color: readonly [number, number, number] }
+
+export function drawOutlines(png: Buffer, outlines: readonly Outline[], thickness = 2): Buffer {
+  const img = decode(png)
+  const paint = (x: number, y: number, color: Outline['color']): void => {
+    if (x < 0 || y < 0 || x >= img.width || y >= img.height) return
+    const o = (y * img.width + x) * 4
+    img.rgba[o] = color[0]
+    img.rgba[o + 1] = color[1]
+    img.rgba[o + 2] = color[2]
+    img.rgba[o + 3] = 0xff
+  }
+  for (const { x, y, width, height, color } of outlines) {
+    const x0 = Math.round(x)
+    const y0 = Math.round(y)
+    const x1 = Math.max(Math.round(x + width), x0 + 1)
+    const y1 = Math.max(Math.round(y + height), y0 + 1)
+    for (let t = 0; t < thickness; t++) {
+      for (let px = x0 - t; px < x1 + t; px++) {
+        paint(px, y0 - t, color)
+        paint(px, y1 - 1 + t, color)
+      }
+      for (let py = y0 - t; py < y1 + t; py++) {
+        paint(x0 - t, py, color)
+        paint(x1 - 1 + t, py, color)
+      }
+    }
+  }
+  return encode(img)
+}
+
 function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max)
 }

@@ -28,6 +28,7 @@ read it before your first call in a session.
 | `dialog` `upload`                    | JS modals and native file pickers                              |
 | `screenshot`                         | full window, scaled, or cropped to one element                 |
 | `emulate`                            | viewport size, pixel ratio, dark or light, coarse pointer, reduced motion |
+| `audit`                              | layout defects: offscreen, clipped, text-clip, overlap, small targets, contrast |
 | `eval` `watch`                       | state now / state trajectory over time (both need `allowEval`) |
 | `console` `logs`                     | message ring buffer / durable file feed that survives reloads  |
 | `network`                            | requests, headers, timing, bodies, WebSocket frames            |
