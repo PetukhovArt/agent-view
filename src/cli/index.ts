@@ -22,6 +22,7 @@ import { runDrag } from './commands/drag.js'
 import { runFill } from './commands/fill.js'
 import { runKey } from './commands/key.js'
 import { runScreenshot } from './commands/screenshot.js'
+import { runEmulate } from './commands/emulate.js'
 import { runScene } from './commands/scene.js'
 import { runSnap } from './commands/snap.js'
 import { runStop } from './commands/stop.js'
@@ -191,6 +192,22 @@ program
   .action(async (options) => {
     const config = requireConfig()
     await runScreenshot(config, options)
+  })
+
+program
+  .command('emulate')
+  .description('Emulate a viewport size, device pixel ratio, color scheme, pointer or reduced motion on a window; no flags prints the current state')
+  .option('--width <px>', 'Viewport width in CSS px', parseEmulatedNumber)
+  .option('--height <px>', 'Viewport height in CSS px', parseEmulatedNumber)
+  .option('--scale <dpr>', 'Device pixel ratio', parseEmulatedNumber)
+  .option('--color-scheme <scheme>', 'light or dark: prefers-color-scheme')
+  .option('--pointer <kind>', 'fine or coarse: coarse also turns touch emulation on, so (pointer: coarse) and (hover: none) match')
+  .option('--reduced-motion', 'prefers-reduced-motion: reduce')
+  .option('--reset', 'Drop every emulation first, then apply the other flags')
+  .option('-w, --window <id>', 'Target window ID or name')
+  .option('--json', 'Print { width, height, scale, colorScheme, pointer, reducedMotion } as JSON; null is not emulated')
+  .action(async (options) => {
+    await runEmulate(requireConfig(), options)
   })
 
 program
@@ -701,6 +718,12 @@ function parseCropUp(value: string): number {
     console.error(`Invalid --crop-up value: "${value}" (must be 0 or a positive integer)`)
     process.exit(1)
   }
+  return n
+}
+
+function parseEmulatedNumber(value: string): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError('a positive number')
   return n
 }
 

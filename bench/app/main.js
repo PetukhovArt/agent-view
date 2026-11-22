@@ -83,6 +83,7 @@ function startNetServer() {
 
 async function createWindow() {
   const win = new BrowserWindow({
+    show: !process.env.BENCH_INACTIVE,
     width: 1280,
     height: 800,
     webPreferences: {
@@ -92,6 +93,7 @@ async function createWindow() {
     },
   })
   await win.loadFile(path.join(__dirname, 'index.html'))
+  if (process.env.BENCH_INACTIVE) win.showInactive()
   if (bgMode === 'occluded') {
     const { width, height } = screen.getPrimaryDisplay().workAreaSize
     const cover = new BrowserWindow({ x: 0, y: 0, width, height, alwaysOnTop: true })

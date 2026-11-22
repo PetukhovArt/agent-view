@@ -171,6 +171,36 @@ agent-view screenshot --out shots/home.png    # Write to this path, directories 
 
 A text filter matches the text-bearing node, so cropping on a section title yields a thin strip of that title; `--crop-up <n>` climbs `n` element ancestors first (`1` usually gets the surrounding card). A text-sized crop is reported on stderr.
 
+## `emulate`
+
+Puts a window into a viewport, device pixel ratio, color scheme, pointer and motion setting, so `screenshot`, `audit`, `act` and every other command see that. No flags prints the current state.
+
+```bash
+agent-view emulate --width 390 --height 844 --scale 2 --pointer coarse   # a phone
+agent-view emulate --color-scheme dark                                   # keeps what is already set
+agent-view emulate --reduced-motion
+agent-view emulate                                                       # prints the state
+agent-view emulate --json                                                # { width, height, scale, colorScheme, pointer, reducedMotion }
+agent-view emulate --reset                                               # back to the app's own values
+agent-view emulate --reset --width 1280 --height 900                     # reset, then apply
+```
+
+A flag changes only the value it names; `--reset` drops every other one first. Output is `emulation: width=390 height=844 scale=2 color-scheme=dark pointer=coarse reduced-motion`, or `emulation: none`; `--json` prints `null` for a value that is not emulated and `false` for `reducedMotion` off. `--width` and `--height` are whole CSS px from 1 to 10000, `--scale` a ratio from 0.1 to 10.
+
+How it is applied, over the window's Page Session: `Emulation.setDeviceMetricsOverride` (`mobile: false`) for width, height and scale; `Emulation.setEmulatedMedia` for `prefers-color-scheme` and `prefers-reduced-motion`; `--pointer coarse` also `Emulation.setTouchEmulationEnabled`, which is what makes `(pointer: coarse)` match. `--pointer fine` only turns touch emulation off: no CDP call makes `(pointer: fine)` match where the machine reports no pointer.
+
+Lifetime: the state lives in the server, per window, until `--reset` or server shutdown (idle for 5 minutes, or `agent-view stop`); Chromium drops an override with the connection that set it, so the app returns to its own values by itself. A page reload or navigation keeps it. When the server re-creates the window's session while an emulation is requested (the connection dropped, the app restarted its window), it applies the requested state again. A screenshot under emulation is in CSS px of the emulated viewport (`--width 390 --scale 2` gives 390 px wide).
+
+Measured with `matchMedia` and `innerWidth` after `--width 390 --height 844 --scale 2 --color-scheme dark --pointer coarse --reduced-motion`:
+
+| Runtime | width, height, scale | `prefers-color-scheme` | `(pointer: coarse)` | `prefers-reduced-motion` |
+|---|---|---|---|---|
+| Chromium 158 (Chrome, headless and headed) | `innerWidth` 390, `devicePixelRatio` 2 | dark | matches, `maxTouchPoints` 5 | reduce |
+| Electron 33 (Chromium 130) | same | dark | matches, `maxTouchPoints` 5 | reduce |
+| Tauri (WebView2) | not measured: the bench Tauri app was not built | | | |
+
+Limits found: on the test PC neither Chrome nor Electron reported `(pointer: fine)` or `(hover: hover)` before emulation (`(hover: none)` already matched), so `--pointer fine` could not be shown to change a match there, and `(hover: none)` turning on with `coarse` was not isolated. `ontouchstart in window` stays false after touch emulation until the page is created again; touch events are not synthesised from `click`, which stays a mouse input.
+
 ## `scene`
 
 Reads the WebGL scene graph for canvas-based apps: PixiJS via `window.__PIXI_DEVTOOLS__`, CesiumJS, and any other engine through `"engine": "app-hook"`, where the app sets `window.__AGENT_VIEW_SCENE__` with `nodes()`, `locate(query)` and `goto(target)` (contract in [`commands.md`](./skills/verify/references/commands.md), Scene section).

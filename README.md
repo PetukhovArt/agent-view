@@ -103,7 +103,8 @@ Verify: after clicking Save, the button stays disabled until the request complet
 |---|---|
 | `dom` | Accessibility tree with `[ref=N]` handles and test ids; `--filter`, `--compact`, `--count`, `--diff` |
 | `click` / `hover` / `fill` / `key` / `drag` | Real CDP input; address by ref, `--testid` or `--selector` |
-| `screenshot` | PNG, `--scale` or `--crop <element>` |
+| `screenshot` | PNG, `--scale` or `--crop <element>`, `--out <path>` |
+| `emulate` | Viewport size, pixel ratio, color scheme, coarse pointer, reduced motion |
 | `eval` / `watch` | Read JS state; stream JSON-patch diffs of an expression (needs `allowEval`) |
 | `console` / `logs` | Console of pages and workers; a durable file feed that survives reloads |
 | `network` | Requests, headers, timing, bodies, WebSocket and SSE frames, from page load on |

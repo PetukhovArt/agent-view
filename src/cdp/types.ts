@@ -322,6 +322,7 @@ export type PageSession = RuntimeSession & {
   getBoxRect: (backendDOMNodeId: number, opts?: { scrollIntoView?: boolean; ancestorLevels?: number }) => Promise<ScreenshotClip>
   /** CDP-level drag. Reports whether Chromium turned it into an HTML5 drag and what payload it carried. */
   dragBetweenPositions: (from: Point, to: Point, opts?: DragOpts) => Promise<DragResult>
+  applyEmulation: (state: EmulationState) => Promise<void>
   /** One `DOMSnapshot` for the whole page: viewport-relative rect, tag and attributes of every laid-out element. */
   getLayoutSnapshot: () => Promise<LayoutSnapshot>
   /** Scroll into view, hit-test the box centre. null = the element (or its descendant/ancestor) receives the click; else a short description of what covers it. */
@@ -346,6 +347,23 @@ export type LayoutNode = {
   /** Computed `cursor`. */
   cursor: string
 }
+
+export type ColorScheme = 'light' | 'dark'
+export type PointerKind = 'fine' | 'coarse'
+
+export type EmulationState = {
+  width: number | null
+  height: number | null
+  scale: number | null
+  colorScheme: ColorScheme | null
+  pointer: PointerKind | null
+  reducedMotion: boolean
+}
+
+export const NO_EMULATION: EmulationState = { width: null, height: null, scale: null, colorScheme: null, pointer: null, reducedMotion: false }
+
+export const isEmulating = (state: EmulationState): boolean =>
+  Object.entries(state).some(([key, value]) => value !== NO_EMULATION[key as keyof EmulationState])
 
 export type LayoutSnapshot = {
   viewport: { width: number; height: number }

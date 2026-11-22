@@ -36,7 +36,8 @@ import { formatListeners } from '../inspectors/listeners/index.js'
 import { createHeapSnapshotParser, describeSnapshot, formatSummary, formatDiff, formatRetainers, formatList, type HeapSnapshot } from '../inspectors/heap/index.js'
 import { formatBytes } from '../inspectors/format.js'
 import { buildTauriArmScript, buildTauriStatusScript, TauriShimResult, type TauriShimStatus } from './tauri-dialog-shim.js'
-import { NetworkResourceType, type NetworkFilter } from '../cdp/types.js'
+import { NetworkResourceType, NO_EMULATION, isEmulating, type EmulationState, type NetworkFilter } from '../cdp/types.js'
+import { mergeEmulation } from './emulation.js'
 import { AxTreeCache } from '../cdp/ax-cache.js'
 import { parseKeys } from '../cdp/keys.js'
 import { WatchSession } from './watch-session.js'
@@ -257,6 +258,7 @@ export class AgentViewServer {
   private heapSnapshots = new Map<string, HeapSnapshot>()
   private axTreeCache = new AxTreeCache()
   private portStates = new Map<number, PortState>()
+  private emulations = new Map<string, EmulationState>()
   private token = ''
   private activeWatches = new Set<WatchSession>()
 
@@ -271,6 +273,7 @@ export class AgentViewServer {
     key: (req: ServerRequest) => this.handleKey(req),
     wait: (req: ServerRequest) => this.handleWait(req),
     screenshot: (req: ServerRequest) => this.handleScreenshot(req),
+    emulate: (req: ServerRequest) => this.handleEmulate(req),
     scene: (req: ServerRequest) => this.handleScene(req),
     snap: (req: ServerRequest) => this.handleSnap(req),
     targets: (req: ServerRequest) => this.handleTargets(req),
@@ -510,10 +513,13 @@ export class AgentViewServer {
   }
 
   private async getPageSession(req: AppPort, targetId: string): Promise<PageSession> {
-    const cached = await this.cachedSession(`${req.port}:${targetId}`, async () => ({
-      kind: 'page',
-      session: await getAdapter(req.runtime).connect(req.port, targetId, this.axTreeCache),
-    }))
+    const connKey = `${req.port}:${targetId}`
+    const cached = await this.cachedSession(connKey, async () => {
+      const session = await getAdapter(req.runtime).connect(req.port, targetId, this.axTreeCache)
+      const requested = this.emulations.get(connKey)
+      if (requested) await session.applyEmulation(requested).catch(() => this.emulations.delete(connKey))
+      return { kind: 'page' as const, session }
+    })
     if (cached.kind === 'page') return cached.session
     throw new Error(`Cached session for ${targetId} is runtime-only — cannot use page operations.`)
   }
@@ -1405,6 +1411,29 @@ export class AgentViewServer {
     await mkdir(dirname(filepath), { recursive: true })
     await writeFile(filepath, buffer)
     return filepath
+  }
+
+  private async handleEmulate(req: ServerRequest): Promise<ServerResponse> {
+    const { targetId } = await this.resolveWindow(req)
+    const conn = await this.getPageSession(req, targetId)
+    const connKey = `${req.port}:${targetId}`
+    const current = this.emulations.get(connKey) ?? NO_EMULATION
+    const next = mergeEmulation(current, {
+      width: argNum(req.args, 'width'),
+      height: argNum(req.args, 'height'),
+      scale: argNum(req.args, 'scale'),
+      colorScheme: argStr(req.args, 'colorScheme'),
+      pointer: argStr(req.args, 'pointer'),
+      reducedMotion: argBool(req.args, 'reducedMotion'),
+      reset: argBool(req.args, 'reset'),
+    })
+    if ('error' in next) return { ok: false, error: next.error }
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      await conn.applyEmulation(next)
+      if (isEmulating(next)) this.emulations.set(connKey, next)
+      else this.emulations.delete(connKey)
+    }
+    return { ok: true, data: next }
   }
 
   private async handleScreenshot(req: ServerRequest): Promise<ServerResponse> {

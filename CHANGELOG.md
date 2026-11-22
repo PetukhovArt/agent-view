@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `emulate`: a window's viewport (`--width`, `--height`, `--scale`), `--color-scheme light|dark`, `--pointer coarse|fine` (coarse turns touch emulation on) and `--reduced-motion`, kept until `--reset` so `screenshot`, `act` and the rest see it; no flags prints the state, `--json` prints it as JSON
+
 - Added `screenshot --out <path>`: writes the PNG to that path, creating its directories, instead of the temp dir
 
 ## 0.27.0 (2026-11-13)

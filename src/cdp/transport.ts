@@ -40,6 +40,7 @@ import {
   type CoverageFunction,
   type CoverageScript,
   type EventListenerInfo,
+  type EmulationState,
 } from './types.js'
 import type { AxTreeCache } from './ax-cache.js'
 import { LOCATION_NUMPAD, MODIFIER_KEYS, type KeyChord, type KeyDef } from './keys.js'
@@ -988,6 +989,13 @@ type DOMSnapshotDomain = {
   }>
 }
 
+type EmulationDomain = {
+  setDeviceMetricsOverride: (p: Record<string, unknown>) => Promise<unknown>
+  clearDeviceMetricsOverride: () => Promise<unknown>
+  setEmulatedMedia: (p: Record<string, unknown>) => Promise<unknown>
+  setTouchEmulationEnabled: (p: Record<string, unknown>) => Promise<unknown>
+}
+
 type DebuggerDomain = {
   enable: () => Promise<unknown>
   disable: () => Promise<unknown>
@@ -1238,6 +1246,7 @@ export async function connectToPage(
   }
   const DOMDebugger = (client as RawCDPClient & { DOMDebugger: DOMDebuggerDomain }).DOMDebugger
   const DOMSnapshot = (client as RawCDPClient & { DOMSnapshot: DOMSnapshotDomain }).DOMSnapshot
+  const Emulation = (client as RawCDPClient & { Emulation: EmulationDomain }).Emulation
   const cacheKey = `${port}:${target.id}`
 
   // Subscribe BEFORE enable so we catch buffered console/log entries emitted at enable-time.
@@ -1602,7 +1611,8 @@ export async function connectToPage(
       const png = Buffer.from(data, 'base64')
       // The capture is in device pixels. It comes out in CSS pixels, the unit of clip rects and of
       // every click and drag coordinate, so a point read off a screenshot clicks that spot.
-      const dpr = devicePixelRatio(await Page.getLayoutMetrics())
+      const { result } = await Runtime.evaluate({ expression: 'window.devicePixelRatio', returnByValue: true })
+      const dpr = typeof result.value === 'number' && result.value > 0 ? result.value : devicePixelRatio(await Page.getLayoutMetrics())
       const scale = Math.min(opts?.scale ?? 1, 1) / dpr
       const clip = opts?.clip
       if (clip === undefined && scale === 1) return { buffer: png, format: 'png' }
@@ -1675,6 +1685,18 @@ export async function connectToPage(
       }) as { result?: { value?: unknown } }
       if (filled.result?.value !== true) throw new EvaluationError('No input or textarea at or inside the element')
     }),
+
+    async applyEmulation(state: EmulationState): Promise<void> {
+      const { width, height, scale, colorScheme, pointer, reducedMotion } = state
+      await Emulation.clearDeviceMetricsOverride()
+      if (width !== null || height !== null || scale !== null) await Emulation.setDeviceMetricsOverride({ width: width ?? 0, height: height ?? 0, deviceScaleFactor: scale ?? 0, mobile: false })
+      const features = [
+        ...(colorScheme ? [{ name: 'prefers-color-scheme', value: colorScheme }] : []),
+        ...(reducedMotion ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : []),
+      ]
+      await Emulation.setEmulatedMedia({ features })
+      await Emulation.setTouchEmulationEnabled(pointer === 'coarse' ? { enabled: true, maxTouchPoints: 5 } : { enabled: false })
+    },
 
     async getLayoutSnapshot(): Promise<LayoutSnapshot> {
       const [{ documents, strings }, metrics] = await Promise.all([

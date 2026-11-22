@@ -16,6 +16,7 @@ listing call — always expand from the most recent one.
 - [Waiting](#waiting-wait) — `wait`
 - [Step protocol](#step-protocol-act) — `act`
 - [Screenshots](#screenshots) — `screenshot`
+- [Viewport and media emulation](#viewport-and-media-emulation-emulate) — `emulate`
 - [Runtime state](#runtime-state-eval) — `eval`
 - [Reactive state](#reactive-state-watch) — `watch`
 - [Console](#console-console) — `console`
@@ -519,6 +520,20 @@ there a screenshot of a minimised window still times out.
 Screenshot pixels are CSS pixels, whatever the OS display scale: a point read off a full-window screenshot is the `click --pos` / `drag --from-pos` coordinate as is. Divide it by `--scale` when you passed one; on a `--crop` it is an offset from the element's top-left (the `act … @x,y` form).
 
 A text filter usually matches the text-bearing node, so cropping on a section title returns a thin strip of that title. `--crop-up <n>` climbs `n` element ancestors before cropping — use `1` (sometimes `2`) to get the surrounding card/section. When a crop comes back text-sized, the command says so on stderr.
+
+### Viewport and media emulation (`emulate`)
+```bash
+agent-view emulate --width 390 --height 844 --scale 2 --pointer coarse   # a phone
+agent-view emulate --color-scheme dark                                   # light|dark; keeps the other values
+agent-view emulate --reduced-motion
+agent-view emulate                                                       # prints the current state
+agent-view emulate --json                                                # { width, height, scale, colorScheme, pointer, reducedMotion }
+agent-view emulate --reset                                               # drops every emulation
+```
+
+Prints `emulation: width=390 height=844 scale=2 color-scheme=dark pointer=coarse reduced-motion`, or `emulation: none`. `--json` prints `null` for a value not emulated (`reducedMotion`: `false`). A flag changes only the value it names; `--reset` drops the others first and then applies its own flags. `--width` / `--height` are whole CSS px (1 to 10000), `--scale` a device pixel ratio (0.1 to 10), `--color-scheme` is `light` or `dark`, `--pointer` `fine` or `coarse`. `--pointer coarse` turns touch emulation on so `(pointer: coarse)` matches; `fine` only turns it off.
+
+The state is kept per window in the server until `--reset`, `stop` or the idle shutdown, and every other command (`screenshot`, `audit`, `act`, `eval`) sees it; a screenshot is in CSS px of the emulated viewport. A reload keeps it; a session the server re-creates gets it applied again. Verified on Chromium and Electron; not measured on Tauri (WebView2).
 
 ### Runtime State (`eval`)
 
