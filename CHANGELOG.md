@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fixed `audit` `clipped`: an icon, image or control cut by a `text-overflow: ellipsis` or `line-clamp` box is now an error (only the truncated text is exempt), and content in a scroll container that a scroll reaches (a column scrolled out of a table inside an `overflow: hidden` panel) is no longer reported as cut by the panel
+## 0.28.0 (2026-11-23)
 
 - Added `audit --scene`: audits a canvas scene through the app scene hook, whose nodes may now carry `bounds` (page CSS px), `id` and `parent`; reports `scene-text-out`, `scene-overlap` and `scene-offscreen` in the same shape and exit codes as `audit`, and exits 2 saying so when the engine, the hook or the nodes give no bounds
 
@@ -11,6 +11,8 @@
 - Added `emulate`: a window's viewport (`--width`, `--height`, `--scale`), `--color-scheme light|dark`, `--pointer coarse|fine` (coarse turns touch emulation on) and `--reduced-motion`, kept until `--reset` so `screenshot`, `act` and the rest see it; no flags prints the state, `--json` prints it as JSON
 
 - Added `screenshot --out <path>`: writes the PNG to that path, creating its directories, instead of the temp dir
+
+- Fixed `audit` `clipped`: an icon, image or control cut by a `text-overflow: ellipsis` or `line-clamp` box is now an error (only the truncated text is exempt), and content in a scroll container that a scroll reaches (a column scrolled out of a table inside an `overflow: hidden` panel) is no longer reported as cut by the panel
 
 ## 0.27.0 (2026-11-13)
 
