@@ -159,8 +159,7 @@ A feature or fix lands locally: commit it to `main`, add its line under `## Unre
 `pnpm build`. The global `agent-view` is npm-linked to this checkout, so the build is what puts the change in use.
 Leave `main` unpushed: a push to `main` carrying an untagged version publishes it.
 
-A release batches several such changes and starts only when the user asks for one: run `/review-smells` from the last
-release commit, commit the fixes it calls for, rename `## Unreleased` to `## x.y.z (<date>)` and add an empty `## Unreleased` above it, run
+A release batches several such changes and starts only when the user asks for one: rename `## Unreleased` to `## x.y.z (<date>)` and add an empty `## Unreleased` above it, run
 `npm version <major|minor|patch>` (the `version` hook syncs `.claude-plugin/plugin.json`), then push.
 `.github/workflows/release.yml` publishes to npm, creates the tag and writes the GitHub release with that
 CHANGELOG section as its body. A missing CHANGELOG section fails the run before `npm publish`.
