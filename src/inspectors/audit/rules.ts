@@ -130,25 +130,45 @@ function transformedBetween(nodes: readonly AuditNode[], index: number, clipper:
   return false
 }
 
+const isTextContent = (n: AuditNode): boolean => n.ownText && !n.interactive && !n.replaced
+
+function scrolledIntoView(rect: Box, clipper: AuditNode): Box {
+  const area = clipper.scrollArea
+  const clip = clipper.clipBox
+  if (!area || !clip) return rect
+  let { x, y, width, height } = rect
+  if (isScrollable(clipper.overflowX) && x >= area.x - TOLERANCE_PX && right(rect) <= right(area) + TOLERANCE_PX) {
+    width = Math.min(width, clip.width)
+    x = Math.max(clip.x, Math.min(x, right(clip) - width))
+  }
+  if (isScrollable(clipper.overflowY) && y >= area.y - TOLERANCE_PX && bottom(rect) <= bottom(area) + TOLERANCE_PX) {
+    height = Math.min(height, clip.height)
+    y = Math.max(clip.y, Math.min(y, bottom(clip) - height))
+  }
+  return { x, y, width, height }
+}
+
 function clipped(ctx: AuditContext): Hit[] {
   const hits: Hit[] = []
   for (const i of candidates(ctx)) {
     const n = ctx.nodes[i]
-    const rect = n.rect
-    if (!hasArea(rect)) continue
+    if (!hasArea(n.rect)) continue
+    const text = isTextContent(n)
+    let rect = n.rect
     for (const a of clippingAncestors(ctx.nodes, i)) {
       const clipper = ctx.nodes[a]
       const clip = clipper.clipBox!
+      rect = scrolledIntoView(rect, clipper)
       if (!intersection(rect, clip)) continue
       if (transformedBetween(ctx.nodes, i, a)) break
-      const cutX = isHiddenByClip(clipper.overflowX) && !clipper.ellipsis
+      const cutX = isHiddenByClip(clipper.overflowX) && !(clipper.ellipsis && text)
         && (rect.x < clip.x - TOLERANCE_PX || right(rect) > right(clip) + TOLERANCE_PX)
-      const cutY = isHiddenByClip(clipper.overflowY) && !clipper.lineClamp
+      const cutY = isHiddenByClip(clipper.overflowY) && !(clipper.lineClamp && text)
         && (rect.y < clip.y - TOLERANCE_PX || bottom(rect) > bottom(clip) + TOLERANCE_PX)
       if (!cutX && !cutY) continue
       const cut = cutX ? `${Math.round(Math.max(clip.x - rect.x, right(rect) - right(clip)))} px horizontally` : `${Math.round(Math.max(clip.y - rect.y, bottom(rect) - bottom(clip)))} px vertically`
       const by = clipper.target?.selector ?? clipper.tag
-      hits.push(make(ctx, i, 'clipped', 'error', rect, `cut by ${cut} by ancestor ${by} (overflow: ${cutX ? clipper.overflowX : clipper.overflowY})`))
+      hits.push(make(ctx, i, 'clipped', 'error', n.rect, `cut by ${cut} by ancestor ${by} (overflow: ${cutX ? clipper.overflowX : clipper.overflowY})`))
       break
     }
   }

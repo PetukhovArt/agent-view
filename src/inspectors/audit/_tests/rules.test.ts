@@ -19,6 +19,7 @@ const node = (over: Partial<AuditNode> & { rect: Box }): AuditNode => ({
   overflowX: 'visible',
   overflowY: 'visible',
   clipBox: null,
+  scrollArea: null,
   ellipsis: false,
   lineClamp: false,
   scroll: null,
@@ -95,6 +96,44 @@ describe('clipped', () => {
     expect(ids(ellipsis, 'clipped')).toEqual([])
     const slide = snapshot(clipper(), named('mid', { parent: 1, transformed: true, ownText: false, rect: box(-40, 60, 360, 20) }), named('t', { parent: 2, rect: box(-40, 60, 120, 16) }))
     expect(ids(slide, 'clipped')).toEqual([])
+  })
+
+  it('flags an icon or a control cut by an ellipsis box, and not the text it truncates', () => {
+    const ellipsisButton = named('ellipsis-btn', {
+      tag: 'button', interactive: true, ownText: false, rect: box(20, 60, 8, 18), clipBox: box(21, 60, 6, 18),
+      overflowX: 'hidden', overflowY: 'hidden', ellipsis: true,
+    })
+    const icon = named('icon', { parent: 1, tag: 'svg', replaced: true, ownText: false, rect: box(17, 62, 14, 14) })
+    expect(ids(snapshot(ellipsisButton, icon), 'clipped')).toEqual(['icon'])
+    const text = named('text', { parent: 1, rect: box(17, 62, 40, 14) })
+    expect(ids(snapshot(ellipsisButton, text), 'clipped')).toEqual([])
+    const control = named('control', { parent: 1, tag: 'button', interactive: true, rect: box(17, 62, 40, 14) })
+    expect(ids(snapshot(ellipsisButton, control), 'clipped')).toEqual(['control'])
+  })
+
+  describe('inside a scroll container', () => {
+    const panel = (): AuditNode => clipper()
+    const scroller = (scrollArea: Box): AuditNode => clipper({
+      parent: 1, overflowX: 'auto', overflowY: 'visible', clipBox: box(20, 60, 120, 36), scrollArea, target: { selector: 'scroller' },
+    })
+
+    it('does not flag a column past the scroller edge but inside its scrollable area, on either side', () => {
+      const right = snapshot(panel(), scroller(box(20, 60, 260, 36)), named('col', { parent: 2, rect: box(120, 60, 60, 20) }))
+      expect(ids(right, 'clipped')).toEqual([])
+      const left = snapshot(panel(), scroller(box(-80, 60, 260, 36)), named('col', { parent: 2, rect: box(-10, 60, 50, 20) }))
+      expect(ids(left, 'clipped')).toEqual([])
+    })
+
+    it('still flags content past the end of the scrollable area that the hidden panel cuts', () => {
+      const s = snapshot(panel(), scroller(box(20, 60, 140, 36)), named('col', { parent: 2, rect: box(130, 60, 50, 20) }))
+      expect(ids(s, 'clipped')).toEqual(['col'])
+    })
+
+    it('still flags a node cut by a hidden box inside the scroller', () => {
+      const inner = clipper({ parent: 2, clipBox: box(20, 60, 60, 36), rect: box(20, 60, 60, 36), target: { selector: 'inner' } })
+      const s = snapshot(panel(), scroller(box(20, 60, 300, 36)), inner, named('btn', { parent: 3, tag: 'button', interactive: true, rect: box(20, 60, 100, 30) }))
+      expect(ids(s, 'clipped')).toEqual(['btn'])
+    })
   })
 })
 

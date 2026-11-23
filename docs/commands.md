@@ -218,7 +218,7 @@ agent-view audit --max-lines 200                      # findings printed before 
 | Rule | Severity | Finds |
 |---|---|---|
 | `offscreen` | error | content that crosses the viewport edge (the right or left edge for any content, the bottom or top edge for fixed layers and dialogs); content parked wholly outside, as in a closed drawer, is fine |
-| `clipped` | error | content cut by an ancestor's `overflow: hidden` or `clip`; scroll containers, `text-overflow: ellipsis`, `line-clamp` and transformed sliders are fine |
+| `clipped` | error | content cut by an ancestor's `overflow: hidden` or `clip`; an icon, control or other non-text box cut by an `ellipsis` or `line-clamp` box is flagged, the truncated text is not; content a scroll container can scroll to is fine, and so are transformed sliders |
 | `text-clip` | error | text whose box is smaller than the text (`scrollWidth` over `clientWidth`, or the height equivalent) with no ellipsis, clamp or scroll |
 | `overlap` | error | two text or control boxes that intersect and are neither nested nor in different layers (a popover, dialog, tooltip or a `z-index` layer over content is fine) |
 | `target-size` | warn, error under a coarse pointer | an enabled control smaller than 24 px (44 px under `--pointer coarse`); an inline link, a disabled control and a checkbox whose label is large enough are fine |

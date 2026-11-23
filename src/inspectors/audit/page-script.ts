@@ -235,6 +235,7 @@ function (opts) {
       overflowX: ox,
       overflowY: oy,
       clipBox: clips ? { x: r.left + el.clientLeft, y: r.top + el.clientTop, width: el.clientWidth, height: el.clientHeight } : null,
+      scrollArea: clips && (ox === 'auto' || ox === 'scroll' || oy === 'auto' || oy === 'scroll') ? { x: r.left + el.clientLeft - el.scrollLeft, y: r.top + el.clientTop - el.scrollTop, width: el.scrollWidth, height: el.scrollHeight } : null,
       ellipsis: cs.textOverflow.indexOf('ellipsis') >= 0,
       lineClamp: cs.webkitLineClamp !== 'none' && cs.webkitLineClamp !== '',
       scroll: scrollInfo,

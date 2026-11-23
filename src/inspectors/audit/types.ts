@@ -27,6 +27,7 @@ export type AuditNode = {
   overflowX: Overflow
   overflowY: Overflow
   clipBox: Box | null
+  scrollArea: Box | null
   ellipsis: boolean
   lineClamp: boolean
   scroll: { width: number; clientWidth: number; height: number; clientHeight: number } | null

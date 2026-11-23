@@ -19,6 +19,8 @@ const EXPECTED = [
   'offscreen error bad-offscreen',
   'offscreen error bad-dialog-text',
   'clipped error bad-clipped',
+  'clipped error bad-clipped-icon',
+  'clipped error bad-clipped-in-scroller',
   'text-clip error bad-textclip',
   'text-clip error bad-textclip-v',
   'overlap error bad-overlap-a',
@@ -103,7 +105,7 @@ async function main(): Promise<void> {
     const got = result.findings.map(label).sort()
     check('findings match the planted set', JSON.stringify(got) === JSON.stringify(EXPECTED), got.join(' | '))
     check('no near-miss control is flagged', !result.findings.some(f => (f.target.testid ?? '').startsWith('ok-')))
-    check('counts are 6 errors and 3 warnings', result.counts.error === 6 && result.counts.warn === 3, JSON.stringify(result.counts))
+    check('counts are 8 errors and 3 warnings', result.counts.error === 8 && result.counts.warn === 3, JSON.stringify(result.counts))
     check('viewport is the emulated one', result.viewport.width === 800 && result.viewport.height === 600, JSON.stringify(result.viewport))
     check('an error finding gives exit code 1', full.exitCode === 1, String(full.exitCode))
 

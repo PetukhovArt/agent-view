@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed `audit` `clipped`: an icon, image or control cut by a `text-overflow: ellipsis` or `line-clamp` box is now an error (only the truncated text is exempt), and content in a scroll container that a scroll reaches (a column scrolled out of a table inside an `overflow: hidden` panel) is no longer reported as cut by the panel
+
 - Added `audit --scene`: audits a canvas scene through the app scene hook, whose nodes may now carry `bounds` (page CSS px), `id` and `parent`; reports `scene-text-out`, `scene-overlap` and `scene-offscreen` in the same shape and exit codes as `audit`, and exits 2 saying so when the engine, the hook or the nodes give no bounds
 
 - Added `audit`: reads the window's layout and reports offscreen, clipped, text-clip, overlap, target-size and contrast findings (one line each, `--json`, `--rules`, `--root`, `--min-target`, `--shot <png>` draws the rects); exit 1 on an error finding, 2 when it cannot run; under `emulate --pointer coarse` the target-size minimum is 44 px and an error
